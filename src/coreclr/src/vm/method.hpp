@@ -1845,7 +1845,7 @@ protected:
 
         enum_flag2_IsEligibleForTieredCompilation = 0x20,
 
-        // unused                           = 0x40,
+        enum_flag2_IsHelper                 = 0x40,
         // unused                           = 0x80,
     };
     BYTE        m_bFlags2;
@@ -1861,8 +1861,6 @@ protected:
     };
 
     WORD m_wFlags;
-
-
 
 public:
 #ifdef DACCESS_COMPILE
@@ -1972,6 +1970,16 @@ public:
         _ASSERTE(!IsZapped() && !IsCompilationProcess());
 
         InterlockedUpdateFlags3(enum_flag3_ValueTypeParametersWalked, TRUE);
+    }
+
+    inline void SetHelper()
+    {
+        this->m_bFlags2 |= enum_flag2_IsHelper;
+    }
+
+    inline bool IsHelper()
+    {
+        return this->m_bFlags2 & enum_flag2_IsHelper;
     }
 
     //

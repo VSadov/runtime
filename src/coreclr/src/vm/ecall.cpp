@@ -198,10 +198,12 @@ void ECall::PopulateManagedCastHelpers()
     pMD = MscorlibBinder::GetMethod((BinderMethodID)(METHOD__CASTHELPERS__STELEMREF));
     pDest = pMD->GetMultiCallableAddrOfCode();
     SetJitHelperFunction(CORINFO_HELP_ARRADDR_ST, pDest);
+    pMD->SetHelper();
 
     pMD = MscorlibBinder::GetMethod((BinderMethodID)(METHOD__CASTHELPERS__LDELEMAREF));
     pDest = pMD->GetMultiCallableAddrOfCode();
     SetJitHelperFunction(CORINFO_HELP_LDELEMA_REF, pDest);
+
 #endif  //CROSSGEN_COMPILE
 }
 

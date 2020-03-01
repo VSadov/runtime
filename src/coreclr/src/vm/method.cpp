@@ -5028,6 +5028,11 @@ void MethodDesc::SetCodeEntryPoint(PCODE entryPoint)
     {
         SetStableEntryPointInterlocked(entryPoint);
     }
+
+    if (IsHelper())
+    {
+        SetJitHelperFunction(CORINFO_HELP_ARRADDR_ST, entryPoint);
+    }
 }
 
 void MethodDesc::ResetCodeEntryPoint()
