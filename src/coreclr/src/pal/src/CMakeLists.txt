@@ -246,7 +246,7 @@ if(NOT CLR_CMAKE_USE_SYSTEM_LIBUNWIND)
 endif(NOT CLR_CMAKE_USE_SYSTEM_LIBUNWIND)
 
 add_library(coreclrpal
-  STATIC
+  OBJECT
   ${SOURCES}
   ${ARCH_SOURCES}
   ${PLATFORM_SOURCES}
@@ -261,7 +261,7 @@ add_library(coreclrpal
 #
 if(CLR_CMAKE_TARGET_LINUX)
   add_library(tracepointprovider
-    STATIC
+    OBJECT
     misc/tracepointprovider.cpp
   )
 endif(CLR_CMAKE_TARGET_LINUX)

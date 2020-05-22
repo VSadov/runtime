@@ -56,8 +56,34 @@ if (CLR_CMAKE_TARGET_WIN32 AND (CLR_CMAKE_TARGET_ARCH_ARM OR CLR_CMAKE_TARGET_AR
     target_link_libraries(singlefilehost Advapi32.lib shell32.lib)
 endif()
 
+find_library (CORECLR_STATIC
+    name coreclr_static
+    HINTS C:/Hosting01/runtime/artifacts/obj/coreclr/Windows_NT.x64.Release/src/dlls/mscoree/coreclr/Release)
+
+if(CLR_CMAKE_TARGET_WIN32)
+    set(CORECLR_LIBRARIES
+        ${STATIC_MT_CRT_LIB}
+        ${STATIC_MT_VCRT_LIB}
+        kernel32.lib
+        advapi32.lib
+        ole32.lib
+        oleaut32.lib
+        uuid.lib
+        user32.lib
+        version.lib
+        shlwapi.lib
+        bcrypt.lib
+        RuntimeObject.lib
+    )
+else()
+    set(CORECLR_LIBRARIES
+    )
+endif(CLR_CMAKE_TARGET_WIN32)
+
 target_link_libraries(singlefilehost
     libhostfxr_static
     libhostpolicy_static
     libhostcommon
+    ${CORECLR_STATIC}
+    ${CORECLR_LIBRARIES}
 )
