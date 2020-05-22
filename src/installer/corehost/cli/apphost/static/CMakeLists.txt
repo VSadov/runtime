@@ -56,9 +56,14 @@ if (CLR_CMAKE_TARGET_WIN32 AND (CLR_CMAKE_TARGET_ARCH_ARM OR CLR_CMAKE_TARGET_AR
     target_link_libraries(singlefilehost Advapi32.lib shell32.lib)
 endif()
 
+# Path like: artifacts/obj/coreclr/Windows_NT.x64.Release/src/dlls/mscoree/coreclr/Release
+set(CORECLR_STATIC_LIB_LOCATION $ENV{__ObjDir}/coreclr/$ENV{__TargetOS}.$ENV{__BuildArch}.$ENV{__BuildType}/src/dlls/mscoree/coreclr/$ENV{__BuildType})
+
+message ("Looking for coreclr_static lib at: '${CORECLR_STATIC_LIB_LOCATION}'.")
+
 find_library (CORECLR_STATIC
     name coreclr_static
-    HINTS C:/Hosting01/runtime/artifacts/obj/coreclr/Windows_NT.x64.Release/src/dlls/mscoree/coreclr/Release)
+    HINTS ${CORECLR_STATIC_LIB_LOCATION})
 
 if(CLR_CMAKE_TARGET_WIN32)
     set(CORECLR_LIBRARIES
