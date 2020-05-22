@@ -33,7 +33,7 @@ add_custom_command(OUTPUT ${DUMMY_PROVIDER_SOURCES}
   DEPENDS ${EVENT_MANIFEST} ${GENERATE_SCRIPT})
 
 add_library(eventprovider
-    STATIC
+    OBJECT
     ${DUMMY_PROVIDER_SOURCES}
 )
 

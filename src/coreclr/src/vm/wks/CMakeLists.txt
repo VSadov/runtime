@@ -7,7 +7,7 @@ if (CLR_CMAKE_TARGET_WIN32)
 
 endif (CLR_CMAKE_TARGET_WIN32)
 
-add_library_clr(cee_wks ${VM_SOURCES_WKS} ${VM_SOURCES_WKS_ARCH_ASM})
+add_library_clr(cee_wks OBJECT ${VM_SOURCES_WKS} ${VM_SOURCES_WKS_ARCH_ASM})
 target_precompile_header(TARGET cee_wks HEADER common.h)
 if (MSVC)
     # mscorlib.cpp does not compile with precompiled header file

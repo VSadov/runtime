@@ -29,7 +29,7 @@ add_library_clr(mdwinmd_dac ${MDWINMD_SOURCES})
 set_target_properties(mdwinmd_dac PROPERTIES DAC_COMPONENT TRUE)
 target_precompile_header(TARGET mdwinmd_dac HEADER stdafx.h)
 
-add_library_clr(mdwinmd_wks ${MDWINMD_SOURCES})
+add_library_clr(mdwinmd_wks OBJECT ${MDWINMD_SOURCES})
 target_compile_definitions(mdwinmd_wks PRIVATE FEATURE_METADATA_EMIT_ALL)
 target_precompile_header(TARGET mdwinmd_wks HEADER stdafx.h)
 

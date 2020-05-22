@@ -13,7 +13,7 @@ set(PALRT_SOURCES
 )
 
 add_library_clr(palrt
-    STATIC
+    OBJECT
     ${PALRT_SOURCES}
 )
 
