@@ -65,6 +65,22 @@ find_library (CORECLR_STATIC
     name coreclr_static
     HINTS ${CORECLR_STATIC_LIB_LOCATION})
 
+    find_library (CORECLRPAL
+    name coreclrpal
+    HINTS ${CORECLR_STATIC_LIB_LOCATION})
+
+find_library (PALRT
+    name palrt
+    HINTS ${CORECLR_STATIC_LIB_LOCATION})
+
+find_library (EVENTPROVIDER
+    name eventprovider
+    HINTS ${CORECLR_STATIC_LIB_LOCATION})
+
+find_library (NATIVERESOURCESTRING
+    name nativeresourcestring
+    HINTS ${CORECLR_STATIC_LIB_LOCATION})
+
 if(CLR_CMAKE_TARGET_WIN32)
     set(CORECLR_LIBRARIES
         ${STATIC_MT_CRT_LIB}
@@ -82,6 +98,10 @@ if(CLR_CMAKE_TARGET_WIN32)
     )
 else()
     set(CORECLR_LIBRARIES
+        ${EVENTPROVIDER}
+        ${CORECLRPAL}
+        ${PALRT}
+        ${NATIVERESOURCESTRING}
     )
 endif(CLR_CMAKE_TARGET_WIN32)
 

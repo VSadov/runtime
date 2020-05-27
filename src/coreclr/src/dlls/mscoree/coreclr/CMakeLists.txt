@@ -235,7 +235,8 @@ endif(CLR_CMAKE_TARGET_WIN32)
 # add the install targets
 install_clr(TARGETS coreclr ADDITIONAL_DESTINATION sharedFramework)
 
-install (TARGETS coreclr_static DESTINATION lib)
+# publish coreclr_static lib
+_install(TARGETS coreclr_static DESTINATION lib)
 
 # Enable profile guided optimization
 add_pgo(coreclr)
