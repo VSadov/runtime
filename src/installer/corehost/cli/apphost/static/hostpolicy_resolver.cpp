@@ -24,20 +24,16 @@ int hostpolicy_resolver::load(
     pal::dll_t* dll,
     hostpolicy_contract_t &hostpolicy_contract)
 {
-    static hostpolicy_contract_t contract;
-
     trace::info(_X("Using internal hostpolicy"));
 
-    contract.load = corehost_load;
-    contract.unload = corehost_unload;
-    contract.set_error_writer = corehost_set_error_writer;
-    contract.initialize = corehost_initialize;
-    contract.corehost_main = corehost_main;
-    contract.corehost_main_with_output_buffer = corehost_main_with_output_buffer;
+    hostpolicy_contract.load = corehost_load;
+    hostpolicy_contract.unload = corehost_unload;
+    hostpolicy_contract.set_error_writer = corehost_set_error_writer;
+    hostpolicy_contract.initialize = corehost_initialize;
+    hostpolicy_contract.corehost_main = corehost_main;
+    hostpolicy_contract.corehost_main_with_output_buffer = corehost_main_with_output_buffer;
 
-    hostpolicy_contract = contract;
     *dll = nullptr;
-
     return StatusCode::Success;
 }
 
