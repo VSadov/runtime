@@ -361,7 +361,6 @@ namespace
         const char* clrFilesAbsolutePath)
     {
         std::string coreClrDllPath(clrFilesAbsolutePath);
-        std::string coreClrDllPath(clrFilesAbsolutePath);
         coreClrDllPath.append("/");
         coreClrDllPath.append(coreClrDll);
         if (coreClrDllPath.length() >= PATH_MAX)
