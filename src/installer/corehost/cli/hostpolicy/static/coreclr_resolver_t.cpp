@@ -43,7 +43,7 @@ extern "C"
 }
 
 
-#if defined(_WIN32)
+// #if defined(_WIN32)
 
 bool coreclr_resolver_t::resolve_coreclr(const pal::string_t& libcoreclr_path, coreclr_resolver_contract_t& coreclr_resolver_contract)
 {
@@ -69,16 +69,16 @@ bool coreclr_resolver_t::resolve_coreclr(const pal::string_t& libcoreclr_path, c
     return true;
 }
 
-#else
-
-bool coreclr_resolver_t::resolve_coreclr(const pal::string_t& libcoreclr_path, coreclr_resolver_contract_t& coreclr_resolver_contract)
-{
-    coreclr_resolver_contract.coreclr_initialize = reinterpret_cast<coreclr_initialize_fn>(coreclr_initialize);
-    coreclr_resolver_contract.coreclr_shutdown = reinterpret_cast<coreclr_shutdown_fn>(coreclr_shutdown_2);
-    coreclr_resolver_contract.coreclr_execute_assembly = reinterpret_cast<coreclr_execute_assembly_fn>(coreclr_execute_assembly);
-    coreclr_resolver_contract.coreclr_create_delegate = reinterpret_cast<coreclr_create_delegate_fn>(coreclr_create_delegate);
-
-    return true;
-}
-
-#endif
+//#else
+//
+//bool coreclr_resolver_t::resolve_coreclr(const pal::string_t& libcoreclr_path, coreclr_resolver_contract_t& coreclr_resolver_contract)
+//{
+//    coreclr_resolver_contract.coreclr_initialize = reinterpret_cast<coreclr_initialize_fn>(coreclr_initialize);
+//    coreclr_resolver_contract.coreclr_shutdown = reinterpret_cast<coreclr_shutdown_fn>(coreclr_shutdown_2);
+//    coreclr_resolver_contract.coreclr_execute_assembly = reinterpret_cast<coreclr_execute_assembly_fn>(coreclr_execute_assembly);
+//    coreclr_resolver_contract.coreclr_create_delegate = reinterpret_cast<coreclr_create_delegate_fn>(coreclr_create_delegate);
+//
+//    return true;
+//}
+//
+//#endif
