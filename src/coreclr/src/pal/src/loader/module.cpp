@@ -928,6 +928,8 @@ PAL_GetLoadLibraryError()
 
 /* Internal PAL functions *****************************************************/
 
+extern "C" BOOL WINAPI DllMain(HANDLE hInstance, DWORD dwReason, LPVOID lpReserved);
+
 /*++
 Function :
     LOADInitializeModules
@@ -963,7 +965,7 @@ BOOL LOADInitializeModules()
     exe_module.refcount = -1;
     exe_module.next = &exe_module;
     exe_module.prev = &exe_module;
-    exe_module.pDllMain = (PDLLMAIN)dlsym(exe_module.dl_handle, "DllMain");
+    exe_module.pDllMain = (PDLLMAIN)DllMain;
     exe_module.hinstance = (HINSTANCE)&exe_module;
     exe_module.threadLibCalls = TRUE;
     return TRUE;
