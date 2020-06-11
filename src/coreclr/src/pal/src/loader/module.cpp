@@ -928,7 +928,7 @@ PAL_GetLoadLibraryError()
 
 /* Internal PAL functions *****************************************************/
 
-extern "C" BOOL WINAPI DllMain(HANDLE hInstance, DWORD dwReason, LPVOID lpReserved);
+extern "C" BOOL PALAPI_NOEXPORT DllMain(HANDLE hInstance, DWORD dwReason, LPVOID lpReserved);
 
 /*++
 Function :
