@@ -134,6 +134,7 @@ else()
         coreclrpal
         ${END_WHOLE_ARCHIVE}
         mscorrc
+        System.IO.Compression.Native-Static
         palrt
     )
 endif(CLR_CMAKE_TARGET_WIN32)

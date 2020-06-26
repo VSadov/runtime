@@ -79,6 +79,7 @@ jobs:
       include:
       - src/libraries/System.Private.CoreLib/*
       - src/libraries/Native/Unix/System.Globalization.Native/*
+      - src/libraries/Native/Unix/System.IO.Compression.Native/*
       - src/libraries/Native/Unix/Common/*
       exclude:
       - eng/Version.Details.xml
