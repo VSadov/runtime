@@ -2559,7 +2559,7 @@ void * MAPMapPEFile(HANDLE hFile, off_t offset)
             flags = readWriteFlags;
         }
 
-        _ASSERTE(OffsetWithinPage(sectionBase) == OffsetWithinPage(offset + currentHeader.PointerToRawData));
+        _ASSERTE(OffsetWithinPage((off_t)sectionBase) == OffsetWithinPage(offset + currentHeader.PointerToRawData));
         palError = MAPmmapAndRecord(pFileObject, loadedBase,
                         sectionBase,
                         currentHeader.SizeOfRawData,
