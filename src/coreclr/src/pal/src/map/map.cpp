@@ -2497,6 +2497,8 @@ void * MAPMapPEFile(HANDLE hFile, off_t offset)
 
     void* prevSectionEnd;
     prevSectionEnd = (char*)loadedHeader + headerSize; // the first "section" for our purposes is the header
+    prevSectionEnd = ALIGN_UP(prevSectionEnd, GetVirtualPageSize()); // round up to page boundary
+
     for (unsigned i = 0; i < numSections; ++i)
     {
         //for each section, map the section of the file to the correct virtual offset.  Gather the
