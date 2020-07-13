@@ -12,18 +12,19 @@
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 
   <PropertyGroup>
-    <LibrariesArtifactsLocation>$(LibrariesArtifactsPath)/bin/native/$(NetCoreAppCurrent)-$(TargetOS)-$(LibrariesConfiguration)-$(TargetArchitecture)</LibrariesArtifactsLocation>
-    <NativeLibsExportList>$(LibrariesArtifactsLocation)/installer/exports.txt</NativeLibsExportList>
+    <LibrariesNativeArtifactsLocation>$(LibrariesArtifactsPath)/bin/native/$(NetCoreAppCurrent)-$(TargetOS)-$(LibrariesConfiguration)-$(TargetArchitecture)</LibrariesNativeArtifactsLocation>
+    <LibrariesRuntimeLocation>$(LibrariesArtifactsPath)/bin/runtime/$(NetCoreAppCurrent)-$(TargetOS)-$(LibrariesConfiguration)-$(TargetArchitecture)</LibrariesRuntimeLocation>
+    <NativeLibsExportList>$(LibrariesNativeArtifactsLocation)/installer/exports.txt</NativeLibsExportList>
   </PropertyGroup>
 
   <ItemGroup>
-    <NativeShimAssemblies Include="$(LibrariesArtifactsLocation)/System.*.dll"/>
+    <NativeShimAssemblies Include="$(LibrariesRuntimeLocation)/System.*.dll"/>
   </ItemGroup>
     
   <UsingTask TaskName="CollectNativeLibsExports" AssemblyFile="$(InstallerTasksAssemblyPath)"/>
 
   <Target Name="BuildNativeLibsExports">
-    <MakeDir Directories="$(LibrariesArtifactsLocation)/installer"/>
+    <MakeDir Directories="$(LibrariesNativeArtifactsLocation)/installer"/>
     <CollectNativeLibsExports Assemblies="@(NativeShimAssemblies)"
                     OutputPath="$(NativeLibsExportList)" />
   </Target>
