@@ -1,0 +1,11 @@
+BrotliDecoderCreateInstance
+BrotliDecoderDecompressStream
+BrotliDecoderDecompress
+BrotliDecoderDestroyInstance
+BrotliDecoderIsFinished
+BrotliEncoderCreateInstance
+BrotliEncoderSetParameter
+BrotliEncoderCompressStream
+BrotliEncoderHasMoreOutput
+BrotliEncoderDestroyInstance
+BrotliEncoderCompress
