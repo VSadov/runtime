@@ -125,9 +125,9 @@ set(NATIVE_LIBS_LOCATION "${NATIVE_LIBS_ARTIFACTS}")
 
 message ("Looking for native libs at location: '${NATIVE_LIBS_LOCATION}'.")
 
-if(CLR_CMAKE_TARGET_WIN32)
+if(CLR_CMAKE_TARGET_WIN32 OR CLR_CMAKE_TARGET_OSX)
     set(NATIVE_LIBS
-        # Disable superhost on Win32 for now.
+        # Disable native libs linking on Win32 and OSX for now.
         # ${NATIVE_LIBS_LOCATION}/libclrcompression.lib
     )
 else()
