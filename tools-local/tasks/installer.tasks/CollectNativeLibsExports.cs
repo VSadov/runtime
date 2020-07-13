@@ -28,11 +28,13 @@ public class CollectNativeLibsExports : Task
     {
         var pinvokes = new List<string>();
 
-        //var resolver = new System.Reflection.PathAssemblyResolver(assemblies);
-        //var mlc = new MetadataLoadContext(resolver, "System.Private.CoreLib");
+        var resolver = new System.Reflection.PathAssemblyResolver(assemblies);
+        var mlc = new MetadataLoadContext(resolver, "System.Private.CoreLib");
+
         foreach (var aName in assemblies)
         {
-            var a = Assembly.LoadFrom(aName);
+            var a = mlc.LoadFromAssemblyPath(aName);
+
             foreach (var type in a.GetTypes())
             {
                 CollectPInvokes(pinvokes, type);
