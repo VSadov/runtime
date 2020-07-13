@@ -11,6 +11,23 @@
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 
+  <PropertyGroup>
+    <LibrariesArtifactsLocation>$(LibrariesArtifactsPath)/bin/native/$(NetCoreAppCurrent)-$(TargetOS)-$(LibrariesConfiguration)-$(TargetArchitecture)</LibrariesArtifactsLocation>
+    <NativeLibsExportList>$(LibrariesArtifactsLocation)/installer/exports.txt</NativeLibsExportList>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <NativeShimAssemblies Include="$(LibrariesArtifactsLocation)/System.*.dll"/>
+  </ItemGroup>
+    
+  <UsingTask TaskName="CollectNativeLibsExports" AssemblyFile="$(InstallerTasksAssemblyPath)"/>
+
+  <Target Name="BuildNativeLibsExports">
+    <MakeDir Directories="$(LibrariesArtifactsLocation)/installer"/>
+    <CollectNativeLibsExports Assemblies="@(NativeShimAssemblies)"
+                    OutputPath="$(NativeLibsExportList)" />
+  </Target>
+
   <!-- Target that builds dotnet, hostfxr and hostpolicy with the same version as what NetCoreApp will be built for
        since the build produced artifacts should always version the same (even if they may not get used).
   -->
@@ -23,7 +40,7 @@
 
   <Target Name="BuildCoreHostUnix"
           Condition="'$(TargetOS)' != 'Windows_NT'"
-          DependsOnTargets="GetLatestCommitHash;GenerateNativeVersionFile">
+          DependsOnTargets="GetLatestCommitHash;GenerateNativeVersionFile;BuildNativeLibsExports">
     <PropertyGroup>
       <CMakeBuildDir>$(IntermediateOutputRootPath)corehost\cmake\</CMakeBuildDir>
 
@@ -45,26 +62,9 @@
     <Exec Command="$(MSBuildProjectDirectory)\build.sh $(BuildArgs)" IgnoreStandardErrorWarningFormat="true"/>
   </Target>
 
-  <PropertyGroup>
-    <LibrariesArtifactsLocation>$(LibrariesArtifactsPath)/bin/native/$(NetCoreAppCurrent)-$(TargetOS)-$(LibrariesConfiguration)-$(TargetArchitecture)</LibrariesArtifactsLocation>
-    <NativeLibsExportList>$(LibrariesArtifactsLocation)/installer/exports.txt</NativeLibsExportList>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <NativeShimAssemblies Include="$(LibrariesArtifactsLocation)/System.*.dll"/>
-  </ItemGroup>
-    
-  <UsingTask TaskName="CollectNativeLibsExports" AssemblyFile="$(InstallerTasksAssemblyPath)"/>
-
-  <Target Name="BuildNativeLibsExports">
-    <MakeDir Directories="$(LibrariesArtifactsLocation)/installer"/>
-    <CollectNativeLibsExports Assemblies="@(NativeShimAssemblies)"
-                    OutputPath="$(NativeLibsExportList)" />
-  </Target>
-
   <Target Name="BuildCoreHostWindows"
           Condition="'$(TargetOS)' == 'Windows_NT'"
-          DependsOnTargets="GetLatestCommitHash;BuildNativeLibsExports">
+          DependsOnTargets="GetLatestCommitHash">
 
     <!-- Generate Version files -->
     <ItemGroup>
