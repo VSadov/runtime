@@ -51,6 +51,9 @@
 #include "clr/fs/path.h"
 using namespace clr::fs;
 
+// Specifies whether coreclr is embedded or standalone
+extern bool g_coreclr_embedded;
+
 // remove when we get an updated SDK
 #define LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR 0x00000100
 #define LOAD_LIBRARY_SEARCH_DEFAULT_DIRS 0x00001000
