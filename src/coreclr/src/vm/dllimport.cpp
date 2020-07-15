@@ -38,10 +38,6 @@
 #include <formattype.h>
 #include "../md/compiler/custattr.h"
 
-#if defined(TARGET_LINUX)
-#include <dlfcn.h>
-#endif
-
 #ifdef FEATURE_COMINTEROP
 #include "runtimecallablewrapper.h"
 #include "clrtocomcall.h"
@@ -6275,7 +6271,7 @@ namespace
             {
                 if (wcscmp(wszLibName, match) == 0)
                 {
-                    return dlopen(NULL, RTLD_LAZY);
+                    return PAL_LoadLibraryDirect(NULL);
                 }
             }
         }

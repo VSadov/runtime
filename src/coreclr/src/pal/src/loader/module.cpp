@@ -592,6 +592,11 @@ PALAPI
 PAL_LoadLibraryDirect(
     IN LPCWSTR lpLibFileName)
 {
+    if (!lpLibFileName && g_running_in_exe)
+    {
+        return dlopen(NULL, RTLD_LAZY);
+    }
+
     PathCharString pathstr;
     CHAR * lpstr = nullptr;
     LPCSTR lpcstr = nullptr;
