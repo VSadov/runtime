@@ -6269,7 +6269,7 @@ namespace
             int count = sizeof(toRedirect) / sizeof(toRedirect[0]);
             for (int i = 0; i < count; ++i)
             {
-                if (wcscmp(wszLibName, match) == 0)
+                if (wcscmp(wszLibName, toRedirect[i]) == 0)
                 {
                     return PAL_LoadLibraryDirect(NULL);
                 }
