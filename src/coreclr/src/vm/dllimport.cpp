@@ -6253,6 +6253,27 @@ namespace
         }
 #endif // FEATURE_CORESYSTEM && !TARGET_UNIX
 
+#if defined(TARGET_LINUX)
+        if (g_coreclr_embedded)
+        {
+            static const LPCWSTR toRedirect[] = {
+                W("System.Native.so"),
+                W("System.IO.Compression.Native.so"),
+                W("System.Net.Security.Native.so"),
+                W("System.Security.Cryptography.Native.OpenSsl.so")
+            };
+
+            int count = sizeof(toRedirect) / sizeof(toRedirect[0]);
+            for (int i = 0; i < count; ++i)
+            {
+                if (wcscmp(libraryNameOrPath, match) == 0)
+                {
+                    return dlopen(NULL, RTLD_LAZY);
+                }
+            }
+        }
+#endif
+
         AppDomain* pDomain = GetAppDomain();
         DWORD loadWithAlteredPathFlags = GetLoadWithAlteredSearchPathFlag();
         bool libNameIsRelativePath = Path::IsRelative(wszLibName);
