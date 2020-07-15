@@ -579,7 +579,7 @@ LPCSTR FixLibCName(LPCSTR shortAsciiName)
     return shortAsciiName;
 }
 
-static bool ShouldRedirectToCurrentLibrary(void* libraryNameOrPath)
+static bool ShouldRedirectToCurrentLibrary(const void* libraryNameOrPath)
 {
     if (!g_running_in_exe)
         return false;
