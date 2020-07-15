@@ -38,6 +38,10 @@
 #include <formattype.h>
 #include "../md/compiler/custattr.h"
 
+#if defined(TARGET_LINUX)
+#include <dlfcn.h>
+#endif
+
 #ifdef FEATURE_COMINTEROP
 #include "runtimecallablewrapper.h"
 #include "clrtocomcall.h"
@@ -6269,7 +6273,7 @@ namespace
             int count = sizeof(toRedirect) / sizeof(toRedirect[0]);
             for (int i = 0; i < count; ++i)
             {
-                if (wcscmp(libraryNameOrPath, match) == 0)
+                if (wcscmp(wszLibName, match) == 0)
                 {
                     return dlopen(NULL, RTLD_LAZY);
                 }
