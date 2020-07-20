@@ -6513,6 +6513,7 @@ void gc_heap::fix_allocation_context (alloc_context* acontext, BOOL for_gc_p,
     else if (for_gc_p)
     {
         alloc_allocated = acontext->alloc_ptr;
+        assert (heap_segment_used(ephemeral_heap_segment) >= alloc_allocated - plug_skew);
         assert (heap_segment_allocated (ephemeral_heap_segment) <=
                 heap_segment_committed (ephemeral_heap_segment));
         alloc_contexts_used ++;
@@ -12159,17 +12160,19 @@ void gc_heap::adjust_limit_clr (uint8_t* start, size_t limit_size, size_t size,
 
     if (seg == ephemeral_heap_segment)
     {
+        uint8_t* old_allocated = alloc_allocated - plug_skew - limit_size;
         //Sometimes the allocated size is advanced without clearing the
         //memory. Let's catch up here
-        if (heap_segment_used (seg) < (alloc_allocated - plug_skew))
-        {
-#ifdef MARK_ARRAY
-#ifndef BACKGROUND_GC
-            clear_mark_array (heap_segment_used (seg) + plug_skew, alloc_allocated);
-#endif //BACKGROUND_GC
-#endif //MARK_ARRAY
-            heap_segment_used (seg) = alloc_allocated - plug_skew;
-        }
+        assert (heap_segment_used (seg) >= old_allocated);
+//        if (heap_segment_used (seg) < (alloc_allocated - plug_skew))
+//        {
+//#ifdef MARK_ARRAY
+//#ifndef BACKGROUND_GC
+//            clear_mark_array (heap_segment_used (seg) + plug_skew, alloc_allocated);
+//#endif //BACKGROUND_GC
+//#endif //MARK_ARRAY
+//            heap_segment_used (seg) = alloc_allocated - plug_skew;
+//        }
     }
 #ifdef BACKGROUND_GC
     else if (seg)
@@ -24577,6 +24580,7 @@ void gc_heap::fix_generation_bounds (int condemned_gen_number,
 
         heap_segment_allocated(ephemeral_heap_segment)=
             heap_segment_plan_allocated(ephemeral_heap_segment);
+        assert (heap_segment_used(ephemeral_heap_segment) >= alloc_allocated - plug_skew);
     }
 }
 
@@ -24746,6 +24750,7 @@ void gc_heap::make_free_lists (int condemned_gen_number)
         //reset the allocated size
         uint8_t* start2 = generation_allocation_start (youngest_generation);
         alloc_allocated = start2 + Align (size (start2));
+        assert (heap_segment_used(ephemeral_heap_segment) >= alloc_allocated - plug_skew);
     }
 }
 
