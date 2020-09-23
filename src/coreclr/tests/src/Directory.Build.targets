@@ -68,6 +68,7 @@
   <Import Project="..\Directory.Build.targets" />
 
   <!-- Determine if this project should be built or not -->
+
   <PropertyGroup>
     <BuildAllProjects Condition="'$(BuildAllProjects)' == ''">false</BuildAllProjects>
     <_WillCLRTestProjectBuild Condition="'$(_WillCLRTestProjectBuild)' == ''">false</_WillCLRTestProjectBuild>
@@ -76,7 +77,23 @@
     <_WillCLRTestProjectBuild Condition="'$(CLRTestNeedTargetToBuild)' == 'targetGeneric' And '$(CLRTestNeedTarget)' == '1'">false</_WillCLRTestProjectBuild>
     <_WillCLRTestProjectBuild Condition="'$(CLRTestNeedTargetToBuild)' == 'targetSpecific' And '$(CLRTestNeedTarget)' != '1'">false</_WillCLRTestProjectBuild>
     <_WillCLRTestProjectBuild Condition="'$(DisableProjectBuild)' == 'true'">false</_WillCLRTestProjectBuild>
+
   </PropertyGroup>
+
+  <Target Name="StopBuild">
+    <Message Text="Test was disabled, build stopped." />
+  </Target>
+
+  <Target Name="Filter"
+          BeforeTargets="Build">
+
+    <ItemGroup>
+        <ActiveExclusionTags Include="@(TraitTags)" Condition="'%(Identity)' == 'ExcludeOn_Coreclr_X86_Windows'" />
+    </ItemGroup>
+    
+    <Error Condition="@(ActiveExclusionTags->Count()) != 0" />
+    <OnError ExecuteTargets="StopBuild"/>
+  </Target>
 
   <PropertyGroup>
     <_CopyNativeProjectBinaries>$(CopyNativeProjectBinaries)</_CopyNativeProjectBinaries>
@@ -92,6 +109,18 @@
 
   <Import Project="..\override.targets" Condition="Exists('..\override.targets')"/>
 
+  <!--<Target Name="__Build">
+    <CallTarget Targets="Build" />
+  </Target>
+
+  <Target Name="Build" Condition="@(ActiveExclusionTags->Count()) == 0">
+    <ItemGroup>
+      <ActiveExclusionTags Include="@(TraitTags)" Condition="'%(Identity)' == 'ExcludeOn_Coreclr_X86_Windows'" />
+    </ItemGroup>
+    
+    <CallTarget Targets="__Build" Condition="@(ActiveExclusionTags->Count()) != 0"/>
+  </Target>-->
+  
   <!-- We enable auto-unification of assembly references after importing the common targets.  Binding redirects are not needed
        for coreclr since it auto-unifies, so the warnings we get without this setting are just noise -->
   <PropertyGroup>

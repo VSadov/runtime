@@ -11,10 +11,14 @@
         <ExcludeList Include="$(XunitTestBinBase)/Regressions/coreclr/GitHub_22888/test22888/*">
             <Issue>https://github.com/dotnet/runtime/issues/13703</Issue>
         </ExcludeList>
+
+        <ExcludeTags Include="ExcludeOn_All" />
     </ItemGroup>
 
     <!-- All OS/Arch CoreCLR excludes -->
     <ItemGroup Condition="'$(XunitTestBinBase)' != '' and '$(RuntimeFlavor)' == 'coreclr' ">
+        <ExcludeTags Include="ExcludeOn_Coreclr" />
+
         <ExcludeList Include="$(XunitTestBinBase)/baseservices/threading/generics/threadstart/GThread23/*">
             <Issue>https://github.com/dotnet/runtime/issues/10847</Issue>
         </ExcludeList>
@@ -367,9 +371,8 @@
 
     <!-- Windows x86 specific excludes -->
     <ItemGroup Condition="'$(XunitTestBinBase)' != '' and '$(TargetArchitecture)' == 'x86' and '$(TargetsWindows)' == 'true' and '$(RuntimeFlavor)' == 'coreclr'">
-        <ExcludeList Include="$(XunitTestBinBase)/GC/LargeMemory/Allocation/largeexceptiontest/*">
-            <Issue>3392, test is useful to have because it can be run manually when making changes to the GC that can have effects in OOM scenarios, but not appropriate to run on our current test infrastructure.</Issue>
-        </ExcludeList>
+        <ExcludeTags Include="ExcludeOn_Coreclr_X64_Windows" />
+
         <ExcludeList Include="$(XunitTestBinBase)/GC/LargeMemory/API/gc/gettotalmemory/*">
             <Issue>3392, test is useful to have because it can be run manually when making changes to the GC that can have effects in OOM scenarios, but not appropriate to run on our current test infrastructure.</Issue>
         </ExcludeList>

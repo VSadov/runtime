@@ -3,7 +3,7 @@
     <OutputType>Exe</OutputType>
     <GCStressIncompatible>true</GCStressIncompatible>
     <CLRTestExecutionArguments>2048</CLRTestExecutionArguments>
-    <CLRTestPriority>1</CLRTestPriority>
+    <CLRTestPriority>0</CLRTestPriority>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="largeexceptiontest.cs" />
@@ -11,5 +11,10 @@
   <ItemGroup>
     <ProjectReference Include="../largeobject.csproj" />
     <ProjectReference Include="../memcheck.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <TraitTags Include="ExcludeOn_Coreclr_X86_Windows">
+      <Issue>3392, test is useful to have because it can be run manually when making changes to the GC that can have effects in OOM scenarios, but not appropriate to run on our current test infrastructure.</Issue>    
+    </TraitTags>
   </ItemGroup>
 </Project>
