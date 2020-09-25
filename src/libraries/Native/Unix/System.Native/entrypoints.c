@@ -169,8 +169,12 @@ FCFuncStart(gEmbedded_Sys)
     QCFuncElement("Rename", SystemNative_Rename)
     QCFuncElement("RestoreAndHandleCtrl", SystemNative_RestoreAndHandleCtrl)
     QCFuncElement("RmDir", SystemNative_RmDir)
+
+#ifndef __APPLE__
     QCFuncElement("SchedGetAffinity", SystemNative_SchedGetAffinity)
     QCFuncElement("SchedSetAffinity", SystemNative_SchedSetAffinity)
+#endif
+
     QCFuncElement("Send", SystemNative_Send)
     QCFuncElement("SendFile", SystemNative_SendFile)
     QCFuncElement("SendMessage", SystemNative_SendMessage)
