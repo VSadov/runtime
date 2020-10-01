@@ -107,6 +107,8 @@ FCFuncStart(gEmbedded_Sys)
     QCFuncElement("GetMaximumAddressSize", SystemNative_GetMaximumAddressSize)
     QCFuncElement("GetNameInfo", SystemNative_GetNameInfo)
     QCFuncElement("GetNetworkInterfaces", SystemNative_GetNetworkInterfaces)
+    // trimmed
+    QCFuncElement("GetCryptographicallySecureRandomBytes", "SystemNative_GetCryptographicallySecureRandomBytes")
     QCFuncElement("GetNonCryptographicallySecureRandomBytes", SystemNative_GetNonCryptographicallySecureRandomBytes)
     QCFuncElement("GetOSArchitecture", SystemNative_GetOSArchitecture)
     QCFuncElement("GetPeerID", SystemNative_GetPeerID)
@@ -250,9 +252,7 @@ FCFuncStart(gEmbedded_Sys)
     QCFuncElement("GetNativeIPInterfaceStatistics", "SystemNative_GetNativeIPInterfaceStatistics")
     QCFuncElement("SystemNative_GetNumRoutes", "SystemNative_GetNumRoutes")
 
-    // more trimmed
-    QCFuncElement("GetNonCryptographicallySecureRandomBytes", "SystemNative_GetNonCryptographicallySecureRandomBytes")
-    QCFuncElement("GetCryptographicallySecureRandomBytes", "SystemNative_GetCryptographicallySecureRandomBytes")
+    // trimmed
     QCFuncElement("Sync", "SystemNative_Sync")
 FCFuncEnd()
 
