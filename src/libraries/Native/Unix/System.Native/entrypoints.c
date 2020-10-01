@@ -256,5 +256,12 @@ FCFuncStart(gEmbedded_Sys)
 
     // trimmed
     QCFuncElement("Sync", SystemNative_Sync)
+
+    // trimmed
+    QCFuncElement("GetRLimit", SystemNative_GetRLimit)
+
+    // trimmed
+    QCFuncElement("SetRLimit", SystemNative_SetRLimit)
+
 FCFuncEnd()
 
