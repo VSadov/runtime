@@ -634,7 +634,14 @@ void EEStartupHelper()
         g_fEEInit = true;
 
 #if CORECLR_EMBEDDED
+#ifdef TARGET_WINDOWS
         HINSTANCE curModule = WszGetModuleHandle(NULL);
+#else
+        HINSTANCE curModule = PAL_LoadLibraryDirect(NULL);
+#endif
+        // DllMain/DLL_PROCESS_ATTACH may have run for the executable and set g_hmodCoreCLR.
+        // That is not required, just sanity check that it was the same module.
+        _ASSERTE(g_hmodCoreCLR == NULL || g_hmodCoreCLR == curModule);
         g_hmodCoreCLR = curModule;
         g_hThisInst = curModule;
 #endif
