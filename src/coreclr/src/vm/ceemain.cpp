@@ -1804,6 +1804,8 @@ LONG DllMainFilter(PEXCEPTION_POINTERS p, PVOID pv)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+#if !defined(CORECLR_EMBEDDED)
+
 //*****************************************************************************
 // This is the part of the old-style DllMain that initializes the
 // stuff that the EE team works on. It's called from the real DllMain
@@ -1883,6 +1885,8 @@ BOOL STDMETHODCALLTYPE EEDllMain( // TRUE on success, FALSE on error.
 
     return TRUE;
 }
+
+#endif // !defined(CORECLR_EMBEDDED)
 
 struct TlsDestructionMonitor
 {
