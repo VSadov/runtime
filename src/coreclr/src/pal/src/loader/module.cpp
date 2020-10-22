@@ -667,9 +667,10 @@ Function:
 --*/
 HMODULE
 PALAPI
-PAL_GetPalHostModule(
+PAL_GetPalHostModule()
+{
     return (HMODULE)LOADGetPalLibrary();
-);
+}
 
 /*
 Function:
