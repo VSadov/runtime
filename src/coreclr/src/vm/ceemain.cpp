@@ -645,6 +645,12 @@ void EEStartupHelper()
         g_hThisInst = curModule;
 #endif
 
+#ifndef TARGET_WINDOWS
+        // FOR TESTING, REMOVE THIS
+        g_hmodCoreCLR = PAL_GetPalHostModule();
+        g_hThisInst = PAL_GetPalHostModule();
+#endif
+
 #ifndef CROSSGEN_COMPILE
 
         // We cache the SystemInfo for anyone to use throughout the life of the EE.
