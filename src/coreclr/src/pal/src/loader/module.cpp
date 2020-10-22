@@ -93,6 +93,7 @@ static bool LOADConvertLibraryPathWideStringToMultibyteString(
 static BOOL LOADValidateModule(MODSTRUCT *module);
 static LPWSTR LOADGetModuleFileName(MODSTRUCT *module);
 static MODSTRUCT *LOADAddModule(NATIVE_LIBRARY_HANDLE dl_handle, LPCSTR libraryNameOrPath);
+static MODSTRUCT *LOADGetPalLibrary();
 static NATIVE_LIBRARY_HANDLE LOADLoadLibraryDirect(LPCSTR libraryNameOrPath);
 static BOOL LOADFreeLibrary(MODSTRUCT *module, BOOL fCallDllMain);
 static HMODULE LOADRegisterLibraryDirect(NATIVE_LIBRARY_HANDLE dl_handle, LPCSTR libraryNameOrPath, BOOL fDynamic);
@@ -654,6 +655,21 @@ PAL_FreeLibraryDirect(
     PERF_EXIT(PAL_FreeLibraryDirect);
     return retValue;
 }
+
+/*++
+Function:
+  PAL_GetPalHostModule
+
+  Returns the module that hosts the PAL.
+  That is typically:
+      - coreclr.dll when coreclr is dynamically linked
+      - containing executable in the statically linked case
+--*/
+HMODULE
+PALAPI
+PAL_GetPalHostModule(
+    return (HMODULE)LOADGetPalLibrary();
+);
 
 /*
 Function:

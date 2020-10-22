@@ -2479,6 +2479,11 @@ PAL_FreeLibraryDirect(
         IN NATIVE_LIBRARY_HANDLE dl_handle);
 
 PALIMPORT
+HMODULE
+PALAPI
+PAL_GetPalHostModule();
+
+PALIMPORT
 FARPROC
 PALAPI
 PAL_GetProcAddressDirect(
