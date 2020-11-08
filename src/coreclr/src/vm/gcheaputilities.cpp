@@ -243,7 +243,7 @@ HRESULT LoadAndInitializeGC(LPWSTR standaloneGcLocation)
 #if TARGET_WINDOWS
         pGcModuleBase = (PTR_VOID)hMod;
 #else
-        pGcModuleBase = (PTR_VOID)PAL_GetSymbolModuleBase(initFunc);
+        pGcModuleBase = (PTR_VOID)PAL_GetSymbolModuleBase((PVOID)initFunc);
 #endif
 
         FinalizeLoad(heap, manager, pGcModuleBase);
