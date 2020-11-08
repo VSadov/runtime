@@ -238,7 +238,15 @@ HRESULT LoadAndInitializeGC(LPWSTR standaloneGcLocation)
     HRESULT initResult = initFunc(gcToClr, &heap, &manager, &g_gc_dac_vars);
     if (initResult == S_OK)
     {
-        FinalizeLoad(heap, manager, (PTR_VOID)hMod);
+        PTR_VOID pGcModuleBase;
+
+#if TARGET_WINDOWS
+        pGcModuleBase = (PTR_VOID)hMod;
+#else
+        pGcModuleBase = (PTR_VOID)PAL_GetSymbolModuleBase(initFunc);
+#endif
+
+        FinalizeLoad(heap, manager, pGcModuleBase);
     }
     else
     {
