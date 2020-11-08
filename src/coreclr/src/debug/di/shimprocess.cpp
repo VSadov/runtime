@@ -1824,34 +1824,23 @@ HMODULE ShimProcess::GetDacModule()
     HModuleHolder hDacDll;
     PathString wszAccessDllPath;
 
-#ifdef TARGET_UNIX
-    if (!PAL_GetPALDirectoryWrapper(wszAccessDllPath))
-    {
-        ThrowLastError();
-    }
-    PCWSTR eeFlavor = MAKEDLLNAME_W(W("mscordaccore"));
-#else
     //
     // Load the access DLL from the same directory as the the current CLR Debugging Services DLL.
     //
-
-    if (!GetClrModulePathName(wszAccessDllPath))
+    if (GetClrModuleDirectory(wszAccessDllPath) != S_OK)
     {
         ThrowLastError();
-    }
-
-	if (!SUCCEEDED(CopySystemDirectory(wszAccessDllPath, wszAccessDllPath)))
-    {
-        ThrowHR(E_INVALIDARG);
     }
 
     // Dac Dll is named:
     //   mscordaccore.dll  <-- coreclr
     //   mscordacwks.dll   <-- desktop
-    PCWSTR eeFlavor =
-        W("mscordaccore.dll");
-
+#ifdef TARGET_UNIX
+    PCWSTR eeFlavor = MAKEDLLNAME_W(W("mscordaccore"));
+#else
+    PCWSTR eeFlavor = W("mscordaccore.dll");
 #endif // TARGET_UNIX
+
     wszAccessDllPath.Append(eeFlavor);
 
     hDacDll.Assign(WszLoadLibrary(wszAccessDllPath));

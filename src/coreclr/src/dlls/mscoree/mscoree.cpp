@@ -226,24 +226,9 @@ STDAPI GetCORSystemDirectoryInternaL(SString& pBuffer)
     HRESULT hr = S_OK;
     BEGIN_ENTRYPOINT_NOTHROW;
 
-
-#ifdef CROSSGEN_COMPILE
-
-    if (WszGetModuleFileName(NULL, pBuffer) > 0)
-    {
-        hr = CopySystemDirectory(pBuffer, pBuffer);
-    }
-    else {
+    if (GetClrModuleDirectory(pBuffer) != S_OK) {
         hr = HRESULT_FROM_GetLastError();
     }
-
-#else
-
-    if (!PAL_GetPALDirectoryWrapper(pBuffer)) {
-        hr = HRESULT_FROM_GetLastError();
-    }
-#endif
-
     END_ENTRYPOINT_NOTHROW;
     return hr;
 }
