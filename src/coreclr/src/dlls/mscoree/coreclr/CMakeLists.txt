@@ -129,12 +129,10 @@ if(CLR_CMAKE_TARGET_WIN32)
     )
 else()
     list(APPEND CORECLR_LIBRARIES
-        ${START_LIBRARY_GROUP}
         ${START_WHOLE_ARCHIVE} # force all PAL objects to be included so all exports are available
         coreclrpal
-        ${END_WHOLE_ARCHIVE}
         palrt
-        ${END_LIBRARY_GROUP} 
+        ${END_WHOLE_ARCHIVE}
         mscorrc
     )
 endif(CLR_CMAKE_TARGET_WIN32)
