@@ -131,9 +131,9 @@ else()
     list(APPEND CORECLR_LIBRARIES
         ${START_WHOLE_ARCHIVE} # force all PAL objects to be included so all exports are available
         coreclrpal
-        palrt
         ${END_WHOLE_ARCHIVE}
         mscorrc
+        palrt
     )
 endif(CLR_CMAKE_TARGET_WIN32)
 

@@ -390,10 +390,8 @@ set(JIT_ARCH_LINK_LIBRARIES
 if(CLR_CMAKE_HOST_UNIX)
     list(APPEND JIT_LINK_LIBRARIES
        mscorrc
-        ${START_LIBRARY_GROUP}
        coreclrpal
        palrt
-        ${END_LIBRARY_GROUP} 
     )
 else()
     list(APPEND JIT_LINK_LIBRARIES

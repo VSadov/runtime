@@ -131,10 +131,8 @@ else()
     set(CORECLR_LIBRARIES
         ${CORECLR_STATIC_LIB_LOCATION}/libcoreclr_static.a
         ${CORECLR_STATIC_LIB_LOCATION}/libSystem.Globalization.Native.a
-        ${START_LIBRARY_GROUP}
         ${CORECLR_STATIC_LIB_LOCATION}/libpalrt.a
         ${CORECLR_STATIC_LIB_LOCATION}/libcoreclrpal.a
-        ${END_LIBRARY_GROUP} 
         ${CORECLR_STATIC_LIB_LOCATION}/libeventprovider.a
         ${CORECLR_STATIC_LIB_LOCATION}/libnativeresourcestring.a
     )
