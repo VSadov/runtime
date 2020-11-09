@@ -18,21 +18,25 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 static void* pImageBase = NULL;
 #endif
 
+static void* pImageBase = NULL;
+
 void* GetClrModuleBase()
 {
     LIMITED_METHOD_CONTRACT;
 
 #if HOST_WINDOWS
     return (void*)&__ImageBase;
+    VolatileLoadWithoutBarrier(&pImageBase);
 #else // HOST_WINDOWS
     // PAL_GetSymbolModuleBase defers to dladdr, which is typically a hash lookup through symbols.
     // It should be fairly fast, however it may take a loader lock, so we will cache the result.
-    if (!pImageBase)
+    void* pRet = VolatileLoadWithoutBarrier(&pImageBase);
+    if (!pRet)
     {
-        pImageBase = (void*)PAL_GetSymbolModuleBase((void*)GetClrModuleBase);
+        pImageBase = pRet = (void*)PAL_GetSymbolModuleBase((void*)GetClrModuleBase);
     }
 
-    return pImageBase;
+    return pRet;
 #endif // HOST_WINDOWS
 }
 
