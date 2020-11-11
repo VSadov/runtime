@@ -373,6 +373,22 @@ const USHORT c_nCoreLibFieldDescriptions = NumItems(c_rgCoreLibFieldDescriptions
 
 // ECalls defined by libraries-native shims
 EXTERN_C const LPVOID gPalGlobalizationNative[];
+EXTERN_C const LPVOID gEmbedded_Brotli[];
+EXTERN_C const LPVOID gEmbedded_zlib[];
+
+#ifdef TARGET_UNIX
+EXTERN_C const LPVOID gEmbedded_Fcntl[];
+EXTERN_C const LPVOID gEmbedded_Sys[];
+EXTERN_C const LPVOID gEmbedded_NetSecurityNative[];
+
+#if !defined(__APPLE__)
+EXTERN_C const LPVOID gEmbedded_Crypto[];
+EXTERN_C const LPVOID gEmbedded_CryptoInitializer[];
+EXTERN_C const LPVOID gEmbedded_OpenSsl[];
+EXTERN_C const LPVOID gEmbedded_Ssl[];
+#endif
+
+#endif
 
 // When compiling crossgen, we only need the target version of the ecall tables
 #if !defined(CROSSGEN_COMPILE) || defined(CROSSGEN_CORELIB)

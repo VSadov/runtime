@@ -84,6 +84,112 @@ if (CLR_CMAKE_HOST_UNIX)
     set(LIB_UNWINDER unwinder_wks)
 endif (CLR_CMAKE_HOST_UNIX)
 
+if(CLR_CMAKE_HOST_WIN32)
+    set(COMPRESSION_LIB clrcompression-static)
+else()
+    set(COMPRESSION_LIB System.IO.Compression.Native-Static)
+
+    if (CLR_CMAKE_TARGET_BROWSER)
+        add_definitions(-s USE_ZLIB)
+    elseif (CLR_CMAKE_TARGET_ANDROID)
+        # need special case here since we want to link against libz.so but find_package() would resolve libz.a
+        set(ZLIB_LIBRARIES z)
+    elseif (CLR_CMAKE_TARGET_SUNOS)
+        set(ZLIB_LIBRARIES z m)
+    else ()
+        find_package(ZLIB REQUIRED)
+    endif ()
+
+
+    if (HAVE_GSSFW_HEADERS)
+       find_library(LIBGSS NAMES GSS)
+       if(LIBGSS STREQUAL LIBGSS-NOTFOUND)
+         message(FATAL_ERROR "Cannot find GSS.Framework and System.Net.Security.Native cannot build without it. Try installing GSS.Framework (or the appropriate package for your platform)")
+       endif()
+    elseif(HAVE_HEIMDAL_HEADERS)
+       find_library(LIBGSS NAMES gssapi)
+       if(LIBGSS STREQUAL LIBGSS-NOTFOUND)
+         message(FATAL_ERROR "Cannot find libgssapi and System.Net.Security.Native cannot build without it. Try installing heimdal (or the appropriate package for your platform)")
+       endif()
+    else()
+       find_library(LIBGSS NAMES gssapi_krb5)
+       if(LIBGSS STREQUAL LIBGSS-NOTFOUND)
+         message(FATAL_ERROR "Cannot find libgssapi_krb5 and System.Net.Security.Native cannot build without it. Try installing libkrb5-dev (or the appropriate package for your platform)")
+       endif()
+    endif()
+
+    # Additional requirements for System.Native
+    if (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_ANDROID)
+        set(NATIVE_LIBS_EXTRA
+          rt
+        )
+    elseif (CLR_CMAKE_TARGET_FREEBSD)
+        set(NATIVE_LIBS_EXTRA
+          pthread
+        )
+        find_library(INOTIFY_LIBRARY inotify HINTS /usr/local/lib)
+        if(NOT (INOTIFY_LIBRARY STREQUAL INOTIFY_LIBRARY-NOTFOUND))
+          LIST(APPEND NATIVE_LIBS_EXTRA
+            ${INOTIFY_LIBRARY}
+          )
+        endif ()
+    elseif (CLR_CMAKE_TARGET_SUNOS)
+        set(NATIVE_LIBS_EXTRA
+            socket
+        )
+    endif ()
+
+    # Additional requirements for System.Security.Cryptography.Native.OpenSsl
+    if(NOT FEATURE_DISTRO_AGNOSTIC_SSL)
+        find_package(OpenSSL)
+        list(APPEND NATIVE_LIBS_EXTRA
+            ${OPENSSL_CRYPTO_LIBRARY}
+            ${OPENSSL_SSL_LIBRARY}
+        )
+    endif()
+
+    if(CLR_CMAKE_TARGET_OSX)
+      find_library(COREFOUNDATION CoreFoundation)
+      find_library(CORESERVICES CoreServices)
+      find_library(SECURITY Security)
+      find_library(SYSTEM System)
+    
+      LIST(APPEND NATIVE_LIBS_EXTRA
+        ${COREFOUNDATION}
+        ${CORESERVICES}
+        ${SECURITY}
+        ${SYSTEM}
+      )
+    endif()
+
+    # Always build portable on macOS because OpenSSL is not a system component
+    # and our prebuilts should not assume a specific ABI version for the types
+    # that use OpenSSL at runtime.
+    if (CLR_CMAKE_TARGET_OSX)
+        set(FEATURE_DISTRO_AGNOSTIC_SSL True)
+    endif()
+
+    if(CLR_CMAKE_TARGET_NETBSD)
+        find_library(KVM kvm)
+    
+        LIST(APPEND NATIVE_LIBS_EXTRA
+          ${KVM}
+        )
+    endif()
+
+    set(NATIVE_LIBS
+      System.Native-Static
+      System.Net.Security.Native-Static
+    )
+
+    if(NOT CLR_CMAKE_TARGET_OSX)
+        LIST(APPEND NATIVE_LIBS
+          System.Security.Cryptography.Native.OpenSsl-Static
+        )
+    endif()
+
+endif()
+
 # IMPORTANT! Please do not rearrange the order of the libraries. The linker on Linux is
 # order dependent and changing the order can result in undefined symbols in the shared
 # library.
@@ -108,6 +214,11 @@ set(CORECLR_LIBRARIES
     utilcode
     v3binder
     System.Globalization.Native-Static
+    ${COMPRESSION_LIB}
+    ${NATIVE_LIBS}
+    ${ZLIB_LIBRARIES}
+    ${LIBGSS}
+    ${NATIVE_LIBS_EXTRA}
     interop
 )
 

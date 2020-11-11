@@ -4321,7 +4321,16 @@ void NDirect::PopulateNDirectMethodDesc(NDirectMethodDesc* pNMD, PInvokeStaticSi
     if (callConv == pmCallConvThiscall)
         ndirectflags |= NDirectMethodDesc::kThisCall;
 
-    if (pNMD->GetLoaderModule()->IsSystem() && strcmp(szLibName, "QCall") == 0)
+    if ((pNMD->GetLoaderModule()->IsSystem() && (strcmp(szLibName, "QCall") == 0)) ||
+        (szLibName != NULL &&
+        (strcmp(szLibName, "libSystem.Globalization.Native") == 0 || 
+         strcmp(szLibName, "libSystem.IO.Compression.Native") == 0 ||
+         strcmp(szLibName, "libSystem.Native") == 0 ||
+         strcmp(szLibName, "libSystem.Net.Security.Native") == 0 ||
+#ifndef __APPLE__
+         strcmp(szLibName, "libSystem.Security.Cryptography.Native.OpenSsl") == 0 ||
+#endif // !__APPLE__
+         strcmp(szLibName, "clrcompression") == 0)))
     {
         ndirectflags |= NDirectMethodDesc::kIsQCall;
     }
@@ -6311,28 +6320,6 @@ namespace
             }
         }
 #endif // FEATURE_CORESYSTEM && !TARGET_UNIX
-
-#if defined(TARGET_LINUX)
-        if (g_coreclr_embedded)
-        {
-            // this matches exactly the names in  Interop.Libraries.cs 
-            static const LPCWSTR toRedirect[] = {
-                W("libSystem.Native"),
-                W("libSystem.IO.Compression.Native"),
-                W("libSystem.Net.Security.Native"),
-                W("libSystem.Security.Cryptography.Native.OpenSsl")
-            };
-
-            int count = lengthof(toRedirect);
-            for (int i = 0; i < count; ++i)
-            {
-                if (wcscmp(wszLibName, toRedirect[i]) == 0)
-                {
-                    return PAL_LoadLibraryDirect(NULL);
-                }
-            }
-        }
-#endif
 
         if (g_hostpolicy_embedded)
         {
