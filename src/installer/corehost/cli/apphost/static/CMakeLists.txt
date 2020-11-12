@@ -188,9 +188,9 @@ if(NOT CLR_CMAKE_TARGET_LINUX)
     )
 else()
     set(NATIVE_LIBS
-      ${CORECLR_STATIC_LIB_LOCATION}/libSystem.Native.a
-      ${CORECLR_STATIC_LIB_LOCATION}/libSystem.Net.Security.Native.a
-      ${CORECLR_STATIC_LIB_LOCATION}/libSystem.Security.Cryptography.Native.OpenSsl.a
+      ${NATIVE_LIBS_LOCATION}/libSystem.Native.a
+      ${NATIVE_LIBS_LOCATION}/libSystem.Net.Security.Native.a
+      ${NATIVE_LIBS_LOCATION}/libSystem.Security.Cryptography.Native.OpenSsl.a
     )
 
     find_package(ZLIB REQUIRED)
