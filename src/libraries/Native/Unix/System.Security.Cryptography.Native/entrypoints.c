@@ -22,7 +22,6 @@
 #include "pal_evp_pkey_rsa.h"
 #include "pal_hmac.h"
 #include "pal_ocsp.h"
-#include "pal_pkcs12.h"
 #include "pal_pkcs7.h"
 #include "pal_rsa.h"
 #include "pal_ssl.h"
