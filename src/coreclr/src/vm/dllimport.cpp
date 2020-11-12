@@ -4319,7 +4319,11 @@ void NDirect::PopulateNDirectMethodDesc(NDirectMethodDesc* pNMD, PInvokeStaticSi
     if (callConv == pmCallConvThiscall)
         ndirectflags |= NDirectMethodDesc::kThisCall;
 
-    if (pNMD->GetLoaderModule()->IsSystem() && strcmp(szLibName, "QCall") == 0)
+    if ((pNMD->GetLoaderModule()->IsSystem() && (strcmp(szLibName, "QCall") == 0)) ||
+        (szLibName != NULL &&
+        (strcmp(szLibName, "libSystem.Globalization.Native") == 0 || 
+         strcmp(szLibName, "libSystem.IO.Compression.Native") == 0 ||
+         strcmp(szLibName, "clrcompression") == 0)))
     {
         ndirectflags |= NDirectMethodDesc::kIsQCall;
     }
@@ -6313,7 +6317,6 @@ namespace
             // this matches exactly the names in  Interop.Libraries.cs 
             static const LPCWSTR toRedirect[] = {
                 W("libSystem.Native"),
-                W("libSystem.IO.Compression.Native"),
                 W("libSystem.Net.Security.Native"),
                 W("libSystem.Security.Cryptography.Native.OpenSsl")
             };
