@@ -258,7 +258,11 @@ set_property(TARGET singlefilehost PROPERTY ENABLE_EXPORTS 1)
 
 target_link_libraries(singlefilehost
     ${CORECLR_LIBRARIES}
+
+    ${START_WHOLE_ARCHIVE}
     ${NATIVE_LIBS}
+    ${END_WHOLE_ARCHIVE}
+
     ${ZLIB_LIBRARIES}
     ${LIBGSS}
     ${NATIVE_LIBS_EXTRA}
