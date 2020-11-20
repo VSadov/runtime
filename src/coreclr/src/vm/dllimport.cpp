@@ -34,6 +34,7 @@
 #include "strongnameholders.h"
 #include "ecall.h"
 #include "fieldmarshaler.h"
+#include "pinvokeoverride.h"
 
 #include <formattype.h>
 #include "../md/compiler/custattr.h"
@@ -4318,11 +4319,7 @@ void NDirect::PopulateNDirectMethodDesc(NDirectMethodDesc* pNMD, PInvokeStaticSi
     if (callConv == pmCallConvThiscall)
         ndirectflags |= NDirectMethodDesc::kThisCall;
 
-    if ((pNMD->GetLoaderModule()->IsSystem() && (strcmp(szLibName, "QCall") == 0)) ||
-        (szLibName != NULL &&
-        (strcmp(szLibName, "libSystem.Globalization.Native") == 0 || 
-         strcmp(szLibName, "libSystem.IO.Compression.Native") == 0 ||
-         strcmp(szLibName, "clrcompression") == 0)))
+    if (pNMD->GetLoaderModule()->IsSystem() && (strcmp(szLibName, "QCall") == 0))
     {
         ndirectflags |= NDirectMethodDesc::kIsQCall;
     }
@@ -6599,6 +6596,15 @@ VOID NDirect::NDirectLink(NDirectMethodDesc *pMD)
 
     // Loading unmanaged dlls can trigger dllmains which certainly count as code execution!
     pMD->EnsureActive();
+
+    {
+        LPVOID pvTarget = (LPVOID)PInvokeOverride::TryGetMethodImpl(pMD->GetLibNameRaw(), pMD->GetEntrypointName());
+        if (pvTarget != NULL)
+        {
+            pMD->SetNDirectTarget(pvTarget);
+            return;
+        }
+    }
 
     LoadLibErrorTracker errorTracker;
 
