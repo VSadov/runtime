@@ -19,7 +19,7 @@ typedef uint16_t UChar;
 #include "pal_timeZoneInfo.h"
 
 #ifndef lengthof
-#define lengthof(rg)    (int)(sizeof(rg)/sizeof(rg[0]))
+#define lengthof(rg) (sizeof(rg)/sizeof(rg[0]))
 #endif
 
 typedef struct
@@ -70,7 +70,7 @@ EXTERN_C const void* GlobalizationResolveDllImport(const char* name);
 
 EXTERN_C const void* GlobalizationResolveDllImport(const char* name)
 {
-    for (int i = 0; i < lengthof(s_globalizationNative); i++)
+    for (size_t i = 0; i < lengthof(s_globalizationNative); i++)
     {
         if (strcmp(name, s_globalizationNative[i].name) == 0)
         {

@@ -1,8 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
 
 // Include System.IO.Compression.Native headers
 #include "../zlib/pal_zlib.h"
@@ -12,7 +12,7 @@
 #include "../brotli/include/brotli/types.h"
 
 #ifndef lengthof
-#define lengthof(rg)    (int)(sizeof(rg)/sizeof(rg[0]))
+#define lengthof(rg) (sizeof(rg)/sizeof(rg[0]))
 #endif
 
 typedef struct
@@ -47,7 +47,7 @@ EXTERN_C const void* CompressionResolveDllImport(const char* name);
 
 EXTERN_C const void* CompressionResolveDllImport(const char* name)
 {
-    for (int i = 0; i < lengthof(s_compressionNative); i++)
+    for (size_t i = 0; i < lengthof(s_compressionNative); i++)
     {
         if (strcmp(name, s_compressionNative[i].name) == 0)
         {
