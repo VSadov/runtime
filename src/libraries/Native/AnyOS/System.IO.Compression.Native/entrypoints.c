@@ -47,7 +47,7 @@ EXTERN_C const void* CompressionResolveDllImport(const char* name);
 
 EXTERN_C const void* CompressionResolveDllImport(const char* name)
 {
-    for (size_t i = 0; i < lengthof(s_compressionNative); i++)
+    for (int i = 0; i < lengthof(s_compressionNative); i++)
     {
         if (strcmp(name, s_compressionNative[i].name) == 0)
         {
