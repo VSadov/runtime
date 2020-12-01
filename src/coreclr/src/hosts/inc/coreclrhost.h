@@ -121,4 +121,11 @@ CORECLR_HOSTING_API(coreclr_execute_assembly,
 
 #undef CORECLR_HOSTING_API
 
+//
+// Callback types used by the hosts
+//
+typedef bool(BundleProbeFn)(LPCSTR, INT64*, INT64*);
+typedef const void* (PInvokeOverrideFn)(const char* libraryName, const char* entrypointName);
+
+
 #endif // __CORECLR_HOST_H__
