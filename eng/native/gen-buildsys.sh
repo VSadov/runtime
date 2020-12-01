@@ -96,7 +96,7 @@ if [[ "$build_arch" == "wasm" ]]; then
 fi
 
 # We have to be able to build with CMake 3.6.2, so we can't use the -S or -B options
-pushd intermediate_dir
+pushd "$intermediate_dir"
 
 # Include CMAKE_USER_MAKE_RULES_OVERRIDE as uninitialized since it will hold its value in the CMake cache otherwise can cause issues when branch switching
 $cmake_command \
