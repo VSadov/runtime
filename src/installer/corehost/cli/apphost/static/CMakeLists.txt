@@ -187,26 +187,21 @@ endif()
 set(NATIVE_LIBS_LOCATION "${NATIVE_LIBS_ARTIFACTS}")
 message ("Looking for native libs at location: '${NATIVE_LIBS_LOCATION}'.")
 
-if(NOT CLR_CMAKE_TARGET_LINUX)
-    list(APPEND NATIVE_LIBS_EXTRA
-        # Native libs linked into singlefilehost is supported only on Linux for now.
-    )
-else()
+# These native libs are linked into singlefilehost only on Linux (for now).
+if(CLR_CMAKE_TARGET_LINUX)
     set(NATIVE_LIBS
       ${NATIVE_LIBS_LOCATION}/libSystem.Native.a
       ${NATIVE_LIBS_LOCATION}/libSystem.Net.Security.Native.a
       ${NATIVE_LIBS_LOCATION}/libSystem.Security.Cryptography.Native.OpenSsl.a
     )
 
-    # Additional requirements for System.Net.Security.Native
-    include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Net.Security.Native/extra_libs.cmake)
-
     # Additional requirements for System.Native
     include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Native/extra_libs.cmake)
-
+    # Additional requirements for System.Net.Security.Native
+    include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Net.Security.Native/extra_libs.cmake)
     # Additional requirements for System.Security.Cryptography.Native.OpenSsl
     include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Security.Cryptography.Native/extra_libs.cmake)
-endif(NOT CLR_CMAKE_TARGET_LINUX)
+endif()
 
 if(CLR_CMAKE_TARGET_LINUX OR CLR_CMAKE_TARGET_FREEBSD OR CLR_CMAKE_TARGET_NETBSD OR CLR_CMAKE_TARGET_SUNOS)
     # These options are used to force every object to be included even if it's unused.
@@ -215,8 +210,6 @@ if(CLR_CMAKE_TARGET_LINUX OR CLR_CMAKE_TARGET_FREEBSD OR CLR_CMAKE_TARGET_NETBSD
 endif(CLR_CMAKE_TARGET_LINUX OR CLR_CMAKE_TARGET_FREEBSD OR CLR_CMAKE_TARGET_NETBSD OR CLR_CMAKE_TARGET_SUNOS)
 
 set_property(TARGET singlefilehost PROPERTY ENABLE_EXPORTS 1)
-
-message ("Adding Extras: '${NATIVE_LIBS_EXTRA}'.")
 
 target_link_libraries(singlefilehost
     ${CORECLR_LIBRARIES}
@@ -227,10 +220,3 @@ target_link_libraries(singlefilehost
 
     ${NATIVE_LIBS_EXTRA}
 )
-
-if(NOT FEATURE_DISTRO_AGNOSTIC_SSL)
-    target_link_libraries(singlefilehost
-        ${OPENSSL_CRYPTO_LIBRARY}
-        ${OPENSSL_SSL_LIBRARY}
-    )
-endif()
