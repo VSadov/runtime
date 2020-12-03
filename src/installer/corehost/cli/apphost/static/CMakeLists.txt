@@ -107,6 +107,8 @@ if (CLR_CMAKE_TARGET_WIN32 AND (CLR_CMAKE_TARGET_ARCH_ARM OR CLR_CMAKE_TARGET_AR
     target_link_libraries(singlefilehost Advapi32.lib shell32.lib)
 endif()
 
+set(NATIVE_LIBS_EXTRA)
+
 # Path like: artifacts/bin/coreclr/windows.x64.Release/lib  or
 #            /root/runtime/artifacts/transport/coreclr/lib
 set(CORECLR_STATIC_LIB_LOCATION "${CORECLR_ARTIFACTS}/lib")
@@ -141,16 +143,10 @@ else()
     )
 
     # additional requirements for System.IO.Compression.Native
-    if (CLR_CMAKE_TARGET_BROWSER)
-        add_definitions(-s USE_ZLIB)
-    elseif (CLR_CMAKE_TARGET_ANDROID)
-        # need special case here since we want to link against libz.so but find_package() would resolve libz.a
-        set(ZLIB_LIBRARIES z)
-    elseif (CLR_CMAKE_TARGET_SUNOS)
-        set(ZLIB_LIBRARIES z m)
-    else ()
-        find_package(ZLIB REQUIRED)
-    endif ()
+    message ("Including: '${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.IO.Compression.Native/extra_libs.cmake'.")
+
+    include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.IO.Compression.Native/extra_libs.cmake)
+    message ("Adding Extras: '${NATIVE_LIBS_EXTRA}'.")
 endif()
 
 if(CLR_CMAKE_TARGET_OSX)
@@ -195,7 +191,7 @@ set(NATIVE_LIBS_LOCATION "${NATIVE_LIBS_ARTIFACTS}")
 message ("Looking for native libs at location: '${NATIVE_LIBS_LOCATION}'.")
 
 if(NOT CLR_CMAKE_TARGET_LINUX)
-    set(NATIVE_LIBS
+    list(APPEND NATIVE_LIBS_EXTRA
         # Native libs linked into singlefilehost is supported only on Linux for now.
         # if/when BSD and OSX are supported too, consider the commented code sections below.
     )
@@ -224,13 +220,15 @@ else()
        endif()
     endif()
 
+    list(APPEND NATIVE_LIBS_EXTRA ${LIBGSS})
+
     # Additional requirements for System.Native
     if (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_ANDROID)
-        set(NATIVE_LIBS_EXTRA
+        list(APPEND NATIVE_LIBS_EXTRA
           rt
         )
     # elseif (CLR_CMAKE_TARGET_FREEBSD)
-    #     set(NATIVE_LIBS_EXTRA
+    #     list(APPEND NATIVE_LIBS_EXTRA
     #       pthread
     #     )
     #     find_library(INOTIFY_LIBRARY inotify HINTS /usr/local/lib)
@@ -240,7 +238,7 @@ else()
     #       )
     #     endif ()
     # elseif (CLR_CMAKE_TARGET_SUNOS)
-    #     set(NATIVE_LIBS_EXTRA
+    #     list(APPEND NATIVE_LIBS_EXTRA
     #         socket
     #     )
     endif ()
@@ -259,6 +257,8 @@ endif(NOT CLR_CMAKE_TARGET_LINUX)
 
 set_property(TARGET singlefilehost PROPERTY ENABLE_EXPORTS 1)
 
+message ("Adding Extras: '${NATIVE_LIBS_EXTRA}'.")
+
 target_link_libraries(singlefilehost
     ${CORECLR_LIBRARIES}
 
@@ -266,8 +266,6 @@ target_link_libraries(singlefilehost
     ${NATIVE_LIBS}
     ${END_WHOLE_ARCHIVE}
 
-    ${ZLIB_LIBRARIES}
-    ${LIBGSS}
     ${NATIVE_LIBS_EXTRA}
 )
 
