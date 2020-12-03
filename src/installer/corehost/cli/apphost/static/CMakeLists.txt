@@ -201,27 +201,9 @@ else()
     # Additional requirements for System.Net.Security.Native
     include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Net.Security.Native/extra_libs.cmake)
 
-
     # Additional requirements for System.Native
-    if (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_ANDROID)
-        list(APPEND NATIVE_LIBS_EXTRA
-          rt
-        )
-    # elseif (CLR_CMAKE_TARGET_FREEBSD)
-    #     list(APPEND NATIVE_LIBS_EXTRA
-    #       pthread
-    #     )
-    #     find_library(INOTIFY_LIBRARY inotify HINTS /usr/local/lib)
-    #     if(NOT (INOTIFY_LIBRARY STREQUAL INOTIFY_LIBRARY-NOTFOUND))
-    #       LIST(APPEND NATIVE_LIBS_EXTRA
-    #         ${INOTIFY_LIBRARY}
-    #       )
-    #     endif ()
-    # elseif (CLR_CMAKE_TARGET_SUNOS)
-    #     list(APPEND NATIVE_LIBS_EXTRA
-    #         socket
-    #     )
-    endif ()
+    include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Native/extra_libs.cmake)
+
 
     # Additional requirements for System.Security.Cryptography.Native.OpenSsl
     if(NOT FEATURE_DISTRO_AGNOSTIC_SSL)
