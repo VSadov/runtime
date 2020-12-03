@@ -10,5 +10,4 @@ else ()
     find_package(ZLIB REQUIRED)
 endif ()
 
-list(APPEND EXTRA_LIBS ${ZLIB_LIBRARIES})
-
+list(APPEND NATIVE_LIBS_EXTRA ${ZLIB_LIBRARIES})
