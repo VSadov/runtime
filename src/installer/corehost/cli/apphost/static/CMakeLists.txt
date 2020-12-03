@@ -143,10 +143,7 @@ else()
     )
 
     # additional requirements for System.IO.Compression.Native
-    message ("Including: '${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.IO.Compression.Native/extra_libs.cmake'.")
-
     include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.IO.Compression.Native/extra_libs.cmake)
-    message ("Adding Extras: '${NATIVE_LIBS_EXTRA}'.")
 endif()
 
 if(CLR_CMAKE_TARGET_OSX)
@@ -193,7 +190,6 @@ message ("Looking for native libs at location: '${NATIVE_LIBS_LOCATION}'.")
 if(NOT CLR_CMAKE_TARGET_LINUX)
     list(APPEND NATIVE_LIBS_EXTRA
         # Native libs linked into singlefilehost is supported only on Linux for now.
-        # if/when BSD and OSX are supported too, consider the commented code sections below.
     )
 else()
     set(NATIVE_LIBS
@@ -203,24 +199,8 @@ else()
     )
 
     # Additional requirements for System.Net.Security.Native
-    if (HAVE_GSSFW_HEADERS)
-       find_library(LIBGSS NAMES GSS)
-       if(LIBGSS STREQUAL LIBGSS-NOTFOUND)
-         message(FATAL_ERROR "Cannot find GSS.Framework and System.Net.Security.Native cannot build without it. Try installing GSS.Framework (or the appropriate package for your platform)")
-       endif()
-    elseif(HAVE_HEIMDAL_HEADERS)
-       find_library(LIBGSS NAMES gssapi)
-       if(LIBGSS STREQUAL LIBGSS-NOTFOUND)
-         message(FATAL_ERROR "Cannot find libgssapi and System.Net.Security.Native cannot build without it. Try installing heimdal (or the appropriate package for your platform)")
-       endif()
-    else()
-       find_library(LIBGSS NAMES gssapi_krb5)
-       if(LIBGSS STREQUAL LIBGSS-NOTFOUND)
-         message(FATAL_ERROR "Cannot find libgssapi_krb5 and System.Net.Security.Native cannot build without it. Try installing libkrb5-dev (or the appropriate package for your platform)")
-       endif()
-    endif()
+    include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Net.Security.Native/extra_libs.cmake)
 
-    list(APPEND NATIVE_LIBS_EXTRA ${LIBGSS})
 
     # Additional requirements for System.Native
     if (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_ANDROID)
