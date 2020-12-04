@@ -55,8 +55,6 @@ static const Entry s_globalizationNative[] =
     DllImportEntry(GlobalizationNative_ToUnicode)
 };
 
-EXTERN_C const void* GlobalizationResolveDllImport(const char* name);
-
 EXTERN_C const void* GlobalizationResolveDllImport(const char* name)
 {
     return ResolveDllImport(s_globalizationNative, lengthof(s_globalizationNative), name);
