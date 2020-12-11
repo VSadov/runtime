@@ -6225,7 +6225,6 @@ namespace
             // this matches exactly the names in  Interop.Libraries.cs 
             static const LPCWSTR toRedirect[] = {
                 W("libSystem.Native"),
-                W("libSystem.Net.Security.Native"),
                 W("libSystem.Security.Cryptography.Native.OpenSsl")
             };
 
