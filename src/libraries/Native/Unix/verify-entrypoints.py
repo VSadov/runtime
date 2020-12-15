@@ -33,11 +33,10 @@ if __name__ == "__main__":
     with open(args.entries, 'r') as f:
         entriesList = re.findall(entriesPattern, f.read())
 
-    print(entriesList)
+    dllSet = set(dllList)
+    etriesSet = set(entriesList)
 
-    # get exports from the DSO
-    # remove predefined symbols
-
-    # get exports from entrypoints.c
-
-    # if an entry in DSO is not matched in entrypoints.c complain
+    if dllSet != entriesSet
+        stderr.write("DIFFERENCES FOUND:")
+        stderr.write(dllSet.symmetric_difference(entriesSet))
+        exit(1)
