@@ -38,8 +38,8 @@ if __name__ == "__main__":
     entriesSet = set(entriesList)
 
     # ignore well-known dll exports
-    dllSet.discard('_init')
-    dllSet.discard('_fini')
+    dllSet.discard('init')
+    dllSet.discard('fini')
 
     diff = dllSet ^ entriesSet
 
