@@ -39,6 +39,6 @@ if __name__ == "__main__":
     diff = dllSet ^ entriesSet
 
     if len(diff) > 0:
-        stderr.write("DIFFERENCES FOUND:")
-        stderr.write(diff)
+        stderr.write("DIFFERENCES FOUND: \n")
+        stderr.write(list(diff))
         exit(1)
