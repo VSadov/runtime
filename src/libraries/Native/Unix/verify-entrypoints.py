@@ -36,6 +36,10 @@ if __name__ == "__main__":
     dllSet = set(dllList)
     entriesSet = set(entriesList)
 
+    # ignore well-known dll exports
+    dllSet.discard('_init')
+    dllSet.discard('_fini')
+
     diff = dllSet ^ entriesSet
 
     if len(diff) > 0:
