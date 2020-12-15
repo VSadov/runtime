@@ -102,11 +102,6 @@ if(CLR_CMAKE_TARGET_WIN32)
     add_linker_flag("/INCREMENTAL:NO")
 endif()
 
-# Specify non-default Windows libs to be used for Arm/Arm64 builds
-if (CLR_CMAKE_TARGET_WIN32 AND (CLR_CMAKE_TARGET_ARCH_ARM OR CLR_CMAKE_TARGET_ARCH_ARM64))
-    target_link_libraries(singlefilehost Advapi32.lib shell32.lib)
-endif()
-
 # Path like: artifacts/bin/coreclr/windows.x64.Release/lib  or
 #            /root/runtime/artifacts/transport/coreclr/lib
 set(CORECLR_STATIC_LIB_LOCATION "${CORECLR_ARTIFACTS}/lib")
@@ -159,6 +154,14 @@ else()
     include(${CLR_REPO_ROOT_DIR}/src/libraries/Native/Unix/System.Security.Cryptography.Native/extra_libs.cmake)
     append_extra_cryptography_libs(NATIVE_LIBS)
 
+endif()
+
+# Specify non-default Windows libs to be used for Arm/Arm64 builds
+if (CLR_CMAKE_TARGET_WIN32 AND (CLR_CMAKE_TARGET_ARCH_ARM OR CLR_CMAKE_TARGET_ARCH_ARM64))
+    LIST(APPEND NATIVE_LIBS
+      Advapi32.lib
+      shell32.lib
+    )
 endif()
 
 if(CLR_CMAKE_TARGET_OSX)
