@@ -18,6 +18,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    print('DLL: ' + args.dll)
+    print('ENTRIES: ' + args.entries)
+
     # get exports from the DSO
     # remove predefined symbols
 

@@ -101,7 +101,6 @@ if (GEN_SHARED_LIB)
             COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../verify-entrypoints.py
                 $<TARGET_FILE:System.Security.Cryptography.Native.OpenSsl>
                 ${CMAKE_CURRENT_SOURCE_DIR}/entrypoints.c
-                "entrypoints.c does not match exports from System.Security.Cryptography.Native.OpenSsl"
             VERBATIM
         )
     endif()
