@@ -40,5 +40,5 @@ if __name__ == "__main__":
 
     if len(diff) > 0:
         stderr.write("DIFFERENCES FOUND: \n")
-        stderr.write(list(diff))
+        stderr.write(', '.join(diff))
         exit(1)
