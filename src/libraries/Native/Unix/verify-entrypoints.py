@@ -43,7 +43,7 @@ if __name__ == "__main__":
     diff = dllSet ^ entriesSet
 
     if len(diff) > 0:
-        stderr.write("ERROR: entrypoints.c file did not match entries exported form DSO")
+        stderr.write("ERROR: entrypoints.c file did not match entries exported form DSO \n")
         stderr.write("DIFFERENCES FOUND: ")
         stderr.write(', '.join(diff) + '\n')
         exit(1)
