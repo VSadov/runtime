@@ -36,7 +36,9 @@ if __name__ == "__main__":
     dllSet = set(dllList)
     entriesSet = set(entriesList)
 
-    if dllSet != entriesSet
+    diff = dllSet.symmetric_difference(entriesSet)
+
+    if diff.Count > 0
         stderr.write("DIFFERENCES FOUND:")
-        stderr.write(dllSet.symmetric_difference(entriesSet))
+        stderr.write(diff)
         exit(1)
