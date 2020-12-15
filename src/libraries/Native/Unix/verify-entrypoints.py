@@ -34,7 +34,7 @@ if __name__ == "__main__":
         entriesList = re.findall(entriesPattern, f.read())
 
     dllSet = set(dllList)
-    etriesSet = set(entriesList)
+    entriesSet = set(entriesList)
 
     if dllSet != entriesSet
         stderr.write("DIFFERENCES FOUND:")
