@@ -60,6 +60,14 @@ if (GEN_SHARED_LIB)
         ${NATIVE_LIBS_EXTRA}
     )
 
+    add_custom_command(TARGET System.Native POST_BUILD
+        COMMENT "Verifying System.Native entry points against entrypoints.c "
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../verify-entrypoints.py
+            $<TARGET_FILE:System.Native>
+            ${CMAKE_CURRENT_SOURCE_DIR}/entrypoints.c
+        VERBATIM
+    )
+
     install_with_stripped_symbols (System.Native PROGRAMS .)
 endif ()
 

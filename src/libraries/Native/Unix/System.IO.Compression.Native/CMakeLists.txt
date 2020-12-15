@@ -67,6 +67,15 @@ if (GEN_SHARED_LIB)
     target_link_libraries(System.IO.Compression.Native
         ${NATIVE_LIBS_EXTRA}
     )
+
+    add_custom_command(TARGET System.IO.Compression.Native POST_BUILD
+        COMMENT "Verifying System.IO.Compression.Native entry points against entrypoints.c "
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../verify-entrypoints.py
+            $<TARGET_FILE:System.IO.Compression.Native>
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../AnyOS/System.IO.Compression.Native/entrypoints.c
+        VERBATIM
+    )
+
     install_with_stripped_symbols (System.IO.Compression.Native PROGRAMS .)
 endif ()
 
