@@ -24,9 +24,16 @@ if __name__ == "__main__":
     exportPatternStr = r'(?:\sT\s)(\S*)'
     exportPattern = re.compile(exportPatternStr)
 
-    dllEntriesList = re.findall(exportPattern, dllEntries)
+    dllList = re.findall(exportPattern, dllEntries)
 
-    print(dllEntriesList)
+    # match name in "DllImportEntry(CryptoNative_BioRead)"
+    entriesPatternStr = r'(?:DllImportEntry\()(\S*)\)'
+    entriesPattern = re.compile(entriesPatternStr)
+
+    with open(args.entries, 'r') as f:
+        entriesList = re.findall(entriesPattern, f.read())
+
+    print(entriesList)
 
     # get exports from the DSO
     # remove predefined symbols
