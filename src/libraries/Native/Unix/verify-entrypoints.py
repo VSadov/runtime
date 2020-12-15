@@ -13,8 +13,8 @@ if __name__ == "__main__":
     from sys import stdout, stderr
 
     parser = argparse.ArgumentParser(description="Check if exports from Arg1 match entries in Arg2.")
-    parser.add_argument('dll', metavar='file', nargs=1, help="DSO binary")
-    parser.add_argument('entries', metavar='file', nargs=1, help="entrypoints.c source")
+    parser.add_argument('dll', help="DSO binary")
+    parser.add_argument('entries', help="entrypoints.c source")
 
     args = parser.parse_args()
 
