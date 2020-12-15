@@ -7,6 +7,7 @@
 from glob import glob
 import sys
 import re
+import subprocess
 import argparse
 
 if __name__ == "__main__":
@@ -17,9 +18,15 @@ if __name__ == "__main__":
     parser.add_argument('entries', help="entrypoints.c source")
 
     args = parser.parse_args()
+    dllEntries = subprocess.check_output(['-D' '--defined-only' '--demangle', args.dll])
 
-    print('DLL: ' + args.dll)
-    print('ENTRIES: ' + args.entries)
+    # match name in "000000000000ce50 T CryptoNative_X509StackAddMultiple"
+    exportPatternStr = r'(?:\sT\s)(\S*)'
+    exportPattern = re.compile(exportPatternStr)
+
+    dllEntriesList = re.FindAll(exportPattern, dllEntries)
+
+    print(dllEntriesList)
 
     # get exports from the DSO
     # remove predefined symbols
@@ -27,6 +34,3 @@ if __name__ == "__main__":
     # get exports from entrypoints.c
 
     # if an entry in DSO is not matched in entrypoints.c complain
-
-    with open(args.entries, 'r') as f:
-        print(f.read())
