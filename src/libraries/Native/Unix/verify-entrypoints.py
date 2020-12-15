@@ -14,14 +14,15 @@ if __name__ == "__main__":
     from sys import stdout, stderr
 
     parser = argparse.ArgumentParser(description="Check if exports from Arg1 match entries in Arg2.")
-    parser.add_argument('dll', help="DSO binary")
+    parser.add_argument('dll', help="so/dylib binary")
     parser.add_argument('entries', help="entrypoints.c source")
 
     args = parser.parse_args()
     dllEntries = subprocess.check_output(['nm', args.dll])
 
     # match name in "000000000000ce50 T CryptoNative_X509StackAddMultiple"
-    exportPatternStr = r'(?:\sT\s)(\S*)'
+    #            or "000000000000ce50 T _CryptoNative_X509StackAddMultiple"
+    exportPatternStr = r'(?:\sT\s_*)(\S*)'
     exportPattern = re.compile(exportPatternStr)
 
     dllList = re.findall(exportPattern, dllEntries)
