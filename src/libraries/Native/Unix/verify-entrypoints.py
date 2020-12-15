@@ -24,7 +24,7 @@ if __name__ == "__main__":
     exportPatternStr = r'(?:\sT\s)(\S*)'
     exportPattern = re.compile(exportPatternStr)
 
-    dllEntriesList = re.FindAll(exportPattern, dllEntries)
+    dllEntriesList = re.findall(exportPattern, dllEntries)
 
     print(dllEntriesList)
 
