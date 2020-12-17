@@ -58,6 +58,8 @@ if (NOT CLR_CMAKE_TARGET_BROWSER)
 endif()
 
 if (GEN_SHARED_LIB)
+    find_program(AWK awk)
+
     set(DEF_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/compression_unixexports.src)
     set(EXPORTS_FILE ${CMAKE_CURRENT_BINARY_DIR}/compression.exports)
     generate_exports_file(${DEF_SOURCES} ${EXPORTS_FILE})
