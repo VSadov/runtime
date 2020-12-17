@@ -77,7 +77,7 @@ if (GEN_SHARED_LIB)
     add_custom_target(compression_exports DEPENDS ${EXPORTS_FILE})
     add_dependencies(System.IO.Compression.Native compression_exports)
 
-    set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_FLAGS ${EXPORTS_LINKER_OPTION})
+    set_property(TARGET System.IO.Compression.Native PROPERTY LINK_FLAGS ${EXPORTS_LINKER_OPTION})
     set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_DEPENDS ${EXPORTS_FILE})
 
     if (NOT CLR_CMAKE_TARGET_IOS AND NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_TARGET_ANDROID)
