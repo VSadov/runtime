@@ -68,6 +68,7 @@ if (GEN_SHARED_LIB)
         ${NATIVE_LIBS_EXTRA}
     )
 
+    set(LD_GNU 1)
     find_program(AWK awk)
     set(DEF_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/compression_unixexports.src)
     set(EXPORTS_FILE ${CMAKE_CURRENT_BINARY_DIR}/compression.exports)
@@ -77,7 +78,7 @@ if (GEN_SHARED_LIB)
     add_custom_target(compression_exports DEPENDS ${EXPORTS_FILE})
     add_dependencies(System.IO.Compression.Native compression_exports)
 
-    set_property(TARGET System.IO.Compression.Native PROPERTY LINK_FLAGS ${EXPORTS_LINKER_OPTION})
+    set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_FLAGS ${EXPORTS_LINKER_OPTION})
     set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_DEPENDS ${EXPORTS_FILE})
 
     if (NOT CLR_CMAKE_TARGET_IOS AND NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_TARGET_ANDROID)
