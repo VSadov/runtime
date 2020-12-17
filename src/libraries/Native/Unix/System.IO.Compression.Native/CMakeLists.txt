@@ -14,6 +14,11 @@ set(NATIVECOMPRESSION_SOURCES
 )
 
 if (NOT CLR_CMAKE_TARGET_BROWSER)
+    if (GEN_SHARED_LIB)
+        add_definitions(-DBROTLI_SHARED_COMPILATION)
+        add_definitions(-DBROTLIDEC_SHARED_COMPILATION)
+        add_definitions(-DBROTLIENC_SHARED_COMPILATION)
+    endif()
 
     #Include Brotli include files
     include_directories("../../AnyOS/brotli/include")
