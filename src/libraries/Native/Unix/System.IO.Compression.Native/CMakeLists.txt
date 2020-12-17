@@ -14,6 +14,7 @@ set(NATIVECOMPRESSION_SOURCES
 )
 
 if (NOT CLR_CMAKE_TARGET_BROWSER)
+    add_definitions(-DBROTLI_SHARED_COMPILATION)
 
     #Include Brotli include files
     include_directories("../../AnyOS/brotli/include")
@@ -57,11 +58,22 @@ if (NOT CLR_CMAKE_TARGET_BROWSER)
 endif()
 
 if (GEN_SHARED_LIB)
+    set(DEF_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/compression_unixexports.src)
+    set(EXPORTS_FILE ${CMAKE_CURRENT_BINARY_DIR}/compression.exports)
+    generate_exports_file(${DEF_SOURCES} ${EXPORTS_FILE})
+    set_exports_linker_option(${EXPORTS_FILE})
+
     add_library(System.IO.Compression.Native
         SHARED
         ${NATIVECOMPRESSION_SOURCES}
         ${VERSION_FILE_PATH}
     )
+
+    add_custom_target(compression_exports DEPENDS ${EXPORTS_FILE})
+    add_dependencies(System.IO.Compression.Native compression_exports)
+
+    set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_FLAGS ${EXPORTS_LINKER_OPTION})
+    set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_DEPENDS ${EXPORTS_FILE})
 
     target_link_libraries(System.IO.Compression.Native
         ${NATIVE_LIBS_EXTRA}
