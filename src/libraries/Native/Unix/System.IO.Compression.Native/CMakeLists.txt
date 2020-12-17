@@ -68,8 +68,6 @@ if (GEN_SHARED_LIB)
         ${NATIVE_LIBS_EXTRA}
     )
 
-    set(LD_GNU 1)
-    find_program(AWK awk)
     set(DEF_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/compression_unixexports.src)
     set(EXPORTS_FILE ${CMAKE_CURRENT_BINARY_DIR}/compression.exports)
     generate_exports_file(${DEF_SOURCES} ${EXPORTS_FILE})
