@@ -14,8 +14,6 @@ set(NATIVECOMPRESSION_SOURCES
 )
 
 if (NOT CLR_CMAKE_TARGET_BROWSER)
-    add_definitions(-DBROTLI_SHARED_COMPILATION)
-
     #Include Brotli include files
     include_directories("../../AnyOS/brotli/include")
 
@@ -58,12 +56,7 @@ if (NOT CLR_CMAKE_TARGET_BROWSER)
 endif()
 
 if (GEN_SHARED_LIB)
-    find_program(AWK awk)
-
-    set(DEF_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/compression_unixexports.src)
-    set(EXPORTS_FILE ${CMAKE_CURRENT_BINARY_DIR}/compression.exports)
-    generate_exports_file(${DEF_SOURCES} ${EXPORTS_FILE})
-    set_exports_linker_option(${EXPORTS_FILE})
+    add_definitions(-DBROTLI_SHARED_COMPILATION)
 
     add_library(System.IO.Compression.Native
         SHARED
@@ -71,15 +64,21 @@ if (GEN_SHARED_LIB)
         ${VERSION_FILE_PATH}
     )
 
+    target_link_libraries(System.IO.Compression.Native
+        ${NATIVE_LIBS_EXTRA}
+    )
+
+    find_program(AWK awk)
+    set(DEF_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/compression_unixexports.src)
+    set(EXPORTS_FILE ${CMAKE_CURRENT_BINARY_DIR}/compression.exports)
+    generate_exports_file(${DEF_SOURCES} ${EXPORTS_FILE})
+    set_exports_linker_option(${EXPORTS_FILE})
+
     add_custom_target(compression_exports DEPENDS ${EXPORTS_FILE})
     add_dependencies(System.IO.Compression.Native compression_exports)
 
     set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_FLAGS ${EXPORTS_LINKER_OPTION})
     set_property(TARGET System.IO.Compression.Native APPEND_STRING PROPERTY LINK_DEPENDS ${EXPORTS_FILE})
-
-    target_link_libraries(System.IO.Compression.Native
-        ${NATIVE_LIBS_EXTRA}
-    )
 
     if (NOT CLR_CMAKE_TARGET_IOS AND NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_TARGET_ANDROID)
         add_custom_command(TARGET System.IO.Compression.Native POST_BUILD
