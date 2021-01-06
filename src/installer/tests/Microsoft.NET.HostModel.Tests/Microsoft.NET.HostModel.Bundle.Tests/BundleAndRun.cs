@@ -59,13 +59,13 @@ namespace Microsoft.NET.HostModel.Tests
             BundleRun(fixture, publishDir);
         }
 
-        [Fact]
-        public void TestWithRelativePaths()
-        {
-            var fixture = sharedTestState.TestFixture.Copy();
-            string publishDir = RelativePath(BundleHelper.GetPublishPath(fixture));
-            BundleRun(fixture, publishDir);
-        }
+        //[Fact]
+        //public void TestWithRelativePaths()
+        //{
+        //    var fixture = sharedTestState.TestFixture.Copy();
+        //    string publishDir = RelativePath(BundleHelper.GetPublishPath(fixture));
+        //    BundleRun(fixture, publishDir);
+        //}
 
         [Fact]
         public void TestWithRelativePathsDirSeparator()
