@@ -11,8 +11,8 @@
 // For that reason we use function pointers instead of direct call.
 // This can be revisited after we drop support for 10.12.
 
-static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = NULL;
-static OSStatus (*SSLCopyALPNProtocolsPtr)(SSLContextRef context, CFArrayRef* protocols) = NULL;
+static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = (OSStatus(*)(SSLContextRef, CFArrayRef))1;
+static OSStatus (*SSLCopyALPNProtocolsPtr)(SSLContextRef context, CFArrayRef* protocols) = (OSStatus(*)(SSLContextRef, CFArrayRef*))1;
 // end of ALPN.
 
 SSLContextRef AppleCryptoNative_SslCreateContext(int32_t isServer)
@@ -206,6 +206,11 @@ int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
     if (sslContext == NULL || protocols == NULL || pOSStatus == NULL)
         return -1;
 
+    if (SSLSetALPNProtocolsPtr == (OSStatus(*)(SSLContextRef, CFArrayRef))1)
+    {
+        SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
+    }
+
     if (!SSLSetALPNProtocolsPtr)
     {
         // not available.
@@ -222,8 +227,13 @@ int32_t AppleCryptoNative_SslGetAlpnSelected(SSLContextRef sslContext, CFDataRef
     if (sslContext == NULL || protocol == NULL)
         return -1;
 
+    if (SSLCopyALPNProtocolsPtr == (OSStatus(*)(SSLContextRef, CFArrayRef*))1)
+    {
+        SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
+    }
+
     *protocol = NULL;
-    if (!SSLCopyALPNProtocolsPtr)
+    if (SSLCopyALPNProtocolsPtr)
     {
         // not available.
         return 0;
@@ -621,10 +631,4 @@ int32_t AppleCryptoNative_SslSetEnabledCipherSuites(SSLContextRef sslContext, co
         free(cipherSuites16);
         return status;
     }
-}
-
-__attribute__((constructor)) static void InitializeAppleCryptoSslShim()
-{
-    SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
-    SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
 }
