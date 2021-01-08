@@ -199,6 +199,14 @@ int32_t AppleCryptoNative_SslSetTargetName(SSLContextRef sslContext,
     return *pOSStatus == noErr;
 }
 
+static bool InitializeAppleCryptoSslShim()
+{
+    SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
+    SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
+
+    return !!SSLSetALPNProtocolsPtr;
+}
+
 int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
                                                         CFArrayRef protocols,
                                                         int32_t* pOSStatus)
@@ -206,7 +214,8 @@ int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
     if (sslContext == NULL || protocols == NULL || pOSStatus == NULL)
         return -1;
 
-    if (!SSLSetALPNProtocolsPtr)
+    static bool initializedShim = InitializeAppleCryptoSslShim();
+    if (!initializedShim)
     {
         // not available.
         *pOSStatus = 0;
@@ -621,10 +630,4 @@ int32_t AppleCryptoNative_SslSetEnabledCipherSuites(SSLContextRef sslContext, co
         free(cipherSuites16);
         return status;
     }
-}
-
-__attribute__((constructor)) static void InitializeAppleCryptoSslShim()
-{
-    SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
-    SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
 }
