@@ -199,11 +199,12 @@ int32_t AppleCryptoNative_SslSetTargetName(SSLContextRef sslContext,
     return *pOSStatus == noErr;
 }
 
-static void InitializeAppleCryptoSslShim()
+static bool InitializeAppleCryptoSslShim()
 {
-
     SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
     SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
+
+    return !!SSLSetALPNProtocolsPtr;
 }
 
 int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
@@ -213,13 +214,9 @@ int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
     if (sslContext == NULL || protocols == NULL || pOSStatus == NULL)
         return -1;
 
-    static bool initializedShim = false;
-    if (!initializedShim)
-    {
-        InitializeAppleCryptoSslShim();
-    }
+    static bool initializedShim = InitializeAppleCryptoSslShim();
 
-    if (!SSLSetALPNProtocolsPtr)
+    if (!initializedShim)
     {
         // not available.
         *pOSStatus = 0;
