@@ -1305,12 +1305,18 @@ static int32_t EnsureOpenSsl11Initialized()
 
 #endif
 
+#ifdef FEATURE_DISTRO_AGNOSTIC_SSL
+extern void InitializeOpenSSLShim();
+#endif
+
 int32_t CryptoNative_EnsureOpenSslInitialized()
 {
     // If portable then decide which OpenSSL we are, and call the right one.
     // If 1.0, call the 1.0 one.
     // Otherwise call the 1.1 one.
 #ifdef FEATURE_DISTRO_AGNOSTIC_SSL
+    InitializeOpenSSLShim();
+
     if (API_EXISTS(SSL_state))
     {
         return EnsureOpenSsl10Initialized();
