@@ -12,7 +12,7 @@
 // This can be revisited after we drop support for 10.12.
 
 // "1" is not a valid pointer on macOS
-static constexpr OSStatus(*UninitializedProtoPtr)(SSLContextRef context, CFArrayRef protocols) = (OSStatus(*)(SSLContextRef, CFArrayRef))1;
+#define UninitializedProtoPtr (OSStatus(*)(SSLContextRef, CFArrayRef))1;
 
 static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = UninitializedProtoPtr;
 static OSStatus (*SSLCopyALPNProtocolsPtr)(SSLContextRef context, CFArrayRef* protocols) = UninitializedProtoPtr;
