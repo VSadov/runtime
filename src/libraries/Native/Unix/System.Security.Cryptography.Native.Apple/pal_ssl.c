@@ -11,7 +11,7 @@
 // For that reason we use function pointers instead of direct call.
 // This can be revisited after we drop support for 10.12.
 
-static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = NULL;
+static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = (OSStatus(*)(SSLContextRef, CFArrayRef))1;
 static OSStatus (*SSLCopyALPNProtocolsPtr)(SSLContextRef context, CFArrayRef* protocols) = NULL;
 // end of ALPN.
 
@@ -199,12 +199,10 @@ int32_t AppleCryptoNative_SslSetTargetName(SSLContextRef sslContext,
     return *pOSStatus == noErr;
 }
 
-static bool InitializeAppleCryptoSslShim()
+static void InitializeAppleCryptoSslShim()
 {
     SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
     SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
-
-    return !!SSLSetALPNProtocolsPtr;
 }
 
 int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
@@ -214,8 +212,12 @@ int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
     if (sslContext == NULL || protocols == NULL || pOSStatus == NULL)
         return -1;
 
-    static bool initializedShim = InitializeAppleCryptoSslShim();
-    if (!initializedShim)
+    if (SSLSetALPNProtocolsPtr == (OSStatus(*)(SSLContextRef, CFArrayRef))1)
+    {
+        InitializeAppleCryptoSslShim();
+    }
+
+    if (!SSLSetALPNProtocolsPtr)
     {
         // not available.
         *pOSStatus = 0;
