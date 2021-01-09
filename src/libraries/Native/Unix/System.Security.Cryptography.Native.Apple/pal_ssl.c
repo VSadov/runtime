@@ -11,11 +11,8 @@
 // For that reason we use function pointers instead of direct call.
 // This can be revisited after we drop support for 10.12.
 
-// "1" is not a valid pointer on macOS
-#define UninitializedProtoPtr (OSStatus(*)(SSLContextRef, CFArrayRef))1
-
-static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = UninitializedProtoPtr;
-static OSStatus (*SSLCopyALPNProtocolsPtr)(SSLContextRef context, CFArrayRef* protocols) = UninitializedProtoPtr;
+static OSStatus (*SSLSetALPNProtocolsPtr)(SSLContextRef context, CFArrayRef protocols) = (OSStatus(*)(SSLContextRef, CFArrayRef))1;
+static OSStatus (*SSLCopyALPNProtocolsPtr)(SSLContextRef context, CFArrayRef* protocols) = (OSStatus(*)(SSLContextRef, CFArrayRef*))1;
 // end of ALPN.
 
 SSLContextRef AppleCryptoNative_SslCreateContext(int32_t isServer)
@@ -202,12 +199,6 @@ int32_t AppleCryptoNative_SslSetTargetName(SSLContextRef sslContext,
     return *pOSStatus == noErr;
 }
 
-static void InitializeAppleCryptoSslShim()
-{
-    SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
-    SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
-}
-
 int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
                                                         CFArrayRef protocols,
                                                         int32_t* pOSStatus)
@@ -215,10 +206,9 @@ int32_t AppleCryptoNative_SSLSetALPNProtocols(SSLContextRef sslContext,
     if (sslContext == NULL || protocols == NULL || pOSStatus == NULL)
         return -1;
 
-    if (SSLSetALPNProtocolsPtr == UninitializedProtoPtr ||
-        SSLCopyALPNProtocolsPtr == UninitializedProtoPtr)
+    if (SSLSetALPNProtocolsPtr == (OSStatus(*)(SSLContextRef, CFArrayRef))1)
     {
-        InitializeAppleCryptoSslShim();
+        SSLSetALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef))dlsym(RTLD_DEFAULT, "SSLSetALPNProtocols");
     }
 
     if (!SSLSetALPNProtocolsPtr)
@@ -237,8 +227,13 @@ int32_t AppleCryptoNative_SslGetAlpnSelected(SSLContextRef sslContext, CFDataRef
     if (sslContext == NULL || protocol == NULL)
         return -1;
 
+    if (SSLCopyALPNProtocolsPtr == (OSStatus(*)(SSLContextRef, CFArrayRef*))1)
+    {
+        SSLCopyALPNProtocolsPtr = (OSStatus(*)(SSLContextRef, CFArrayRef*))dlsym(RTLD_DEFAULT, "SSLCopyALPNProtocols");
+    }
+
     *protocol = NULL;
-    if (!SSLCopyALPNProtocolsPtr)
+    if (SSLCopyALPNProtocolsPtr)
     {
         // not available.
         return 0;
