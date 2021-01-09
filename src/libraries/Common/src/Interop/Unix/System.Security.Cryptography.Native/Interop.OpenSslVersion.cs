@@ -7,6 +7,11 @@ internal static partial class Interop
 {
     internal static partial class OpenSsl
     {
+        static OpenSsl()
+        {
+            Interop.CryptoInitializer.Initialize();
+        }
+
         [DllImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_OpenSslVersionNumber")]
         internal static extern long OpenSslVersionNumber();
     }
