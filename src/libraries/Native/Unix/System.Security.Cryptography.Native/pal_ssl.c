@@ -109,10 +109,8 @@ static void DetectCiphersuiteConfiguration()
     SSL_CTX_free(ctx);
 }
 
-void CryptoNative_EnsureLibSslInitialized()
+void EnsureLibSslInitialized()
 {
-    CryptoNative_EnsureOpenSslInitialized();
-
     // If portable, call the 1.0 initializer when needed.
     // If 1.0, call it statically.
     // In 1.1 no action is required, since EnsureOpenSslInitialized does both libraries.

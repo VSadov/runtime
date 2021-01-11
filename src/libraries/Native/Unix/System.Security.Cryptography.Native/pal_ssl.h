@@ -120,10 +120,6 @@ typedef int32_t (*SslCtxSetAlpnCallback)(SSL* ssl,
     const uint8_t* in,
     uint32_t inlen,
     void* arg);
-/*
-Ensures that libssl is correctly initialized and ready to use.
-*/
-PALEXPORT void CryptoNative_EnsureLibSslInitialized(void);
 
 /*
 Shims the SSLv23_method method.
