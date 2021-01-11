@@ -1334,6 +1334,6 @@ int32_t CryptoNative_EnsureOpenSslInitialized()
     result = EnsureOpenSsl11Initialized();
 #endif
 
-    EnsureLibSslInitialized()
+    EnsureLibSslInitialized();
     return result;
 }
