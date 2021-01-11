@@ -121,6 +121,8 @@ typedef int32_t (*SslCtxSetAlpnCallback)(SSL* ssl,
     uint32_t inlen,
     void* arg);
 
+void EnsureLibSslInitialized(void);
+
 /*
 Shims the SSLv23_method method.
 
