@@ -29,8 +29,6 @@ c_static_assert(PAL_SSL_ERROR_ZERO_RETURN == SSL_ERROR_ZERO_RETURN);
     "ECDHE-RSA-AES256-SHA384:" \
     "ECDHE-RSA-AES128-SHA256:" \
 
-int32_t CryptoNative_EnsureOpenSslInitialized(void);
-
 #ifdef NEED_OPENSSL_1_0
 static void EnsureLibSsl10Initialized()
 {
@@ -109,10 +107,8 @@ static void DetectCiphersuiteConfiguration()
     SSL_CTX_free(ctx);
 }
 
-void CryptoNative_EnsureLibSslInitialized()
+void EnsureLibSslInitialized()
 {
-    CryptoNative_EnsureOpenSslInitialized();
-
     // If portable, call the 1.0 initializer when needed.
     // If 1.0, call it statically.
     // In 1.1 no action is required, since EnsureOpenSslInitialized does both libraries.

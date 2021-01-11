@@ -234,8 +234,6 @@
              Link="Common\Interop\Unix\Interop.Libraries.cs" />
     <Compile Include="$(CommonPath)Interop\Unix\Interop.Errors.cs"
              Link="Common\Interop\Unix\Interop.Errors.cs" />
-    <Compile Include="$(CommonPath)Interop\Unix\System.Net.Security.Native\Interop.Initialization.cs"
-             Link="Common\Interop\Unix\System.Net.Security.Native\Interop.Initialization.cs" />
     <Compile Include="$(CommonPath)Interop\Unix\System.Net.Security.Native\Interop.GssApiException.cs"
              Link="Common\Interop\Unix\System.Net.Security.Native\Interop.GssApiException.cs" />
     <Compile Include="$(CommonPath)Interop\Unix\System.Net.Security.Native\Interop.GssBuffer.cs"

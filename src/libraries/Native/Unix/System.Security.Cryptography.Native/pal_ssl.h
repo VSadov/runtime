@@ -123,7 +123,7 @@ typedef int32_t (*SslCtxSetAlpnCallback)(SSL* ssl,
 /*
 Ensures that libssl is correctly initialized and ready to use.
 */
-PALEXPORT void CryptoNative_EnsureLibSslInitialized(void);
+void EnsureLibSslInitialized(void);
 
 /*
 Shims the SSLv23_method method.

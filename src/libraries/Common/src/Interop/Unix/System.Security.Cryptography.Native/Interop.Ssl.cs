@@ -18,9 +18,6 @@ internal static partial class Interop
         internal const int SSL_TLSEXT_ERR_ALERT_FATAL = 2;
         internal const int SSL_TLSEXT_ERR_NOACK = 3;
 
-        [DllImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_EnsureLibSslInitialized")]
-        internal static extern void EnsureLibSslInitialized();
-
         [DllImport(Libraries.CryptoNative, EntryPoint = "CryptoNative_SslV2_3Method")]
         internal static extern IntPtr SslV2_3Method();
 

@@ -5,6 +5,7 @@
 #include "pal_types.h"
 #include "pal_utilities.h"
 #include "pal_safecrt.h"
+#include "pal_ssl.h"
 #include "openssl.h"
 
 #ifdef FEATURE_DISTRO_AGNOSTIC_SSL
@@ -1311,6 +1312,8 @@ static int32_t EnsureOpenSsl11Initialized()
 
 int32_t CryptoNative_EnsureOpenSslInitialized()
 {
+    int32_t result;
+
     // If portable then decide which OpenSSL we are, and call the right one.
     // If 1.0, call the 1.0 one.
     // Otherwise call the 1.1 one.
@@ -1319,15 +1322,18 @@ int32_t CryptoNative_EnsureOpenSslInitialized()
 
     if (API_EXISTS(SSL_state))
     {
-        return EnsureOpenSsl10Initialized();
+        result = EnsureOpenSsl10Initialized();
     }
     else
     {
-        return EnsureOpenSsl11Initialized();
+        result = EnsureOpenSsl11Initialized();
     }
 #elif OPENSSL_VERSION_NUMBER < OPENSSL_VERSION_1_1_0_RTM
-    return EnsureOpenSsl10Initialized();
+    result = EnsureOpenSsl10Initialized();
 #else
-    return EnsureOpenSsl11Initialized();
+    result = EnsureOpenSsl11Initialized();
 #endif
+
+    EnsureLibSslInitialized();
+    return result;
 }
