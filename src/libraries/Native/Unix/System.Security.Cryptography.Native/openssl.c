@@ -5,7 +5,6 @@
 #include "pal_types.h"
 #include "pal_utilities.h"
 #include "pal_safecrt.h"
-#include "pal_ssl.h"
 #include "openssl.h"
 
 #ifdef FEATURE_DISTRO_AGNOSTIC_SSL
@@ -1309,6 +1308,8 @@ static int32_t EnsureOpenSsl11Initialized()
 }
 
 #endif
+
+int32_t EnsureLibSslInitialized(void);
 
 int32_t CryptoNative_EnsureOpenSslInitialized()
 {
