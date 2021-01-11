@@ -1309,7 +1309,7 @@ static int32_t EnsureOpenSsl11Initialized()
 
 #endif
 
-int32_t EnsureLibSslInitialized(void);
+void EnsureLibSslInitialized(void);
 
 int32_t CryptoNative_EnsureOpenSslInitialized()
 {
