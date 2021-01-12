@@ -37,7 +37,7 @@ namespace Microsoft.NET.HostModel.Tests
             // attempt to remove signature data.
             // no-op if the file is not signed (it should not be)
             // fail if the file structure is malformed
-            Command.Create($"/usr/bin/codesign_allocate -i {path} -o {path} -r")
+            Command.Create("/usr/bin/codesign_allocate", $"-i {path} -o {path} -r")
                 .CaptureStdErr()
                 .CaptureStdOut()
                 .Execute()
