@@ -29,7 +29,7 @@ FOR_ALL_OPENSSL_FUNCTIONS
 // x.x.x, considering the max number of decimal digits for each component
 #define MaxVersionStringLength 32
 
- static volatile void* libssl = NULL;
+ static void* libssl = NULL;
 
 #ifdef __APPLE__
 #define DYLIBNAME_PREFIX "libssl."
