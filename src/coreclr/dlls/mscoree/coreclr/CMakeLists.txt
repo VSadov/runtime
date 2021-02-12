@@ -1,3 +1,9 @@
+
+add_library_clr(coreclr_static
+    STATIC
+    ${CLR_SOURCES}
+)
+
 if (CLR_CMAKE_TARGET_WIN32)
     preprocess_file(${DEF_SOURCES} ${CMAKE_CURRENT_BINARY_DIR}/coreclr.def)
 
@@ -61,11 +67,6 @@ add_definitions(-DFX_VER_INTERNALNAME_STR=CoreCLR.dll)
 
 add_library_clr(coreclr
     SHARED
-    ${CLR_SOURCES}
-)
-
-add_library_clr(coreclr_static
-    STATIC
     ${CLR_SOURCES}
 )
 
@@ -221,9 +222,6 @@ endif(CLR_CMAKE_TARGET_WIN32)
 
 # add the install targets
 install_clr(TARGETS coreclr ADDITIONAL_DESTINATIONS sharedFramework)
-
-# publish coreclr_static lib
-_install(TARGETS coreclr_static DESTINATION lib)
 
 # Enable profile guided optimization
 add_pgo(coreclr)

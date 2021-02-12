@@ -140,6 +140,31 @@ handle_arguments_local() {
         paltests|-paltests)
             __BuildPALTests=1
             ;;
+
+        hostver|-hostver)
+            __host_ver="$2"
+            __ShiftArgs=1
+            ;;
+
+        apphostver|-apphostver)
+            __apphost_ver="$2"
+            __ShiftArgs=1
+            ;;
+
+        fxrver|-fxrver)
+            __fxr_ver="$2"
+            __ShiftArgs=1
+            ;;
+
+        policyver|-policyver)
+            __policy_ver="$2"
+            __ShiftArgs=1
+            ;;
+
+        commithash|-commithash)
+            __commit_hash="$2"
+            __ShiftArgs=1
+            ;;
         *)
             __UnprocessedBuildArgs="$__UnprocessedBuildArgs $1"
             ;;
@@ -195,6 +220,11 @@ __CMakeArgs=""
 __BuildPALTests=0
 __BuildAllJits=1
 __BuildRuntime=1
+__host_ver=""
+__apphost_ver=""
+__policy_ver=""
+__fxr_ver=""
+__commit_hash=""
 
 source "$__ProjectRoot"/_build-commons.sh
 
@@ -249,6 +279,14 @@ restore_optdata
 __CMakeArgs="-DCLR_CMAKE_PGO_INSTRUMENT=$__PgoInstrument -DCLR_CMAKE_OPTDATA_PATH=$__PgoOptDataPath -DCLR_CMAKE_PGO_OPTIMIZE=$__PgoOptimize $__CMakeArgs"
 __CMakeArgs="-DCLR_CMAKE_BUILD_SUBSET_JIT=$__BuildJit -DCLR_CMAKE_BUILD_SUBSET_ALLJITS=$__BuildAllJits -DCLR_CMAKE_BUILD_SUBSET_RUNTIME=$__BuildRuntime $__CMakeArgs"
 __CMakeArgs="-DCLR_CMAKE_BUILD_TESTS=$__BuildPALTests $__CMakeArgs"
+
+__CMakeArgs="-DCLI_CMAKE_HOST_VER=$__host_ver -DCLI_CMAKE_COMMON_HOST_VER=$__apphost_ver -DCLI_CMAKE_HOST_FXR_VER=$__fxr_ver $__CMakeArgs"
+__CMakeArgs="-DCLI_CMAKE_HOST_POLICY_VER=$__policy_ver -DCLI_CMAKE_PKG_RID=$__DistroRid -DCLI_CMAKE_COMMIT_HASH=$__commit_hash $__CMakeArgs"
+__CMakeArgs="-DFEATURE_DISTRO_AGNOSTIC_SSL=$__PortableBuild $__CMakeArgs"
+
+if [[ "$__PortableBuild" == 1 ]]; then
+    __CMakeArgs="-DCLI_CMAKE_PORTABLE_BUILD=1 $__CMakeArgs"
+fi
 
 if [[ "$__SkipConfigure" == 0 && "$__CodeCoverage" == 1 ]]; then
     __CMakeArgs="-DCLR_CMAKE_ENABLE_CODE_COVERAGE=1 $__CMakeArgs"

@@ -759,7 +759,6 @@ if(CLR_CMAKE_TARGET_ARCH_AMD64)
     )
 elseif(CLR_CMAKE_TARGET_ARCH_I386)
     set(VM_SOURCES_DAC_AND_WKS_ARCH
-        gcdecode.cpp
         exinfo.cpp
         ${ARCH_SOURCES_DIR}/cgenx86.cpp
         ${ARCH_SOURCES_DIR}/excepx86.cpp
@@ -893,6 +892,15 @@ set (VM_SOURCES_WKS_SPECIAL
     codeman.cpp
     ceemain.cpp
 )
+
+if(CLR_CMAKE_TARGET_ARCH_I386)
+    list(APPEND VM_SOURCES_DAC
+        gcdecode.cpp
+    )
+    list(APPEND VM_SOURCES_WKS_SPECIAL
+        gcdecode.cpp
+    )
+endif()
 
 convert_to_absolute_path(VM_SOURCES_WKS ${VM_SOURCES_WKS})
 convert_to_absolute_path(VM_SOURCES_WKS_ARCH_ASM ${VM_SOURCES_WKS_ARCH_ASM})

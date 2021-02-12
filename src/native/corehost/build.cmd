@@ -44,7 +44,6 @@ if /i [%1] == [commit]      (set __CommitSha=%2&&shift&&shift&goto Arg_Loop)
 if /i [%1] == [incremental-native-build] ( set __IncrementalNativeBuild=1&&shift&goto Arg_Loop)
 if /i [%1] == [rootDir]     ( set __rootDir=%2&&shift&&shift&goto Arg_Loop)
 if /i [%1] == [coreclrartifacts]  (set __CoreClrArtifacts=%2&&shift&&shift&goto Arg_Loop)
-if /i [%1] == [nativelibsartifacts]  (set __NativeLibsArtifacts=%2&&shift&&shift&goto Arg_Loop)
 if /i [%1] == [ninja] (set __Ninja=1)
 if /i [%1] == [runtimeflavor]  (set __RuntimeFlavor=%2&&shift&&shift&goto Arg_Loop)
 if /i [%1] == [runtimeconfiguration]  (set __RuntimeConfiguration=%2&&shift&&shift&goto Arg_Loop)
@@ -154,7 +153,6 @@ echo "Computed RID for native build is %cm_BaseRid%"
 
 set __ExtraCmakeParams=%__ExtraCmakeParams% "-DCLI_CMAKE_HOST_VER=%__HostVersion%" "-DCLI_CMAKE_COMMON_HOST_VER=%__AppHostVersion%" "-DCLI_CMAKE_HOST_FXR_VER=%__HostFxrVersion%"
 set __ExtraCmakeParams=%__ExtraCmakeParams% "-DCLI_CMAKE_HOST_POLICY_VER=%__HostPolicyVersion%" "-DCLI_CMAKE_PKG_RID=%cm_BaseRid%" "-DCLI_CMAKE_COMMIT_HASH=%__CommitSha%"
-set __ExtraCmakeParams=%__ExtraCmakeParams% "-DCORECLR_ARTIFACTS=%__CoreClrArtifacts% " "-DRUNTIME_CONFIG=%__RuntimeConfiguration%" "-DNATIVE_LIBS_ARTIFACTS=%__NativeLibsArtifacts%"
 set __ExtraCmakeParams=%__ExtraCmakeParams% "-DRUNTIME_FLAVOR=%__RuntimeFlavor% "
 set __ExtraCmakeParams=%__ExtraCmakeParams% "-DCLI_CMAKE_RESOURCE_DIR=%__ResourcesDir%" "-DCMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE%"
 
@@ -174,6 +172,14 @@ if [%__Ninja%] == [1] (
     set __generatorArgs=-j
 ) else (
     set __generatorArgs=/p:Platform=%__BuildArch% /p:PlatformToolset="%__PlatformToolset%" -noWarn:MSB8065
+)
+
+if "%__RuntimeFlavor%" NEQ "Mono" (
+    echo Copying "%__CoreClrArtifacts%\corehost\*.*"  to "%__CMakeBinDir%/corehost/"
+    xcopy /S /Y /I "%__CoreClrArtifacts%\corehost\*.*"  "%__CMakeBinDir%/corehost/"
+    IF ERRORLEVEL 1 (
+        goto :Failure
+    )
 )
 
 call "%CMakePath%" --build "%__IntermediatesDir%" --target install --config %CMAKE_BUILD_TYPE% -- %__generatorArgs%

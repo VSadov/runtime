@@ -92,6 +92,7 @@ set __CrossOS=0
 set __PgoOptDataPath=
 set __CMakeArgs=
 set __Ninja=0
+set __PortableBuild=0
 
 @REM CMD has a nasty habit of eating "=" on the argument list, so passing:
 @REM    -priority=1
@@ -121,6 +122,13 @@ if /i "%1" == "-checked"             (set __BuildTypeChecked=1&set processedArgs
 if /i "%1" == "-release"             (set __BuildTypeRelease=1&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
 
 if /i "%1" == "-ci"                  (set __ArcadeScriptArgs="-ci"&set __ErrMsgPrefix=##vso[task.logissue type=error]&set processedArgs=!processedArgs! %1&shift&goto Arg_Loop)
+
+if /i "%1" == "-rid"         (set __TargetRid=%2&        set processedArgs=!processedArgs! %1=%2&shift&shift&goto Arg_Loop)
+if /i "%1" == "-hostver"     (set __HostVersion=%2&      set processedArgs=!processedArgs! %1=%2&shift&shift&goto Arg_Loop)
+if /i "%1" == "-apphostver"  (set __AppHostVersion=%2&   set processedArgs=!processedArgs! %1=%2&shift&shift&goto Arg_Loop)
+if /i "%1" == "-fxrver"      (set __HostFxrVersion=%2&   set processedArgs=!processedArgs! %1=%2&shift&shift&goto Arg_Loop)
+if /i "%1" == "-policyver"   (set __HostPolicyVersion=%2&set processedArgs=!processedArgs! %1=%2&shift&shift&goto Arg_Loop)
+if /i "%1" == "-commithash"  (set __CommitSha=%2&        set processedArgs=!processedArgs! %1=%2&shift&shift&goto Arg_Loop)
 
 REM TODO these are deprecated remove them eventually
 REM don't add more, use the - syntax instead
@@ -625,6 +633,18 @@ if %__BuildNative% EQU 1 (
     if %__Ninja% EQU 1 (
         set __ExtraCmakeArgs="-DCMAKE_BUILD_TYPE=!__BuildType!"
     )
+
+    if /i "%__BuildArch%" == "x64"     (set cm_BaseRid=win7)
+    if /i "%__BuildArch%" == "x86"     (set cm_BaseRid=win7)
+    if /i "%__BuildArch%" == "arm"     (set cm_BaseRid=win8)
+    if /i "%__BuildArch%" == "arm64"   (set cm_BaseRid=win10)
+    :: Form the base RID to be used if we are doing a portable build
+    if /i "%__PortableBuild%" == "1"   (set cm_BaseRid=win)
+
+    set cm_BaseRid=!cm_BaseRid!-!__BuildArch!
+    set __ExtraCmakeArgs=!__ExtraCmakeArgs! "-DCLI_CMAKE_HOST_VER=%__HostVersion%" "-DCLI_CMAKE_COMMON_HOST_VER=%__AppHostVersion%" "-DCLI_CMAKE_HOST_FXR_VER=%__HostFxrVersion%"
+    set __ExtraCmakeArgs=!__ExtraCmakeArgs! "-DCLI_CMAKE_HOST_POLICY_VER=%__HostPolicyVersion%" "-DCLI_CMAKE_PKG_RID=!cm_BaseRid!" "-DCLI_CMAKE_COMMIT_HASH=%__CommitSha%"
+    set __ExtraCmakeArgs=!__ExtraCmakeArgs! "-DCLI_CMAKE_RESOURCE_DIR=%__ResourcesDir%"
 
     set __ExtraCmakeArgs=!__ExtraCmakeArgs! !___CrossBuildDefine! %__CMakeClrBuildSubsetArgs% "-DCLR_CMAKE_PGO_INSTRUMENT=%__PgoInstrument%" "-DCLR_CMAKE_OPTDATA_PATH=%__PgoOptDataPath%" "-DCLR_CMAKE_PGO_OPTIMIZE=%__PgoOptimize%" %__CMakeArgs%
     call "%__RepoRootDir%\eng\native\gen-buildsys.cmd" "%__ProjectDir%" "%__IntermediatesDir%" %__VSVersion% %__BuildArch% !__ExtraCmakeArgs!

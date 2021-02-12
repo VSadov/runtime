@@ -5,7 +5,11 @@
   </PropertyGroup>
 
   <Target Name="BuildRuntime"
-          AfterTargets="Build">
+          AfterTargets="Build"
+          DependsOnTargets="
+              GetLatestCommitHash;
+              GetProductVersions;">
+
     <ItemGroup>
       <_CoreClrBuildArg Condition="'$(TargetArchitecture)' != ''" Include="-$(TargetArchitecture)" />
       <_CoreClrBuildArg Condition="!$([MSBuild]::IsOsPlatform(Windows)) and '$(CMakeArgs)' != ''" Include="$(CMakeArgs)" />
@@ -34,6 +38,13 @@
       <_CoreClrBuildArg Condition="'$(PgoInstrument)' == 'true'" Include="-pgoinstrument" />
       <_CoreClrBuildArg Condition="'$(NoPgoOptimize)' == 'true' or '$(PgoInstrument)' == 'true'" Include="-nopgooptimize" />
       <_CoreClrBuildArg Condition="'$(OfficialBuildId)' != ''" Include="/p:OfficialBuildId=$(OfficialBuildId)" />
+
+      <_CoreClrBuildArg Condition="'$(HostVersion)' != ''" Include="-hostver &quot;$(HostVersion)&quot;" />
+      <_CoreClrBuildArg Condition="'$(AppHostVersion)' != ''" Include="-apphostver &quot;$(AppHostVersion)&quot;" />
+      <_CoreClrBuildArg Condition="'$(HostResolverVersion)' != ''" Include="-fxrver &quot;$(HostResolverVersion)&quot;" />
+      <_CoreClrBuildArg Condition="'$(HostPolicyVersion)' != ''" Include="-policyver &quot;$(HostPolicyVersion)&quot;" />
+      <_CoreClrBuildArg Condition="'$(LatestCommit)' != ''" Include="-commithash &quot;$(LatestCommit)&quot;" />
+      <_CoreClrBuildArg Condition="$([MSBuild]::IsOsPlatform(Windows))" Include="-rid &quot;$(OutputRid)&quot;" />
     </ItemGroup>
 
     <PropertyGroup>
