@@ -174,17 +174,21 @@ if [%__Ninja%] == [1] (
     set __generatorArgs=/p:Platform=%__BuildArch% /p:PlatformToolset="%__PlatformToolset%" -noWarn:MSB8065
 )
 
-if "%__RuntimeFlavor%" NEQ "Mono" (
-    echo Copying "%__CoreClrArtifacts%\corehost\*.*"  to "%__CMakeBinDir%/corehost/"
-    xcopy /S /Y /I "%__CoreClrArtifacts%\corehost\*.*"  "%__CMakeBinDir%/corehost/"
-    IF ERRORLEVEL 1 (
-        goto :Failure
-    )
-)
-
 call "%CMakePath%" --build "%__IntermediatesDir%" --target install --config %CMAKE_BUILD_TYPE% -- %__generatorArgs%
 IF ERRORLEVEL 1 (
     goto :Failure
+)
+
+if "%__RuntimeFlavor%" NEQ "Mono" (
+    echo Copying "%__CoreClrArtifacts%\corehost\singlefilehost.exe"  "%__CMakeBinDir%/corehost/"
+    copy /B /Y "%__CoreClrArtifacts%\corehost\singlefilehost.exe"  "%__CMakeBinDir%/corehost/"
+
+    echo Copying "%__CoreClrArtifacts%\corehost\PDB\singlefilehost.pdb"  "%__CMakeBinDir%/corehost/PDB/"
+    copy /B /Y "%__CoreClrArtifacts%\corehost\PDB\singlefilehost.pdb"  "%__CMakeBinDir%/corehost/PDB/"
+
+    IF ERRORLEVEL 1 (
+        goto :Failure
+    )
 )
 
 echo Done building Native components
