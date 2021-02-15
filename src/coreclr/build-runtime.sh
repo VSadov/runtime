@@ -284,10 +284,6 @@ __CMakeArgs="-DCLI_CMAKE_HOST_VER=$__host_ver -DCLI_CMAKE_COMMON_HOST_VER=$__app
 __CMakeArgs="-DCLI_CMAKE_HOST_POLICY_VER=$__policy_ver -DCLI_CMAKE_PKG_RID=$__DistroRid -DCLI_CMAKE_COMMIT_HASH=$__commit_hash $__CMakeArgs"
 __CMakeArgs="-DFEATURE_DISTRO_AGNOSTIC_SSL=$__PortableBuild $__CMakeArgs"
 
-if [[ "$__PortableBuild" == 1 ]]; then
-    __CMakeArgs="-DCLI_CMAKE_PORTABLE_BUILD=1 $__CMakeArgs"
-fi
-
 if [[ "$__SkipConfigure" == 0 && "$__CodeCoverage" == 1 ]]; then
     __CMakeArgs="-DCLR_CMAKE_ENABLE_CODE_COVERAGE=1 $__CMakeArgs"
 fi
