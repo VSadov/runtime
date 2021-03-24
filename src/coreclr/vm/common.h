@@ -185,6 +185,8 @@ Thread* GetThread();
 Thread* GetThreaNotOk();
 Thread* GetThreadNULLOk();
 
+EXTERN_C Thread* STDCALL GetThreadHelper();
+
 void SetThread(Thread*);
 
 // This is a mechanism by which macros can make the Thread pointer available to inner scopes
