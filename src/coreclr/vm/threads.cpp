@@ -60,7 +60,7 @@ TailCallTls::TailCallTls()
 {
 }
 
-EXTERN_C Thread* STDCALL GetThreadHelper()
+Thread* STDCALL PInvokeGetThreadHelper()
 {
     return GetThreadNULLOk();
 }

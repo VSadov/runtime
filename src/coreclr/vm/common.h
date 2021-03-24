@@ -185,7 +185,7 @@ Thread* GetThread();
 Thread* GetThreaNotOk();
 Thread* GetThreadNULLOk();
 
-EXTERN_C Thread* STDCALL GetThreadHelper();
+EXTERN_C Thread* STDCALL PInvokeGetThreadHelper();
 
 void SetThread(Thread*);
 
