@@ -7505,7 +7505,7 @@ BOOL MethodTable::SanityCheck()
     if (GetNumGenericArgs() != 0)
         return (pCanonMT->GetClass() == pClass);
     else
-        return (pCanonMT == this) || IsArray();
+        return (pCanonMT == this);
 }
 
 //==========================================================================================
@@ -9368,29 +9368,25 @@ BOOL MethodTable::Validate()
 {
     LIMITED_METHOD_CONTRACT;
 
-    ASSERT_AND_CHECK(SanityCheck());
-
 #ifdef _DEBUG
     ASSERT_AND_CHECK(!m_pWriteableData.IsNull());
 
     MethodTableWriteableData *pWriteableData = m_pWriteableData.GetValue();
     DWORD dwLastVerifiedGCCnt = pWriteableData->m_dwLastVerifedGCCnt;
-    // Here we used to assert that (dwLastVerifiedGCCnt <= GCHeapUtilities::GetGCHeap()->GetGcCount()) but
-    // this is no longer true because with background gc. Since the purpose of having
-    // m_dwLastVerifedGCCnt is just to only verify the same method table once for each GC
-    // I am getting rid of the assert.
+
+    // The purpose of this check is limit expensive verification of the same method table to
+    // once per GcCount, which monotonically increases with every GC.
     if (g_pConfig->FastGCStressLevel () > 1 && dwLastVerifiedGCCnt == GCHeapUtilities::GetGCHeap()->GetGcCount())
         return TRUE;
+
 #endif //_DEBUG
 
-    if (IsArray())
+    if (!SanityCheck())
     {
-        if (!SanityCheck())
-        {
-            ASSERT_AND_CHECK(!"Detected use of a corrupted OBJECTREF. Possible GC hole.");
-        }
+        ASSERT_AND_CHECK(!"Detected use of a corrupted OBJECTREF. Possible GC hole.");
     }
-    else if (!IsCanonicalMethodTable())
+
+    if (!IsCanonicalMethodTable())
     {
         // Non-canonical method tables has to have non-empty instantiation
         if (GetInstantiation().IsEmpty())
