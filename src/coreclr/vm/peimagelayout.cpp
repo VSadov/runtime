@@ -13,6 +13,13 @@
 #include "amsi.h"
 #endif
 
+#if defined(CORECLR_EMBEDDED)
+extern "C"
+{
+#include "../../../libraries/Native/AnyOS/zlib/pal_zlib.h"
+}
+#endif
+
 #ifndef DACCESS_COMPILE
 PEImageLayout* PEImageLayout::CreateFlat(const void *flat, COUNT_T size,PEImage* pOwner)
 {
@@ -729,10 +736,11 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
         m_FileView.Assign(view);
         addr = (LPVOID)((size_t)view + offset - mapBegin);
 
-        INT64 uncompressedSize = pOwner->GetSize();
+        INT64 uncompressedSize = pOwner->GetUncompressedSize();
         if (uncompressedSize > 0)
         {
-            HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, size >> 32, (DWORD)size, NULL);
+#if defined(CORECLR_EMBEDDED)
+            HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, uncompressedSize >> 32, (DWORD)uncompressedSize, NULL);
             if (anonMap == NULL)
                 ThrowLastError();
 
@@ -740,13 +748,34 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
             if (anonView == NULL)
                 ThrowLastError();
 
-            // read into anonymous mapping (will decompress here)
-            memcpy(anonView, addr, size);
+            //NB: PE cannot be larger than 4GB, conversions are ok
+            PAL_ZStream zStream;
+            zStream.nextIn = (uint8_t*)addr;
+            zStream.availIn = (uint32_t)size;
+            zStream.nextOut = (uint8_t*)anonView;
+            zStream.availOut = (uint32_t)uncompressedSize;
 
-            // Replace file handles with handles to anonymous map. This will release the originals.
+            // Legal values are 8..15 and -8..-15. 15 is the window size,
+            // negative val causes deflate to produce raw deflate data (no zlib header).
+            const int Deflate_DefaultWindowBits = -15;
+            if (CompressionNative_InflateInit2_(&zStream, Deflate_DefaultWindowBits) != PAL_Z_OK)
+                ThrowLastError();
+
+            int ret = CompressionNative_Inflate(&zStream, PAL_Z_NOFLUSH);
+            CompressionNative_InflateEnd(&zStream);
+            if (ret < 0)
+                ThrowLastError();
+
             addr = anonView;
+            size = uncompressedSize;
+            // Replace file handles with handles to anonymous map. This will release the handles to the source view and map.
             m_FileView.Assign(anonView);
             m_FileMap.Assign(anonMap);
+
+#else
+            _ASSERTE(!"Failure extracting contents of the application bundle. Compressed files used with a standalone (not singlefile) apphost.");
+            ThrowLastError();
+#endif
         }
     }
 
