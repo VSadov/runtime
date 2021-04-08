@@ -419,12 +419,17 @@ ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundl
 
     DWORD mapAccess;
     DWORD viewAccess;
-    if (isInBundle && (HasNativeHeader() || HasReadyToRunHeader()))
+    if (isInBundle && (source->HasNativeHeader() || source->HasReadyToRunHeader()))
     {
         // in bundle we may want to enable execution if the image contains R2R sections
         // so must ensure the mapping is compatible with that
         mapAccess = PAGE_EXECUTE_READWRITE;
+
+#if defined(CROSSGEN_COMPILE) || defined(TARGET_UNIX)
+        viewAccess = FILE_MAP_ALL_ACCESS;
+#else
         viewAccess = FILE_MAP_EXECUTE | FILE_MAP_WRITE;
+#endif
     }
     else
     {
