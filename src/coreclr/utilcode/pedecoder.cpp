@@ -1773,7 +1773,7 @@ void PEDecoder::LayoutILOnly(void *base) const
     for (section = sectionStart; section < sectionEnd; section++)
     {
         // Add appropriate page protection.
-#if defined(CROSSGEN_COMPILE) || defined(TARGET_UNIX)
+#if defined(CROSSGEN_COMPILE)
         if (section->Characteristics & IMAGE_SCN_MEM_WRITE)
             continue;
 

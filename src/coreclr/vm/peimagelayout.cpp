@@ -417,9 +417,14 @@ ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundl
         EEFileLoadException::Throw(GetPath(), COR_E_BADIMAGEFORMAT);
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
+    bool makeExecutable = isInBundle &&
+        source->HasCorHeader() &&
+        (source->HasNativeHeader() || source->HasReadyToRunHeader()) &&
+        g_fAllowNativeImages;
+    
     DWORD mapAccess;
     DWORD viewAccess;
-    if (isInBundle && (source->HasNativeHeader() || source->HasReadyToRunHeader()))
+    if (makeExecutable)
     {
         // in bundle we may want to enable execution if the image contains R2R sections
         // so must ensure the mapping is compatible with that
@@ -460,11 +465,9 @@ ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundl
     {
         ApplyBaseRelocations();
     }
-#elif !defined(TARGET_UNIX)
-    if (isInBundle &&
-        HasCorHeader() &&
-        (HasNativeHeader() || HasReadyToRunHeader()) &&
-        g_fAllowNativeImages)
+
+#else
+    if (makeExecutable)
     {
         if (!IsNativeMachineFormat())
             ThrowHR(COR_E_BADIMAGEFORMAT);
@@ -473,8 +476,8 @@ ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundl
         // otherwise R2R will be disabled for this image.
         ApplyBaseRelocations();
 
-        // Check if there is a static function table and install it. (except x86)
-#if !defined(TARGET_X86)
+        // Check if there is a static function table and install it. (Windows only, except x86)
+#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
         COUNT_T cbSize = 0;
         PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
         DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
