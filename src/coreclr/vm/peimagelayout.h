@@ -41,7 +41,6 @@ public:
         LAYOUT_MAPPED =1,
         LAYOUT_FLAT =2,
         LAYOUT_LOADED =4,
-        LAYOUT_LOADED_FOR_INTROSPECTION =8,
         LAYOUT_ANY =0xf
     };
 
