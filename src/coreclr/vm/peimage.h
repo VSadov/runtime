@@ -127,7 +127,6 @@ public:
     void AddToHashMap();
 
     void   Load();
-    void   SetLoadedHMODULE(HMODULE hMod);
     void   LoadNoMetaData();
     void   LoadNoFile();
     void   LoadFromMapped();

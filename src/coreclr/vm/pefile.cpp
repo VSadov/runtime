@@ -319,26 +319,6 @@ void PEFile::LoadLibrary(BOOL allowNativeSkip/*=TRUE*/) // if allowNativeSkip==F
     RETURN;
 }
 
-void PEFile::SetLoadedHMODULE(HMODULE hMod)
-{
-    CONTRACT_VOID
-    {
-        INSTANCE_CHECK;
-        PRECONDITION(CheckPointer(hMod));
-        POSTCONDITION(CheckLoaded());
-        THROWS;
-        GC_TRIGGERS;
-        MODE_ANY;
-        INJECT_FAULT(COMPlusThrowOM(););
-    }
-    CONTRACT_END;
-
-    // See if the image is an internal PEImage.
-    GetILimage()->SetLoadedHMODULE(hMod);
-
-    RETURN;
-}
-
 /* static */
 void PEFile::DefineEmitScope(
     GUID   iid,

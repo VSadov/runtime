@@ -20,7 +20,7 @@ PEImageLayout* PEImageLayout::CreateFlat(const void *flat, COUNT_T size,PEImage*
     return new RawImageLayout(flat,size,pOwner);
 }
 
-
+#ifndef TARGET_UNIX
 PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule,PEImage* pOwner, BOOL bTakeOwnership)
 {
     CONTRACTL
@@ -32,6 +32,7 @@ PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule,PEImage* pOwner,
     CONTRACTL_END;
     return new RawImageLayout(hModule,pOwner,bTakeOwnership,TRUE);
 }
+#endif
 
 PEImageLayout* PEImageLayout::LoadFromFlat(PEImageLayout* pflatimage)
 {
@@ -357,6 +358,7 @@ RawImageLayout::RawImageLayout(const void *flat, COUNT_T size, PEImage* pOwner)
     }
     Init((void*)flat,size);
 }
+
 RawImageLayout::RawImageLayout(const void *mapped, PEImage* pOwner, BOOL bTakeOwnership, BOOL bFixedUp)
 {
     CONTRACTL

@@ -1232,18 +1232,6 @@ void PEImage::Load()
     }
 }
 
-void PEImage::SetLoadedHMODULE(HMODULE hMod)
-{
-    WRAPPER_NO_CONTRACT;
-    SimpleWriteLockHolder lock(m_pLayoutLock);
-    if(m_pLayouts[IMAGE_LOADED])
-    {
-        _ASSERTE(m_pLayouts[IMAGE_LOADED]->GetBase()==hMod);
-        return;
-    }
-    SetLayout(IMAGE_LOADED,PEImageLayout::CreateFromHMODULE(hMod,this,TRUE));
-}
-
 void PEImage::LoadFromMapped()
 {
     STANDARD_VM_CONTRACT;

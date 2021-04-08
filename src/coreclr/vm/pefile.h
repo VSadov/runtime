@@ -131,9 +131,6 @@ public:
 
 
 private:
-    // For use inside LoadLibrary callback
-    void SetLoadedHMODULE(HMODULE hMod);
-
     // DO NOT USE !!! this is to be removed when we move to new fusion binding API
     friend class DomainAssembly;
 
