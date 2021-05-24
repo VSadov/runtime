@@ -54,7 +54,7 @@ namespace bundle
         {
             m_offset_in_file = 0;
 
-#ifdef TARGET_OSX
+#ifdef TARGET_OS
             // check for universal binary container and adjust the offset accordingly
             uint32_t magic = OSSwapBigToHostInt32(((uint32_t*)base_ptr)[0]);
             if (magic == FAT_MAGIC)
