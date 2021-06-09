@@ -144,16 +144,23 @@ NativeImage *NativeImage::Open(
     NewHolder<PEImageLayout> peLoadedImage;
 
     BundleFileLocation bundleFileLocation = Bundle::ProbeAppBundle(fullPath, /*pathIsBundleRelative */ true);
+    printf("After probing \n");
+    printf("fullPath: %s \n", (LPCWSTR)fullPath);
+
     if (bundleFileLocation.IsValid())
     {
+        printf("Probe found \n");
         PEImageHolder pImage = PEImage::OpenImage(fullPath, MDInternalImport_NoCache, bundleFileLocation);
+        printf("Image opened \n");
         peLoadedImage = pImage->GetLayout(PEImageLayout::LAYOUT_MAPPED, PEImage::LAYOUT_CREATEIFNEEDED);
+        printf("After get layout \n");
     }
 
     if (peLoadedImage.IsNull())
     {
         EX_TRY
         {
+            printf("Ordinary load %s \n", (LPCWSTR)fullPath);
             peLoadedImage = PEImageLayout::LoadNative(fullPath);
         }
         EX_CATCH
