@@ -1057,6 +1057,7 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
         printf("trying to map \n");
 
         PEImageLayoutHolder pLayout(PEImageLayout::Map(this));
+        printf("after map \n");
 
         bool fMarkAnyCpuImageAsLoaded = false;
 
