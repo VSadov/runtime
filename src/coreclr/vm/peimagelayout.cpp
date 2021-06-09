@@ -629,6 +629,8 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
 
     if (m_LoadedFile == NULL)
     {
+        printf("loadPEFile gave zero\n");
+
         // For CoreCLR, try to load all files via LoadLibrary first. If LoadLibrary did not work, retry using
         // regular mapping - but not for native images.
         if (pOwner->IsTrustedNativeImage())
@@ -639,18 +641,24 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
     LOG((LF_LOADER, LL_INFO1000, "PEImage: image %S (hFile %p) mapped @ %p\n",
         (LPCWSTR) GetPath(), hFile, (void*)m_LoadedFile));
 
+    printf("before Init\n");
+
     IfFailThrow(Init((void *) m_LoadedFile));
 
+    printf("after Init\n");
     if (!HasCorHeader())
         ThrowHR(COR_E_BADIMAGEFORMAT);
 
+    printf("check for native headers\n");
     if ((HasNativeHeader() || HasReadyToRunHeader()) && g_fAllowNativeImages)
     {
         //Do base relocation for PE, if necessary.
         if (!IsNativeMachineFormat())
             ThrowHR(COR_E_BADIMAGEFORMAT);
 
+        printf("before apply relocations\n");
         ApplyBaseRelocations();
+        printf("after apply relocations\n");
         SetRelocated();
     }
 
