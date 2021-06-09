@@ -69,6 +69,8 @@ namespace
             pal::pal_clrstring(g_context->host_path, &host_path);
             const char *app_domain_friendly_name = g_context->host_mode == host_mode_t::libhost ? "clr_libhost" : "clrhost";
 
+            printf("Before creating clr \n");
+
             // Create a CoreCLR instance
             trace::verbose(_X("CoreCLR path = '%s', CoreCLR dir = '%s'"), g_context->clr_path.c_str(), g_context->clr_dir.c_str());
             auto hr = coreclr_t::create(
