@@ -117,9 +117,13 @@ PEImageLayout* PEImageLayout::Map(PEImage* pOwner)
     {
         printf("checking format\n");
         if (!pAlloc->CheckFormat())
+        {
+            printf("check format failed\n");
             ThrowHR(COR_E_BADIMAGEFORMAT);
+        }
     }
 
+    printf("Map returning\n");
     RETURN pAlloc.Extract();
 }
 
