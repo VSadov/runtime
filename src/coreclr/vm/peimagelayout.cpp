@@ -621,7 +621,11 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
 #else //!TARGET_UNIX
 
 #ifndef CROSSGEN_COMPILE
+    printf("before loadPEFile \n");
+
     m_LoadedFile = PAL_LOADLoadPEFile(hFile, offset);
+
+    printf("after loadPEFile \n");
 
     if (m_LoadedFile == NULL)
     {

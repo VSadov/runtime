@@ -920,6 +920,8 @@ PTR_PEImageLayout PEImage::GetLayout(DWORD imageLayoutMask,DWORD flags)
     WRAPPER_NO_CONTRACT;
     SUPPORTS_DAC;
 
+    printf("In GetLayout \n");
+
     PTR_PEImageLayout pRetVal;
 
 #ifndef DACCESS_COMPILE
@@ -965,6 +967,8 @@ PTR_PEImageLayout PEImage::GetLayoutInternal(DWORD imageLayoutMask,DWORD flags)
         MODE_ANY;
     }
     CONTRACTL_END;
+
+    printf("In GetLayoutInternal \n");
 
     PTR_PEImageLayout pRetVal=GetExistingLayoutInternal(imageLayoutMask);
 
@@ -1024,6 +1028,8 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
     }
     CONTRACTL_END;
 
+    printf("In CreateLayoutMapped \n");
+
     PTR_PEImageLayout pRetVal;
 
     PEImageLayout * pLoadLayout = NULL;
@@ -1034,6 +1040,8 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
         // Try to load all files via LoadLibrary first. If LoadLibrary did not work,
         // retry using regular mapping.
         HRESULT* returnDontThrow = m_bIsTrustedNativeImage ? NULL : &loadFailure;
+
+        printf("trying image load \n");
         pLoadLayout = PEImageLayout::Load(this, FALSE /* bNTSafeLoad */, returnDontThrow);
     }
 
@@ -1046,6 +1054,8 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
     }
     else if (IsFile())
     {
+        printf("trying to map \n");
+
         PEImageLayoutHolder pLayout(PEImageLayout::Map(this));
 
         bool fMarkAnyCpuImageAsLoaded = false;
@@ -1054,10 +1064,14 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
         // since LoadLibrary is needed if we are to actually load code (e.g. IJW).
         if (pLayout->HasCorHeader())
         {
+            printf("has cor header \n");
+
             // IJW images must be successfully loaded by the OS to handle
             // native dependencies, therefore they cannot be mapped.
             if (!pLayout->IsILOnly())
             {
+                printf("not il only!!! \n");
+
                 // For compat with older CoreCLR versions we will fallback to the
                 // COR_E_BADIMAGEFORMAT error code if a failure wasn't indicated.
                 loadFailure = FAILED(loadFailure) ? loadFailure : COR_E_BADIMAGEFORMAT;
@@ -1073,10 +1087,13 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
         pLayout.SuppressRelease();
 
         SetLayout(IMAGE_MAPPED,pLayout);
+        printf("setting mapped \n");
+
         if (fMarkAnyCpuImageAsLoaded)
         {
             pLayout->AddRef();
             SetLayout(IMAGE_LOADED, pLayout);
+            printf("setting loaded \n");
         }
         pRetVal=pLayout;
     }

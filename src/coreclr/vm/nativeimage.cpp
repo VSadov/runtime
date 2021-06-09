@@ -145,7 +145,7 @@ NativeImage *NativeImage::Open(
 
     BundleFileLocation bundleFileLocation = Bundle::ProbeAppBundle(fullPath, /*pathIsBundleRelative */ true);
     printf("After probing \n");
-    printf("fullPath: %s \n", (LPCWSTR)fullPath);
+    wprintf(W("fullPath %s \n"), (LPCWSTR)fullPath);
 
     if (bundleFileLocation.IsValid())
     {
@@ -160,7 +160,7 @@ NativeImage *NativeImage::Open(
     {
         EX_TRY
         {
-            printf("Ordinary load %s \n", (LPCWSTR)fullPath);
+            wprintf(W("Ordinary load %s \n"), (LPCWSTR)fullPath);
             peLoadedImage = PEImageLayout::LoadNative(fullPath);
         }
         EX_CATCH
