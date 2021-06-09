@@ -105,13 +105,17 @@ PEImageLayout* PEImageLayout::Map(PEImage* pOwner)
         LoadConverted(pOwner, /* isInBundle */ true):
         new MappedImageLayout(pOwner);
 
+    printf("got pAlloc\n");
+
     if (pAlloc->GetBase()==NULL)
     {
+        printf("pAlloc is NULL\n");
         //cross-platform or a bad image
         pAlloc = LoadConverted(pOwner);
     }
     else
     {
+        printf("checking format\n");
         if (!pAlloc->CheckFormat())
             ThrowHR(COR_E_BADIMAGEFORMAT);
     }
