@@ -1037,10 +1037,10 @@ CHECK PEDecoder::CheckCorHeader() const
     if (VAL16(pCor->MajorRuntimeVersion) == 0)
     {
         // size is 72 bytes
-        CHECK(VAL32(pCor->cb) == 72);
+        CHECK(VAL32(pCor->cb) == sizeof(IMAGE_COR20_HEADER));
 
         // all else is 0
-        for (int i = 1; i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
+        for (int i = sizeof(DWORD); i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
         {
             printf("checking %i :%i \n", i, ((DWORD*)pCor)[i]);
             CHECK(((DWORD*)pCor)[i] == 0);
