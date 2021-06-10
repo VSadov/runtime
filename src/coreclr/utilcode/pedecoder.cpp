@@ -1034,31 +1034,24 @@ CHECK PEDecoder::CheckCorHeader() const
 
     IMAGE_COR20_HEADER *pCor = GetCorHeader();
 
-    //// composite r2r images have zero-filled COR header. we will allow that.
-    //if (VAL16(pCor->MajorRuntimeVersion) == 0)
-    //{
-    //    // size is set
-    //    CHECK(VAL32(pCor->cb) == sizeof(IMAGE_COR20_HEADER));
-
-    //    // all else is 0
-    //    for (int i = 1; i < (sizeof(IMAGE_COR20_HEADER) / sizeof(DWORD)); i++)
-    //    {
-    //        printf("checking %i :%i \n", i, ((DWORD*)pCor)[i]);
-    //        // CHECK(((DWORD*)pCor)[i] == 0);
-    //    }
-
-    //    const_cast<PEDecoder*>(this)->m_flags |= FLAG_COR_CHECKED;
-    //    CHECK_OK;
-    //}
+    // composite r2r images have version 0.0 and no flags set.
+    bool compositeR2R =
+        pCor->MinorRuntimeVersion == 0 &&
+        pCor->MajorRuntimeVersion == 0 &&
+        pCor->Flags == 0;
 
     //CHECK(((ULONGLONG)pCor & 0x3)==0);
 
     // If the file is COM+ 1.0, which by definition has nothing the runtime can
     // use, or if the file requires a newer version of this engine than us,
     // it cannot be run by this engine.
-    // CHECK(VAL16(pCor->MajorRuntimeVersion) > 1 && VAL16(pCor->MajorRuntimeVersion) <= COR_VERSION_MAJOR);
+    if (!compositeR2R)
+        CHECK(VAL16(pCor->MajorRuntimeVersion) > 1 && VAL16(pCor->MajorRuntimeVersion) <= COR_VERSION_MAJOR);
 
-    CHECK(CheckDirectory(&pCor->MetaData, 0, HasNativeHeader() ? NULL_OK : NULL_NOT_OK));
+    CHECK(CheckDirectory(
+        &pCor->MetaData,
+        compositeR2R ? 0 : IMAGE_SCN_MEM_WRITE,
+        HasNativeHeader() ? NULL_OK : NULL_NOT_OK));
     CHECK(CheckDirectory(&pCor->Resources, IMAGE_SCN_MEM_WRITE, NULL_OK));
     CHECK(CheckDirectory(&pCor->StrongNameSignature, IMAGE_SCN_MEM_WRITE, NULL_OK));
     CHECK(CheckDirectory(&pCor->CodeManagerTable, IMAGE_SCN_MEM_WRITE, NULL_OK));
@@ -1100,9 +1093,9 @@ CHECK PEDecoder::CheckCorHeader() const
 
     // IL library files (really a misnomer - these are native images or ReadyToRun images)
     // only they can have a native image header
-    if ((pCor->Flags&VAL32(COMIMAGE_FLAGS_IL_LIBRARY)) == 0)
+    if ((pCor->Flags&VAL32(COMIMAGE_FLAGS_IL_LIBRARY)) == 0 && !compositeR2R)
     {
-        // CHECK(VAL32(pCor->ManagedNativeHeader.Size) == 0);
+        CHECK(VAL32(pCor->ManagedNativeHeader.Size) == 0);
     }
 
     // Metadata header checks
