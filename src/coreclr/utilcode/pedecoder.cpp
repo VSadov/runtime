@@ -1036,7 +1036,11 @@ CHECK PEDecoder::CheckCorHeader() const
     // composite r2r images have zero-filled COR header. we will allow that.
     if (VAL16(pCor->MajorRuntimeVersion) == 0)
     {
-        for (int i = 0; i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
+        // size is 72 bytes
+        CHECK(VAL32(pCor->cb) == 72);
+
+        // all else is 0
+        for (int i = 1; i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
         {
             printf("checking %i :%i \n", i, ((DWORD*)pCor)[i]);
             CHECK(((DWORD*)pCor)[i] == 0);
