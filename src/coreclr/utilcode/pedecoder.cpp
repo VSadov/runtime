@@ -1060,7 +1060,7 @@ CHECK PEDecoder::CheckCorHeader() const
     CHECK(CheckDirectory(&pCor->ExportAddressTableJumps, 0, NULL_OK));
     CHECK(CheckDirectory(&pCor->ManagedNativeHeader, 0, NULL_OK));
 
-    CHECK(VAL32(pCor->cb) >= offsetof(IMAGE_COR20_HEADER, ManagedNativeHeader) + sizeof(IMAGE_DATA_DIRECTORY));
+    //CHECK(VAL32(pCor->cb) >= offsetof(IMAGE_COR20_HEADER, ManagedNativeHeader) + sizeof(IMAGE_DATA_DIRECTORY));
 
     DWORD validBits = COMIMAGE_FLAGS_ILONLY
       | COMIMAGE_FLAGS_32BITREQUIRED
