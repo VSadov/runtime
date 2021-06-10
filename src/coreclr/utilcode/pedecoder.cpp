@@ -1036,9 +1036,9 @@ CHECK PEDecoder::CheckCorHeader() const
 
     CHECK(VAL32(pDir->Size) >= sizeof(IMAGE_COR20_HEADER));
 
-    //IMAGE_SECTION_HEADER *section = RvaToSection(VAL32(pDir->VirtualAddress));
-    //CHECK(section != NULL);
-    //CHECK((section->Characteristics & VAL32(IMAGE_SCN_MEM_READ))!=0);
+    IMAGE_SECTION_HEADER *section = RvaToSection(VAL32(pDir->VirtualAddress));
+    CHECK(section != NULL);
+    CHECK((section->Characteristics & VAL32(IMAGE_SCN_MEM_READ))!=0);
 
     //CHECK(CheckRva(VAL32(pDir->VirtualAddress), sizeof(IMAGE_COR20_HEADER)));
 
