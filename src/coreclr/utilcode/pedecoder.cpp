@@ -1036,7 +1036,7 @@ CHECK PEDecoder::CheckCorHeader() const
 
     // Currently composite r2r images miss some information, for example the version is 0.0.
     // We may want to change that to something more conforming and explicit.
-    // For now, for compatibility purposes, we will allow that as a valid format.
+    // For now, for compatibility purposes, we will accept that as a valid format.
     bool possiblyCompositeR2R =
         pCor->MinorRuntimeVersion == 0 &&
         pCor->MajorRuntimeVersion == 0;
