@@ -1037,7 +1037,10 @@ CHECK PEDecoder::CheckCorHeader() const
     if (VAL16(pCor->MajorRuntimeVersion) == 0)
     {
         for (int i = 0; i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
+        {
+            printf("checking %i :%i", i, ((DWORD*)pCor)[i]);
             CHECK(((DWORD*)pCor)[i] == 0);
+        }
 
         const_cast<PEDecoder*>(this)->m_flags |= FLAG_COR_CHECKED;
         CHECK_OK;
