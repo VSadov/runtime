@@ -1052,15 +1052,13 @@ CHECK PEDecoder::CheckCorHeader() const
     // TODO: WIP composite r2r violate this, perhps should be fixed.
     // CHECK(VAL16(pCor->MajorRuntimeVersion) > 1 && VAL16(pCor->MajorRuntimeVersion) <= COR_VERSION_MAJOR);
 
-    CHECK_OK;
-
-    //CHECK(CheckDirectory(&pCor->MetaData, IMAGE_SCN_MEM_WRITE, HasNativeHeader() ? NULL_OK : NULL_NOT_OK));
-    //CHECK(CheckDirectory(&pCor->Resources, IMAGE_SCN_MEM_WRITE, NULL_OK));
-    //CHECK(CheckDirectory(&pCor->StrongNameSignature, IMAGE_SCN_MEM_WRITE, NULL_OK));
-    //CHECK(CheckDirectory(&pCor->CodeManagerTable, IMAGE_SCN_MEM_WRITE, NULL_OK));
-    //CHECK(CheckDirectory(&pCor->VTableFixups, 0, NULL_OK));
-    //CHECK(CheckDirectory(&pCor->ExportAddressTableJumps, 0, NULL_OK));
-    //CHECK(CheckDirectory(&pCor->ManagedNativeHeader, 0, NULL_OK));
+    CHECK(CheckDirectory(&pCor->MetaData, IMAGE_SCN_MEM_WRITE, HasNativeHeader() ? NULL_OK : NULL_NOT_OK));
+    CHECK(CheckDirectory(&pCor->Resources, IMAGE_SCN_MEM_WRITE, NULL_OK));
+    CHECK(CheckDirectory(&pCor->StrongNameSignature, IMAGE_SCN_MEM_WRITE, NULL_OK));
+    CHECK(CheckDirectory(&pCor->CodeManagerTable, IMAGE_SCN_MEM_WRITE, NULL_OK));
+    CHECK(CheckDirectory(&pCor->VTableFixups, 0, NULL_OK));
+    CHECK(CheckDirectory(&pCor->ExportAddressTableJumps, 0, NULL_OK));
+    CHECK(CheckDirectory(&pCor->ManagedNativeHeader, 0, NULL_OK));
 
     //CHECK(VAL32(pCor->cb) >= offsetof(IMAGE_COR20_HEADER, ManagedNativeHeader) + sizeof(IMAGE_DATA_DIRECTORY));
 
@@ -1189,9 +1187,9 @@ CHECK PEDecoder::CheckCorHeader() const
     //    }
     //}  //end if(pcMD != NULL)
 
-    //const_cast<PEDecoder *>(this)->m_flags |= FLAG_COR_CHECKED;
+    const_cast<PEDecoder *>(this)->m_flags |= FLAG_COR_CHECKED;
 
-    //CHECK_OK;
+    CHECK_OK;
 }
 
 
