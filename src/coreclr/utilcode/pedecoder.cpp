@@ -1044,7 +1044,7 @@ CHECK PEDecoder::CheckCorHeader() const
 
     IMAGE_COR20_HEADER *pCor = GetCorHeader();
 
-    //CHECK(((ULONGLONG)pCor & 0x3)==0);
+    CHECK(((ULONGLONG)pCor & 0x3)==0);
 
     // If the file is COM+ 1.0, which by definition has nothing the runtime can
     // use, or if the file requires a newer version of this engine than us,
