@@ -1030,11 +1030,11 @@ CHECK PEDecoder::CheckCorHeader() const
 
     CHECK(HasCorHeader());
 
-    //IMAGE_DATA_DIRECTORY *pDir = GetDirectoryEntry(IMAGE_DIRECTORY_ENTRY_COMHEADER);
+    IMAGE_DATA_DIRECTORY *pDir = GetDirectoryEntry(IMAGE_DIRECTORY_ENTRY_COMHEADER);
 
-    //CHECK(CheckDirectory(pDir, IMAGE_SCN_MEM_WRITE, NULL_NOT_OK));
+    CHECK(CheckDirectory(pDir, IMAGE_SCN_MEM_WRITE, NULL_NOT_OK));
 
-    //CHECK(VAL32(pDir->Size) >= sizeof(IMAGE_COR20_HEADER));
+    CHECK(VAL32(pDir->Size) >= sizeof(IMAGE_COR20_HEADER));
 
     //IMAGE_SECTION_HEADER *section = RvaToSection(VAL32(pDir->VirtualAddress));
     //CHECK(section != NULL);
