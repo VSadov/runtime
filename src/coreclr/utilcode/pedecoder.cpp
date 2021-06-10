@@ -1033,14 +1033,22 @@ CHECK PEDecoder::CheckCorHeader() const
     CHECK(CheckRva(VAL32(pDir->VirtualAddress), sizeof(IMAGE_COR20_HEADER)));
 
     IMAGE_COR20_HEADER *pCor = GetCorHeader();
+    // composite r2r images have zero-filled COR header. we will allow that.
+    if (VAL16(pCor->MajorRuntimeVersion) == 0)
+    {
+        for (int i = 0; i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
+            CHECK(((DWORD*)pCor)[i] == 0);
+
+        const_cast<PEDecoder*>(this)->m_flags |= FLAG_COR_CHECKED;
+        CHECK_OK;
+    }
 
     //CHECK(((ULONGLONG)pCor & 0x3)==0);
 
     // If the file is COM+ 1.0, which by definition has nothing the runtime can
     // use, or if the file requires a newer version of this engine than us,
     // it cannot be run by this engine.
-    // TODO: WIP composite r2r violate this, perhps should be fixed.
-    // CHECK(VAL16(pCor->MajorRuntimeVersion) > 1 && VAL16(pCor->MajorRuntimeVersion) <= COR_VERSION_MAJOR);
+    CHECK(VAL16(pCor->MajorRuntimeVersion) > 1 && VAL16(pCor->MajorRuntimeVersion) <= COR_VERSION_MAJOR);
 
     CHECK(CheckDirectory(&pCor->MetaData, IMAGE_SCN_MEM_WRITE, HasNativeHeader() ? NULL_OK : NULL_NOT_OK));
     CHECK(CheckDirectory(&pCor->Resources, IMAGE_SCN_MEM_WRITE, NULL_OK));
@@ -1086,8 +1094,7 @@ CHECK PEDecoder::CheckCorHeader() const
     // only they can have a native image header
     if ((pCor->Flags&VAL32(COMIMAGE_FLAGS_IL_LIBRARY)) == 0)
     {
-        // TODO: WIP composite r2r violate this, perhps should be fixed.
-        // CHECK(VAL32(pCor->ManagedNativeHeader.Size) == 0);
+        CHECK(VAL32(pCor->ManagedNativeHeader.Size) == 0);
     }
 
     // Metadata header checks
