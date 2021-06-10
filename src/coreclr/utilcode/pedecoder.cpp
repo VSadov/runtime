@@ -1038,7 +1038,7 @@ CHECK PEDecoder::CheckCorHeader() const
     {
         for (int i = 0; i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
         {
-            printf("checking %i :%i", i, ((DWORD*)pCor)[i]);
+            printf("checking %i :%i \n", i, ((DWORD*)pCor)[i]);
             CHECK(((DWORD*)pCor)[i] == 0);
         }
 
