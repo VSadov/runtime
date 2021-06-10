@@ -24,22 +24,32 @@ CHECK PEDecoder::CheckFormat() const
     CONTRACT_CHECK_END;
 
     CHECK(HasContents());
+    printf("has contents\n");
 
     if (HasNTHeaders())
     {
         CHECK(CheckNTHeaders());
+        printf("check has nt headers\n");
 
         if (HasCorHeader())
         {
             CHECK(CheckCorHeader());
+            printf("check cor headers\n");
 
             if (IsILOnly())
+            {
                 CHECK(CheckILOnly());
+                printf("check IL only\n");
+            }
 
             if (HasNativeHeader())
+            {
                 CHECK(CheckNativeHeader());
+                printf("check native header\n");
+            }
 
             CHECK(CheckWillCreateGuardPage());
+            printf("check will create\n");
         }
     }
 
