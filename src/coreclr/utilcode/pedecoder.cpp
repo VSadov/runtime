@@ -1033,14 +1033,15 @@ CHECK PEDecoder::CheckCorHeader() const
     CHECK(CheckRva(VAL32(pDir->VirtualAddress), sizeof(IMAGE_COR20_HEADER)));
 
     IMAGE_COR20_HEADER *pCor = GetCorHeader();
+
     // composite r2r images have zero-filled COR header. we will allow that.
     if (VAL16(pCor->MajorRuntimeVersion) == 0)
     {
-        // size is 72 bytes
+        // size is set
         CHECK(VAL32(pCor->cb) == sizeof(IMAGE_COR20_HEADER));
 
         // all else is 0
-        for (int i = sizeof(DWORD); i < sizeof(IMAGE_COR20_HEADER); i += sizeof(DWORD))
+        for (int i = 1; i < sizeof(IMAGE_COR20_HEADER) / sizeof(DWORD); i ++)
         {
             printf("checking %i :%i \n", i, ((DWORD*)pCor)[i]);
             CHECK(((DWORD*)pCor)[i] == 0);
