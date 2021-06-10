@@ -1060,135 +1060,137 @@ CHECK PEDecoder::CheckCorHeader() const
     CHECK(CheckDirectory(&pCor->ExportAddressTableJumps, 0, NULL_OK));
     CHECK(CheckDirectory(&pCor->ManagedNativeHeader, 0, NULL_OK));
 
-    //CHECK(VAL32(pCor->cb) >= offsetof(IMAGE_COR20_HEADER, ManagedNativeHeader) + sizeof(IMAGE_DATA_DIRECTORY));
-
-    DWORD validBits = COMIMAGE_FLAGS_ILONLY
-      | COMIMAGE_FLAGS_32BITREQUIRED
-      | COMIMAGE_FLAGS_TRACKDEBUGDATA
-      | COMIMAGE_FLAGS_STRONGNAMESIGNED
-      | COMIMAGE_FLAGS_NATIVE_ENTRYPOINT
-      | COMIMAGE_FLAGS_IL_LIBRARY
-      | COMIMAGE_FLAGS_32BITPREFERRED;
-
-    CHECK((pCor->Flags&VAL32(~validBits)) == 0);
-
-    // Pure IL images should not have VTable fixups or EAT jumps
-    if (IsILOnly())
-    {
-        CHECK(pCor->VTableFixups.Size == VAL32(0));
-        CHECK(pCor->ExportAddressTableJumps.Size == VAL32(0));
-        CHECK(!(pCor->Flags & VAL32(COMIMAGE_FLAGS_NATIVE_ENTRYPOINT)));
-        //@TODO: If not an exe, check that EntryPointToken is mdNil
-    }
-    else
-    {
-        if (pCor->Flags & VAL32(COMIMAGE_FLAGS_NATIVE_ENTRYPOINT))
-        {
-            CHECK(CheckRva(VAL32(IMAGE_COR20_HEADER_FIELD(*pCor,EntryPointToken))));
-        }
-    }
-
-    // Strong name signed images should have a signature
-    if (IsStrongNameSigned())
-        CHECK(HasStrongNameSignature());
-
-    // IL library files (really a misnomer - these are native images or ReadyToRun images)
-    // only they can have a native image header
-    if ((pCor->Flags&VAL32(COMIMAGE_FLAGS_IL_LIBRARY)) == 0)
-    {
-        // TODO: WIP composite r2r violate this, perhps should be fixed.
-        // CHECK(VAL32(pCor->ManagedNativeHeader.Size) == 0);
-    }
-
-    // Metadata header checks
-    IMAGE_DATA_DIRECTORY *pDirMD = &pCor->MetaData;
-    COUNT_T ctMD = (COUNT_T)VAL32(pDirMD->Size);
-    TADDR   pcMD = (TADDR)GetDirectoryData(pDirMD);
-
-    if(pcMD != NULL)
-    {
-        // Storage signature checks
-        CHECK(ctMD >= sizeof(STORAGESIGNATURE));
-        PTR_STORAGESIGNATURE pStorageSig = PTR_STORAGESIGNATURE((TADDR)pcMD);
-        COUNT_T ctMDStreamSize = ctMD;          // Store MetaData stream size for later usage
-
-
-        CHECK(VAL32(pStorageSig->lSignature) == STORAGE_MAGIC_SIG);
-        COUNT_T ctSSig;
-        CHECK(ClrSafeInt<COUNT_T>::addition(sizeof(STORAGESIGNATURE), (COUNT_T)VAL32(pStorageSig->iVersionString), ctSSig));
-        CHECK(ctMD > ctSSig);
-
-        // Storage header checks
-        pcMD += ctSSig;
-
-        PTR_STORAGEHEADER pSHdr = PTR_STORAGEHEADER((TADDR)pcMD);
-
-
-        ctMD -= ctSSig;
-        CHECK(ctMD >= sizeof(STORAGEHEADER));
-        pcMD = dac_cast<TADDR>(pSHdr) + sizeof(STORAGEHEADER);
-        ctMD -= sizeof(STORAGEHEADER);
-        WORD nStreams = VAL16(pSHdr->iStreams);
-
-        // Storage streams checks (pcMD is a target pointer, so watch out)
-        PTR_STORAGESTREAM pStr = PTR_STORAGESTREAM((TADDR)pcMD);
-        PTR_STORAGESTREAM pSSOutOfRange =
-            PTR_STORAGESTREAM((TADDR)(pcMD + ctMD));
-        size_t namelen;
-        WORD iStr;
-        PTR_STORAGESTREAM pSS;
-        for(iStr = 1, pSS = pStr; iStr <= nStreams; iStr++)
-        {
-            CHECK(pSS < pSSOutOfRange);
-            CHECK(pSS + 1 <= pSSOutOfRange);
-
-            for(namelen=0; (namelen<32)&&(pSS->rcName[namelen]!=0); namelen++);
-            CHECK((0 < namelen)&&(namelen < 32));
-
-            // Is it ngen image?
-            if (!HasNativeHeader())
-            {
-                // Forbid HOT_MODEL_STREAM for non-ngen images
-                CHECK(strcmp(pSS->rcName, HOT_MODEL_STREAM_A) != 0);
-            }
-
-            pcMD = dac_cast<TADDR>(NextStorageStream(pSS));
-            ctMD -= (COUNT_T)(pcMD - dac_cast<TADDR>(pSS));
-
-            pSS = PTR_STORAGESTREAM((TADDR)pcMD);
-        }
-
-        // At this moment, pcMD is pointing past the last stream header
-        // and ctMD contains total size left for streams per se
-        // Now, check the offsets and sizes of streams
-        COUNT_T ctStreamsBegin = (COUNT_T)(pcMD - dac_cast<TADDR>(pStorageSig));  // min.possible offset
-        COUNT_T  ctSS, ctSSbegin, ctSSend = 0;
-        for(iStr = 1, pSS = pStr; iStr <= nStreams; iStr++,pSS = NextStorageStream(pSS))
-        {
-            ctSSbegin = (COUNT_T)VAL32(pSS->iOffset);
-            CHECK(ctStreamsBegin <= ctSSbegin);
-            CHECK(ctSSbegin < ctMDStreamSize);
-
-            ctSS = (COUNT_T)VAL32(pSS->iSize);
-            CHECK(ctMD >= ctSS);
-            CHECK(ClrSafeInt<COUNT_T>::addition(ctSSbegin, ctSS, ctSSend));
-            CHECK(ctSSend <= ctMDStreamSize);
-            ctMD -= ctSS;
-
-            // Check stream overlap
-            PTR_STORAGESTREAM pSSprior;
-            for(pSSprior=pStr; pSSprior < pSS; pSSprior = NextStorageStream(pSSprior))
-            {
-                COUNT_T ctSSprior_end = 0;
-                CHECK(ClrSafeInt<COUNT_T>::addition((COUNT_T)VAL32(pSSprior->iOffset), (COUNT_T)VAL32(pSSprior->iSize), ctSSprior_end));
-                CHECK((ctSSbegin >= ctSSprior_end)||(ctSSend <= (COUNT_T)VAL32(pSSprior->iOffset)));
-            }
-        }
-    }  //end if(pcMD != NULL)
-
-    const_cast<PEDecoder *>(this)->m_flags |= FLAG_COR_CHECKED;
+    CHECK(VAL32(pCor->cb) >= offsetof(IMAGE_COR20_HEADER, ManagedNativeHeader) + sizeof(IMAGE_DATA_DIRECTORY));
 
     CHECK_OK;
+
+    //DWORD validBits = COMIMAGE_FLAGS_ILONLY
+    //  | COMIMAGE_FLAGS_32BITREQUIRED
+    //  | COMIMAGE_FLAGS_TRACKDEBUGDATA
+    //  | COMIMAGE_FLAGS_STRONGNAMESIGNED
+    //  | COMIMAGE_FLAGS_NATIVE_ENTRYPOINT
+    //  | COMIMAGE_FLAGS_IL_LIBRARY
+    //  | COMIMAGE_FLAGS_32BITPREFERRED;
+
+    //CHECK((pCor->Flags&VAL32(~validBits)) == 0);
+
+    //// Pure IL images should not have VTable fixups or EAT jumps
+    //if (IsILOnly())
+    //{
+    //    CHECK(pCor->VTableFixups.Size == VAL32(0));
+    //    CHECK(pCor->ExportAddressTableJumps.Size == VAL32(0));
+    //    CHECK(!(pCor->Flags & VAL32(COMIMAGE_FLAGS_NATIVE_ENTRYPOINT)));
+    //    //@TODO: If not an exe, check that EntryPointToken is mdNil
+    //}
+    //else
+    //{
+    //    if (pCor->Flags & VAL32(COMIMAGE_FLAGS_NATIVE_ENTRYPOINT))
+    //    {
+    //        CHECK(CheckRva(VAL32(IMAGE_COR20_HEADER_FIELD(*pCor,EntryPointToken))));
+    //    }
+    //}
+
+    //// Strong name signed images should have a signature
+    //if (IsStrongNameSigned())
+    //    CHECK(HasStrongNameSignature());
+
+    //// IL library files (really a misnomer - these are native images or ReadyToRun images)
+    //// only they can have a native image header
+    //if ((pCor->Flags&VAL32(COMIMAGE_FLAGS_IL_LIBRARY)) == 0)
+    //{
+    //    // TODO: WIP composite r2r violate this, perhps should be fixed.
+    //    // CHECK(VAL32(pCor->ManagedNativeHeader.Size) == 0);
+    //}
+
+    //// Metadata header checks
+    //IMAGE_DATA_DIRECTORY *pDirMD = &pCor->MetaData;
+    //COUNT_T ctMD = (COUNT_T)VAL32(pDirMD->Size);
+    //TADDR   pcMD = (TADDR)GetDirectoryData(pDirMD);
+
+    //if(pcMD != NULL)
+    //{
+    //    // Storage signature checks
+    //    CHECK(ctMD >= sizeof(STORAGESIGNATURE));
+    //    PTR_STORAGESIGNATURE pStorageSig = PTR_STORAGESIGNATURE((TADDR)pcMD);
+    //    COUNT_T ctMDStreamSize = ctMD;          // Store MetaData stream size for later usage
+
+
+    //    CHECK(VAL32(pStorageSig->lSignature) == STORAGE_MAGIC_SIG);
+    //    COUNT_T ctSSig;
+    //    CHECK(ClrSafeInt<COUNT_T>::addition(sizeof(STORAGESIGNATURE), (COUNT_T)VAL32(pStorageSig->iVersionString), ctSSig));
+    //    CHECK(ctMD > ctSSig);
+
+    //    // Storage header checks
+    //    pcMD += ctSSig;
+
+    //    PTR_STORAGEHEADER pSHdr = PTR_STORAGEHEADER((TADDR)pcMD);
+
+
+    //    ctMD -= ctSSig;
+    //    CHECK(ctMD >= sizeof(STORAGEHEADER));
+    //    pcMD = dac_cast<TADDR>(pSHdr) + sizeof(STORAGEHEADER);
+    //    ctMD -= sizeof(STORAGEHEADER);
+    //    WORD nStreams = VAL16(pSHdr->iStreams);
+
+    //    // Storage streams checks (pcMD is a target pointer, so watch out)
+    //    PTR_STORAGESTREAM pStr = PTR_STORAGESTREAM((TADDR)pcMD);
+    //    PTR_STORAGESTREAM pSSOutOfRange =
+    //        PTR_STORAGESTREAM((TADDR)(pcMD + ctMD));
+    //    size_t namelen;
+    //    WORD iStr;
+    //    PTR_STORAGESTREAM pSS;
+    //    for(iStr = 1, pSS = pStr; iStr <= nStreams; iStr++)
+    //    {
+    //        CHECK(pSS < pSSOutOfRange);
+    //        CHECK(pSS + 1 <= pSSOutOfRange);
+
+    //        for(namelen=0; (namelen<32)&&(pSS->rcName[namelen]!=0); namelen++);
+    //        CHECK((0 < namelen)&&(namelen < 32));
+
+    //        // Is it ngen image?
+    //        if (!HasNativeHeader())
+    //        {
+    //            // Forbid HOT_MODEL_STREAM for non-ngen images
+    //            CHECK(strcmp(pSS->rcName, HOT_MODEL_STREAM_A) != 0);
+    //        }
+
+    //        pcMD = dac_cast<TADDR>(NextStorageStream(pSS));
+    //        ctMD -= (COUNT_T)(pcMD - dac_cast<TADDR>(pSS));
+
+    //        pSS = PTR_STORAGESTREAM((TADDR)pcMD);
+    //    }
+
+    //    // At this moment, pcMD is pointing past the last stream header
+    //    // and ctMD contains total size left for streams per se
+    //    // Now, check the offsets and sizes of streams
+    //    COUNT_T ctStreamsBegin = (COUNT_T)(pcMD - dac_cast<TADDR>(pStorageSig));  // min.possible offset
+    //    COUNT_T  ctSS, ctSSbegin, ctSSend = 0;
+    //    for(iStr = 1, pSS = pStr; iStr <= nStreams; iStr++,pSS = NextStorageStream(pSS))
+    //    {
+    //        ctSSbegin = (COUNT_T)VAL32(pSS->iOffset);
+    //        CHECK(ctStreamsBegin <= ctSSbegin);
+    //        CHECK(ctSSbegin < ctMDStreamSize);
+
+    //        ctSS = (COUNT_T)VAL32(pSS->iSize);
+    //        CHECK(ctMD >= ctSS);
+    //        CHECK(ClrSafeInt<COUNT_T>::addition(ctSSbegin, ctSS, ctSSend));
+    //        CHECK(ctSSend <= ctMDStreamSize);
+    //        ctMD -= ctSS;
+
+    //        // Check stream overlap
+    //        PTR_STORAGESTREAM pSSprior;
+    //        for(pSSprior=pStr; pSSprior < pSS; pSSprior = NextStorageStream(pSSprior))
+    //        {
+    //            COUNT_T ctSSprior_end = 0;
+    //            CHECK(ClrSafeInt<COUNT_T>::addition((COUNT_T)VAL32(pSSprior->iOffset), (COUNT_T)VAL32(pSSprior->iSize), ctSSprior_end));
+    //            CHECK((ctSSbegin >= ctSSprior_end)||(ctSSend <= (COUNT_T)VAL32(pSSprior->iOffset)));
+    //        }
+    //    }
+    //}  //end if(pcMD != NULL)
+
+    //const_cast<PEDecoder *>(this)->m_flags |= FLAG_COR_CHECKED;
+
+    //CHECK_OK;
 }
 
 
