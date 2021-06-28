@@ -549,7 +549,11 @@ uint32_t NetSecurityNative_IsNtlmInstalled()
     gss_OID_desc oid;
     uint32_t foundNtlm = 0;
 
+    printf("before gss_indicate_mechs \n");
     majorStatus = gss_indicate_mechs(&minorStatus, &mechSet);
+
+    printf("after gss_indicate_mechs, majorStatus: %d \n", majorStatus);
+
     if (majorStatus == GSS_S_COMPLETE)
     {
         for (size_t i = 0; i < mechSet->count; i++)
