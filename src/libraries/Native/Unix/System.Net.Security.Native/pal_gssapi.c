@@ -113,6 +113,9 @@ static void init_gss_shim()
     s_gss_shim.fn##_ptr = (TYPEOF(fn)*)dlsym(lib, #fn); \
     if (s_gss_shim.fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", libraryName, dlerror()); abort(); }
 
+    FOR_ALL_GSS_FUNCTIONS
+#undef PER_FUNCTION_BLOCK
+
     // publish the shim pointer
     pal_atomic_cas_ptr((void* volatile *)&s_gss_shim_ptr, &s_gss_shim, NULL);
     dlclose(lib);
