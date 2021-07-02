@@ -87,7 +87,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
 
 typedef struct gss_shim_t
 {
-    // define indiection pointers for all functions, like
+    // define indirection pointers for all functions, like
     // TYPEOF(gss_accept_sec_context)* gss_accept_sec_context_ptr;
 
 #define PER_FUNCTION_BLOCK(fn) \
@@ -105,9 +105,15 @@ static void init_gss_shim()
     void* lib = dlopen(libraryName, RTLD_LAZY);
     if (lib == NULL) { fprintf(stderr, "Cannot load library %s \nError: %s\n", libraryName, dlerror()); abort(); }
 
-    s_gss_shim.gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(lib, "gss_accept_sec_context");
-    if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", libraryName, dlerror()); abort(); }
+    // initialize indiection pointers for all functions, like:
+    //   s_gss_shim.gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(lib, "gss_accept_sec_context");
+    //   if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", libraryName, dlerror()); abort(); }
 
+#define PER_FUNCTION_BLOCK(fn) \
+    s_gss_shim.fn##_ptr = (TYPEOF(fn)*)dlsym(lib, #fn); \
+    if (s_gss_shim.fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", libraryName, dlerror()); abort(); }
+
+    // publish the shim pointer
     pal_atomic_cas_ptr((void* volatile *)&s_gss_shim_ptr, &s_gss_shim, NULL);
     dlclose(lib);
 }
