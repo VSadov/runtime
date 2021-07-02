@@ -68,7 +68,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(gss_import_name) \
     PER_FUNCTION_BLOCK(gss_indicate_mechs) \
     PER_FUNCTION_BLOCK(gss_init_sec_context) \
-    PER_FUNCTION_BLOCK(gss_inquire_context_potato) \
+    PER_FUNCTION_BLOCK(gss_inquire_context) \
     PER_FUNCTION_BLOCK(gss_mech_krb5) \
     PER_FUNCTION_BLOCK(gss_oid_equal) \
     PER_FUNCTION_BLOCK(gss_release_buffer) \
@@ -89,7 +89,6 @@ typedef struct gss_shim_t
 {
     // define indirection pointers for all functions, like
     // TYPEOF(gss_accept_sec_context)* gss_accept_sec_context_ptr;
-
 #define PER_FUNCTION_BLOCK(fn) \
     TYPEOF(fn)* fn##_ptr;
 
@@ -101,7 +100,7 @@ typedef struct gss_shim_t
 static gss_shim_t s_gss_shim;
 
 // reference to the shim storage.
-// NOTE: we ensure that the shim reference is published after all method pointers are initialized.
+// NOTE: the shim reference is published after all method pointers are initialized.
 //       when we read the indirection pointers, we do that via the shim reference.
 //       data dependency ensures that method pointers are loaded after reading and null-checking the shim reference.
 static gss_shim_t* volatile s_gss_shim_ptr = NULL;
@@ -114,7 +113,6 @@ static void init_gss_shim()
     // initialize indirection pointers for all functions, like:
     //   s_gss_shim.gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(lib, "gss_accept_sec_context");
     //   if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", libraryName, dlerror()); abort(); }
-
 #define PER_FUNCTION_BLOCK(fn) \
     s_gss_shim.fn##_ptr = (TYPEOF(fn)*)dlsym(lib, #fn); \
     if (s_gss_shim.fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", libraryName, dlerror()); abort(); }
