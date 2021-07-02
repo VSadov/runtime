@@ -22,7 +22,7 @@
 
 #ifdef TARGET_LINUX
 #include <dlfcn.h>
-#include "pal_atomic.h"
+#include <stdatomic.h>
 #endif
 
 c_static_assert(PAL_GSS_C_DELEG_FLAG == GSS_C_DELEG_FLAG);
@@ -68,7 +68,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(gss_import_name) \
     PER_FUNCTION_BLOCK(gss_indicate_mechs) \
     PER_FUNCTION_BLOCK(gss_init_sec_context) \
-    PER_FUNCTION_BLOCK(gss_inquire_context) \
+    PER_FUNCTION_BLOCK(gss_inquire_context_potato) \
     PER_FUNCTION_BLOCK(gss_mech_krb5) \
     PER_FUNCTION_BLOCK(gss_oid_equal) \
     PER_FUNCTION_BLOCK(gss_release_buffer) \
@@ -97,7 +97,13 @@ typedef struct gss_shim_t
 #undef PER_FUNCTION_BLOCK
 } gss_shim_t;
 
+// static storage for all method pointers
 static gss_shim_t s_gss_shim;
+
+// reference to the shim storage.
+// NOTE: we ensure that the shim reference is published after all method pointers are initialized.
+//       when we read the indirection pointers, we do that via the shim reference.
+//       data dependency ensures that method pointers are loaded after reading and null-checking the shim reference.
 static gss_shim_t* volatile s_gss_shim_ptr = NULL;
 
 static void init_gss_shim()
@@ -105,7 +111,7 @@ static void init_gss_shim()
     void* lib = dlopen(libraryName, RTLD_LAZY);
     if (lib == NULL) { fprintf(stderr, "Cannot load library %s \nError: %s\n", libraryName, dlerror()); abort(); }
 
-    // initialize indiection pointers for all functions, like:
+    // initialize indirection pointers for all functions, like:
     //   s_gss_shim.gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(lib, "gss_accept_sec_context");
     //   if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", libraryName, dlerror()); abort(); }
 
@@ -117,7 +123,7 @@ static void init_gss_shim()
 #undef PER_FUNCTION_BLOCK
 
     // publish the shim pointer
-    pal_atomic_cas_ptr((void* volatile *)&s_gss_shim_ptr, &s_gss_shim, NULL);
+    __atomic_store_n(&s_gss_shim_ptr, &s_gss_shim, __ATOMIC_RELEASE);
     dlclose(lib);
 }
 
