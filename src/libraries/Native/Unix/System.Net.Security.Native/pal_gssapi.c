@@ -69,6 +69,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(gss_indicate_mechs) \
     PER_FUNCTION_BLOCK(gss_init_sec_context) \
     PER_FUNCTION_BLOCK(gss_inquire_context) \
+    PER_FUNCTION_BLOCK(dlopen) \
     PER_FUNCTION_BLOCK(gss_mech_krb5) \
     PER_FUNCTION_BLOCK(gss_oid_equal) \
     PER_FUNCTION_BLOCK(gss_release_buffer) \
