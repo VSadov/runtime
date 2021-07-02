@@ -58,9 +58,42 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
 
 #define libraryName "libgssapi_krb5.so"
 
+#define FOR_ALL_OS_CONDITIONAL_ICU_FUNCTIONS \
+    PER_FUNCTION_BLOCK(gss_accept_sec_context) \
+    PER_FUNCTION_BLOCK(gss_acquire_cred) \
+    PER_FUNCTION_BLOCK(gss_acquire_cred_with_password) \
+    PER_FUNCTION_BLOCK(gss_delete_sec_context) \
+    PER_FUNCTION_BLOCK(gss_display_name) \
+    PER_FUNCTION_BLOCK(gss_display_status) \
+    PER_FUNCTION_BLOCK(gss_import_name) \
+    PER_FUNCTION_BLOCK(gss_indicate_mechs) \
+    PER_FUNCTION_BLOCK(gss_init_sec_context) \
+    PER_FUNCTION_BLOCK(gss_inquire_context) \
+    PER_FUNCTION_BLOCK(gss_mech_krb5) \
+    PER_FUNCTION_BLOCK(gss_oid_equal) \
+    PER_FUNCTION_BLOCK(gss_release_buffer) \
+    PER_FUNCTION_BLOCK(gss_release_cred) \
+    PER_FUNCTION_BLOCK(gss_release_name) \
+    PER_FUNCTION_BLOCK(gss_release_oid_set) \
+    PER_FUNCTION_BLOCK(gss_unwrap) \
+    PER_FUNCTION_BLOCK(gss_wrap)
+
+#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+#define FOR_ALL_OS_CONDITIONAL_ICU_FUNCTIONS \
+    FOR_ALL_OS_CONDITIONAL_ICU_FUNCTIONS \
+    PER_FUNCTION_BLOCK( gss_set_cred_option)
+#endif
+
 typedef struct gss_shim_t
 {
-    TYPEOF(gss_accept_sec_context)* gss_accept_sec_context_ptr;
+    // define indiection pointers for all functions, like
+    // TYPEOF(gss_accept_sec_context)* gss_accept_sec_context_ptr;
+
+#define PER_FUNCTION_BLOCK(fn) \
+    TYPEOF(fn)* fn##_ptr;
+
+    FOR_ALL_ICU_FUNCTIONS
+#undef PER_FUNCTION_BLOCK
 } gss_shim_t;
 
 static gss_shim_t s_gss_shim;
@@ -91,29 +124,6 @@ static gss_shim_t* get_gss_shim()
 }
 
 #define gss_accept_sec_context(...) get_gss_shim()->gss_accept_sec_context_ptr(__VA_ARGS__)
-
-// gss_accept_sec_context
-// gss_acquire_cred
-// gss_acquire_cred_with_password
-// gss_delete_sec_context
-// gss_display_name
-// gss_display_status
-// gss_import_name
-// gss_indicate_mechs
-// gss_init_sec_context
-// gss_inquire_context
-// gss_mech_krb5
-// gss_oid_equal
-// gss_release_buffer
-// gss_release_cred
-// gss_release_name
-// gss_release_oid_set
-// gss_unwrap
-// gss_wrap
-
-#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
-// gss_set_cred_option
-#endif
 
 #endif // TARGET_LINUX
 
