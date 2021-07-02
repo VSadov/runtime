@@ -163,9 +163,9 @@ static gss_shim_t* get_gss_shim()
 #endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 
-#define GSS_C_NT_USER_NAME                      get_gss_shim()->GSS_C_NT_USER_NAME_ptr
-#define GSS_C_NT_HOSTBASED_SERVICE              get_gss_shim()->GSS_C_NT_HOSTBASED_SERVICE_ptr
-#define gss_mech_krb5                           get_gss_shim()->gss_mech_krb5_ptr
+#define GSS_C_NT_USER_NAME                      *get_gss_shim()->GSS_C_NT_USER_NAME_ptr
+#define GSS_C_NT_HOSTBASED_SERVICE              *get_gss_shim()->GSS_C_NT_HOSTBASED_SERVICE_ptr
+#define gss_mech_krb5                           *get_gss_shim()->gss_mech_krb5_ptr
 
 #endif // TARGET_LINUX
 
