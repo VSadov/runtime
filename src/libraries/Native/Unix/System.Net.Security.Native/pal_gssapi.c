@@ -58,7 +58,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
 
 #define libraryName "libgssapi_krb5.so"
 
-#define FOR_ALL_OS_CONDITIONAL_ICU_FUNCTIONS \
+#define FOR_ALL_GSS_FUNCTIONS \
     PER_FUNCTION_BLOCK(gss_accept_sec_context) \
     PER_FUNCTION_BLOCK(gss_acquire_cred) \
     PER_FUNCTION_BLOCK(gss_acquire_cred_with_password) \
@@ -79,10 +79,11 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(gss_wrap)
 
 #if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
-#define FOR_ALL_OS_CONDITIONAL_ICU_FUNCTIONS \
-    FOR_ALL_OS_CONDITIONAL_ICU_FUNCTIONS \
+
+#define FOR_ALL_GSS_FUNCTIONS FOR_ALL_GSS_FUNCTIONS \
     PER_FUNCTION_BLOCK( gss_set_cred_option)
-#endif
+
+#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 typedef struct gss_shim_t
 {
@@ -92,7 +93,7 @@ typedef struct gss_shim_t
 #define PER_FUNCTION_BLOCK(fn) \
     TYPEOF(fn)* fn##_ptr;
 
-    FOR_ALL_ICU_FUNCTIONS
+    FOR_ALL_GSS_FUNCTIONS
 #undef PER_FUNCTION_BLOCK
 } gss_shim_t;
 
