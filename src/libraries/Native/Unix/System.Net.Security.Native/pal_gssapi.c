@@ -161,6 +161,10 @@ static gss_shim_t* get_gss_shim()
 #define gss_set_cred_option(...)                get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
 #endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
+// gss_mech_krb5 is used conditionally, so in case it is unused, make compiler happy about an unused macro
+#if defined gss_mech_krb5
+#endif
+
 #endif // TARGET_LINUX
 
 // transfers ownership of the underlying data from gssBuffer to PAL_GssBuffer
