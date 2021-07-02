@@ -76,7 +76,9 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(gss_release_name) \
     PER_FUNCTION_BLOCK(gss_release_oid_set) \
     PER_FUNCTION_BLOCK(gss_unwrap) \
-    PER_FUNCTION_BLOCK(gss_wrap)
+    PER_FUNCTION_BLOCK(gss_wrap) \
+    PER_FUNCTION_BLOCK(GSS_C_NT_USER_NAME) \
+    PER_FUNCTION_BLOCK(GSS_C_NT_HOSTBASED_SERVICE)
 
 #if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
@@ -148,7 +150,6 @@ static gss_shim_t* get_gss_shim()
 #define gss_indicate_mechs(...)                 get_gss_shim()->gss_indicate_mechs_ptr(__VA_ARGS__)
 #define gss_init_sec_context(...)               get_gss_shim()->gss_init_sec_context_ptr(__VA_ARGS__)
 #define gss_inquire_context(...)                get_gss_shim()->gss_inquire_context_ptr(__VA_ARGS__)
-#define gss_mech_krb5(...)                      get_gss_shim()->gss_mech_krb5_ptr(__VA_ARGS__)
 #define gss_oid_equal(...)                      get_gss_shim()->gss_oid_equal_ptr(__VA_ARGS__)
 #define gss_release_buffer(...)                 get_gss_shim()->gss_release_buffer_ptr(__VA_ARGS__)
 #define gss_release_cred(...)                   get_gss_shim()->gss_release_cred_ptr(__VA_ARGS__)
@@ -161,9 +162,10 @@ static gss_shim_t* get_gss_shim()
 #define gss_set_cred_option(...)                get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
 #endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
-// gss_mech_krb5 is used conditionally, so in case it is unused, make compiler happy about an unused macro
-#if defined gss_mech_krb5
-#endif
+
+#define GSS_C_NT_USER_NAME                      get_gss_shim()->GSS_C_NT_USER_NAME_ptr
+#define GSS_C_NT_HOSTBASED_SERVICE              get_gss_shim()->GSS_C_NT_HOSTBASED_SERVICE_ptr
+#define gss_mech_krb5                           get_gss_shim()->gss_mech_krb5_ptr
 
 #endif // TARGET_LINUX
 
