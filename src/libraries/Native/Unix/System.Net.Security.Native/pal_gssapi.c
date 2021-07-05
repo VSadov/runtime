@@ -54,7 +54,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
 #endif
 
 // gssapi shim
-#ifdef TARGET_LINUX
+// #ifdef TARGET_LINUX
 
 #define libraryName "libgssapi_krb5.so"
 
@@ -167,7 +167,7 @@ static gss_shim_t* get_gss_shim()
 #define GSS_C_NT_HOSTBASED_SERVICE              *get_gss_shim()->GSS_C_NT_HOSTBASED_SERVICE_ptr
 #define gss_mech_krb5                           *get_gss_shim()->gss_mech_krb5_ptr
 
-#endif // TARGET_LINUX
+// #endif // TARGET_LINUX
 
 // transfers ownership of the underlying data from gssBuffer to PAL_GssBuffer
 static void NetSecurityNative_MoveBuffer(gss_buffer_t gssBuffer, PAL_GssBuffer* targetBuffer)
