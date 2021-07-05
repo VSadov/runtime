@@ -53,10 +53,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
                                               .elements = gss_ntlm_oid_value};
 #endif
 
-// gssapi shim
-// #ifdef TARGET_LINUX
-
-#define libraryName "libgssapi_krb5.so"
+#if defined(GSS_SHIM)
 
 #define FOR_ALL_GSS_FUNCTIONS \
     PER_FUNCTION_BLOCK(gss_accept_sec_context) \
@@ -80,12 +77,12 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(GSS_C_NT_USER_NAME) \
     PER_FUNCTION_BLOCK(GSS_C_NT_HOSTBASED_SERVICE)
 
-//#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
-//
-//#define FOR_ALL_GSS_FUNCTIONS FOR_ALL_GSS_FUNCTIONS \
-//    PER_FUNCTION_BLOCK(gss_set_cred_option)
-//
-//#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+
+#define FOR_ALL_GSS_FUNCTIONS FOR_ALL_GSS_FUNCTIONS \
+    PER_FUNCTION_BLOCK(gss_set_cred_option)
+
+#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 typedef struct gss_shim_t
 {
@@ -109,15 +106,15 @@ static gss_shim_t* volatile s_gss_shim_ptr = NULL;
 
 static void init_gss_shim()
 {
-    void* lib = dlopen(libraryName, RTLD_LAZY);
-    if (lib == NULL) { fprintf(stderr, "Cannot load library %s \nError: %s\n", libraryName, dlerror()); abort(); }
+    void* lib = dlopen(gssLibraryName, RTLD_LAZY);
+    if (lib == NULL) { fprintf(stderr, "Cannot load library %s \nError: %s\n", gssLibraryName, dlerror()); abort(); }
 
     // initialize indirection pointers for all functions, like:
     //   s_gss_shim.gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(lib, "gss_accept_sec_context");
-    //   if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", libraryName, dlerror()); abort(); }
+    //   if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", gssLibraryName, dlerror()); abort(); }
 #define PER_FUNCTION_BLOCK(fn) \
     s_gss_shim.fn##_ptr = (TYPEOF(fn)*)dlsym(lib, #fn); \
-    if (s_gss_shim.fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", libraryName, dlerror()); abort(); }
+    if (s_gss_shim.fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", gssLibraryName, dlerror()); abort(); }
 
     FOR_ALL_GSS_FUNCTIONS
 #undef PER_FUNCTION_BLOCK
@@ -158,16 +155,16 @@ static gss_shim_t* get_gss_shim()
 #define gss_unwrap(...)                     get_gss_shim()->gss_unwrap_ptr(__VA_ARGS__)
 #define gss_wrap(...)                       get_gss_shim()->gss_wrap_ptr(__VA_ARGS__)
 
-//#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
-//#define gss_set_cred_option(...)                get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
-//#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+#define gss_set_cred_option(...)            get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
+#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 
 #define GSS_C_NT_USER_NAME                      *get_gss_shim()->GSS_C_NT_USER_NAME_ptr
 #define GSS_C_NT_HOSTBASED_SERVICE              *get_gss_shim()->GSS_C_NT_HOSTBASED_SERVICE_ptr
 #define gss_mech_krb5                           *get_gss_shim()->gss_mech_krb5_ptr
 
-// #endif // TARGET_LINUX
+#endif // GSS_SHIM
 
 // transfers ownership of the underlying data from gssBuffer to PAL_GssBuffer
 static void NetSecurityNative_MoveBuffer(gss_buffer_t gssBuffer, PAL_GssBuffer* targetBuffer)
