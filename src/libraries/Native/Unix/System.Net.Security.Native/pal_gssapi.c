@@ -20,10 +20,10 @@
 #include <assert.h>
 #include <string.h>
 
-#ifdef TARGET_LINUX
+// #ifdef TARGET_LINUX
 #include <dlfcn.h>
 #include <stdatomic.h>
-#endif
+// #endif
 
 c_static_assert(PAL_GSS_C_DELEG_FLAG == GSS_C_DELEG_FLAG);
 c_static_assert(PAL_GSS_C_MUTUAL_FLAG == GSS_C_MUTUAL_FLAG);
