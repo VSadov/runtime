@@ -158,9 +158,9 @@ static gss_shim_t* get_gss_shim()
 #define gss_unwrap(...)                     get_gss_shim()->gss_unwrap_ptr(__VA_ARGS__)
 #define gss_wrap(...)                       get_gss_shim()->gss_wrap_ptr(__VA_ARGS__)
 
-/*#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
-#define gss_set_cred_option(...)                get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
-#endi*/f //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+//#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+//#define gss_set_cred_option(...)                get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
+//#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 
 #define GSS_C_NT_USER_NAME                      *get_gss_shim()->GSS_C_NT_USER_NAME_ptr
