@@ -80,12 +80,12 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
     PER_FUNCTION_BLOCK(GSS_C_NT_USER_NAME) \
     PER_FUNCTION_BLOCK(GSS_C_NT_HOSTBASED_SERVICE)
 
-#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
-
-#define FOR_ALL_GSS_FUNCTIONS FOR_ALL_GSS_FUNCTIONS \
-    PER_FUNCTION_BLOCK( gss_set_cred_option)
-
-#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+//#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+//
+//#define FOR_ALL_GSS_FUNCTIONS FOR_ALL_GSS_FUNCTIONS \
+//    PER_FUNCTION_BLOCK(gss_set_cred_option)
+//
+//#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 typedef struct gss_shim_t
 {
@@ -158,9 +158,9 @@ static gss_shim_t* get_gss_shim()
 #define gss_unwrap(...)                     get_gss_shim()->gss_unwrap_ptr(__VA_ARGS__)
 #define gss_wrap(...)                       get_gss_shim()->gss_wrap_ptr(__VA_ARGS__)
 
-#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+/*#if HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 #define gss_set_cred_option(...)                get_gss_shim()->gss_set_cred_option_ptr(__VA_ARGS__)
-#endif //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
+#endi*/f //HAVE_GSS_KRB5_CRED_NO_CI_FLAGS_X
 
 
 #define GSS_C_NT_USER_NAME                      *get_gss_shim()->GSS_C_NT_USER_NAME_ptr
