@@ -20,7 +20,7 @@
 #include <assert.h>
 #include <string.h>
 
-#ifdef GSS_SHIM
+#if defined(GSS_SHIM)
 #include <dlfcn.h>
 #include <stdatomic.h>
 #endif
