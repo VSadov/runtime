@@ -685,7 +685,7 @@ uint32_t NetSecurityNative_IsNtlmInstalled()
     return foundNtlm;
 }
 
-uint32_t NetSecurityNative_EnsureGssInitialized()
+int32_t NetSecurityNative_EnsureGssInitialized()
 {
 #if defined(GSS_DYNAMIC_LIB)
     return ensure_gss_shim_initialized();
