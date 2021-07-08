@@ -87,7 +87,7 @@ static gss_OID_desc gss_mech_ntlm_OID_desc = {.length = ARRAY_SIZE(gss_ntlm_oid_
 // define indirection pointers for all functions, like
 // static TYPEOF(gss_accept_sec_context)* gss_accept_sec_context_ptr;
 #define PER_FUNCTION_BLOCK(fn) \
-TYPEOF(fn)* fn##_ptr;
+static TYPEOF(fn)* fn##_ptr;
 
 FOR_ALL_GSS_FUNCTIONS
 #undef PER_FUNCTION_BLOCK
