@@ -142,17 +142,17 @@ static int32_t ensure_gss_shim_initialized()
     }
 
     // initialize indirection pointers for all functions, like:
-    //   s_gss_shim.gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(s_gssLib, "gss_accept_sec_context");
-    //   if (s_gss_shim.gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", gss_lib_name, dlerror()); return -1; }
+    //   gss_accept_sec_context_ptr = (TYPEOF(gss_accept_sec_context)*)dlsym(s_gssLib, "gss_accept_sec_context");
+    //   if (gss_accept_sec_context_ptr == NULL) { fprintf(stderr, "Cannot get symbol %s from %s \nError: %s\n", "gss_accept_sec_context", gss_lib_name, dlerror()); return -1; }
 #define PER_FUNCTION_BLOCK(fn) \
-    s_gss_shim.fn##_ptr = (TYPEOF(fn)*)dlsym(s_gssLib, #fn); \
-    if (s_gss_shim.fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", gss_lib_name, dlerror()); return -1; }
+    fn##_ptr = (TYPEOF(fn)*)dlsym(s_gssLib, #fn); \
+    if (fn##_ptr == NULL) { fprintf(stderr, "Cannot get symbol " #fn " from %s \nError: %s\n", gss_lib_name, dlerror()); return -1; }
 
     FOR_ALL_GSS_FUNCTIONS
 #undef PER_FUNCTION_BLOCK
 
-    // set the completion flag
-    __atomic_store_n(&s_gss_shim_initialized, &s_gss_shim, __ATOMIC_RELEASE);
+    // set the completion flag after setting up all indirections
+    __atomic_store_n(&s_gss_shim_initialized, true, __ATOMIC_RELEASE);
 
     return 0;
 }
