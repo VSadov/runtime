@@ -198,4 +198,4 @@ PALEXPORT uint32_t NetSecurityNative_GetUser(uint32_t* minorStatus,
 Performs initialization of GSS shim, if necessary.
 Return value 0 indicates a success.
 */
-PALEXPORT uint32_t NetSecurityNative_EnsureGssInitialized(void);
+PALEXPORT int32_t NetSecurityNative_EnsureGssInitialized(void);
