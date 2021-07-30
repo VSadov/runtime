@@ -264,6 +264,7 @@ namespace System.Tests
             }
         }
 
+        [ActiveIssue("brings debugger")]
         [Trait(XunitConstants.Category, XunitConstants.IgnoreForCI)] // fail fast crashes the process
         [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
         public void FailFast_ExceptionStackTrace_ArgumentException()
@@ -285,6 +286,7 @@ namespace System.Tests
             }
         }
 
+        [ActiveIssue("brings debugger")]
         [Trait(XunitConstants.Category, XunitConstants.IgnoreForCI)] // fail fast crashes the process
         [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
         public void FailFast_ExceptionStackTrace_StackOverflowException()
@@ -307,6 +309,7 @@ namespace System.Tests
             }
         }
 
+        [ActiveIssue("brings debugger")]
         [Trait(XunitConstants.Category, XunitConstants.IgnoreForCI)] // fail fast crashes the process
         [ConditionalFact(typeof(RemoteExecutor), nameof(RemoteExecutor.IsSupported))]
         public void FailFast_ExceptionStackTrace_InnerException()
