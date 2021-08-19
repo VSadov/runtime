@@ -14,7 +14,7 @@ using namespace BINDER_SPACE;
 // CustomAssemblyBinder implementation
 // ============================================================================
 HRESULT CustomAssemblyBinder::BindAssemblyByNameWorker(BINDER_SPACE::AssemblyName *pAssemblyName,
-                                                                   BINDER_SPACE::Assembly **ppCoreCLRFoundAssembly)
+                                                       BINDER_SPACE::Assembly **ppCoreCLRFoundAssembly)
 {
     VALIDATE_ARG_RET(pAssemblyName != nullptr && ppCoreCLRFoundAssembly != nullptr);
     HRESULT hr = S_OK;
@@ -26,13 +26,13 @@ HRESULT CustomAssemblyBinder::BindAssemblyByNameWorker(BINDER_SPACE::AssemblyNam
 
     // Do we have the assembly already loaded in the context of the current binder?
     hr = AssemblyBinderCommon::BindAssembly(this,
-                                      pAssemblyName,
-                                      NULL,
-                                      NULL,
-                                      FALSE, //fNgenExplicitBind,
-                                      FALSE, //fExplicitBindToNativeImage,
-                                      false, //excludeAppPaths,
-                                      ppCoreCLRFoundAssembly);
+                                            pAssemblyName,
+                                            NULL,
+                                            NULL,
+                                            FALSE, //fNgenExplicitBind,
+                                            FALSE, //fExplicitBindToNativeImage,
+                                            false, //excludeAppPaths,
+                                            ppCoreCLRFoundAssembly);
     if (!FAILED(hr))
     {
         _ASSERTE(*ppCoreCLRFoundAssembly != NULL);
@@ -105,8 +105,8 @@ Exit:;
 }
 
 HRESULT CustomAssemblyBinder::BindUsingPEImage( /* in */ PEImage *pPEImage,
-                                                            /* in */ BOOL fIsNativeImage,
-                                                            /* [retval][out] */ BINDER_SPACE::Assembly **ppAssembly)
+                                                /* in */ BOOL fIsNativeImage,
+                                                /* [retval][out] */ BINDER_SPACE::Assembly **ppAssembly)
 {
     HRESULT hr = S_OK;
 
@@ -169,10 +169,10 @@ AssemblyLoaderAllocator* CustomAssemblyBinder::GetLoaderAllocator()
 //=============================================================================
 /* static */
 HRESULT CustomAssemblyBinder::SetupContext(DefaultAssemblyBinder *pTPABinder,
-                                                       AssemblyLoaderAllocator* pLoaderAllocator,
-                                                       void* loaderAllocatorHandle,
-                                                       UINT_PTR ptrAssemblyLoadContext,
-                                                       CustomAssemblyBinder **ppBindContext)
+                                           AssemblyLoaderAllocator* pLoaderAllocator,
+                                           void* loaderAllocatorHandle,
+                                           UINT_PTR ptrAssemblyLoadContext,
+                                           CustomAssemblyBinder **ppBindContext)
 {
     HRESULT hr = E_FAIL;
     EX_TRY
