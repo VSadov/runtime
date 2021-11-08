@@ -180,6 +180,7 @@ void DacEnumerableHashTable<DAC_ENUM_HASH_ARGS>::GrowTable()
         return;
 
     ((size_t*)pNewBuckets)[0] = cNewBuckets;
+    ((PTR_VolatileEntry*)curBuckets)[1] = pNewBuckets;
 
     // All buckets are initially empty.
     // Note: Memory allocated on loader heap is zero filled
