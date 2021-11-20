@@ -726,8 +726,6 @@ void PEImage::EnumMemoryRegions(CLRDataEnumMemoryFlags flags)
     // No lock here as the processs should be suspended.
     if (m_pLayouts[IMAGE_FLAT].IsValid() && m_pLayouts[IMAGE_FLAT]!=NULL)
         m_pLayouts[IMAGE_FLAT]->EnumMemoryRegions(flags);
-    if (m_pLayouts[IMAGE_MAPPED].IsValid() &&  m_pLayouts[IMAGE_MAPPED]!=NULL)
-        m_pLayouts[IMAGE_MAPPED]->EnumMemoryRegions(flags);
     if (m_pLayouts[IMAGE_LOADED].IsValid() &&  m_pLayouts[IMAGE_LOADED]!=NULL)
         m_pLayouts[IMAGE_LOADED]->EnumMemoryRegions(flags);
 }
@@ -818,20 +816,20 @@ PTR_PEImageLayout PEImage::GetOrCreateLayoutInternal(DWORD imageLayoutMask)
     {
         _ASSERTE(HasPath());
 
-        BOOL bIsMappedLayoutSuitable = ((imageLayoutMask & PEImageLayout::LAYOUT_MAPPED) != 0);
+        BOOL bIsLoadedLayoutSuitable = ((imageLayoutMask & PEImageLayout::LAYOUT_LOADED) != 0);
         BOOL bIsFlatLayoutSuitable = ((imageLayoutMask & PEImageLayout::LAYOUT_FLAT) != 0);
 
 #if !defined(TARGET_UNIX)
-        if (!IsInBundle() && bIsMappedLayoutSuitable)
+        if (!IsInBundle() && bIsLoadedLayoutSuitable)
         {
             bIsFlatLayoutSuitable = FALSE;
         }
 #endif // !TARGET_UNIX
 
-        _ASSERTE(bIsMappedLayoutSuitable || bIsFlatLayoutSuitable);
+        _ASSERTE(bIsLoadedLayoutSuitable || bIsFlatLayoutSuitable);
 
         BOOL bIsMappedLayoutRequired = !bIsFlatLayoutSuitable;
-        BOOL bIsFlatLayoutRequired = !bIsMappedLayoutSuitable;
+        BOOL bIsFlatLayoutRequired = !bIsLoadedLayoutSuitable;
 
         if (bIsFlatLayoutRequired
             || bIsFlatLayoutSuitable)
@@ -845,7 +843,7 @@ PTR_PEImageLayout PEImage::GetOrCreateLayoutInternal(DWORD imageLayoutMask)
 
         if (pRetVal == NULL)
         {
-          _ASSERTE(bIsMappedLayoutSuitable);
+          _ASSERTE(bIsLoadedLayoutSuitable);
 
           pRetVal = PEImage::CreateLayoutMapped();
         }
@@ -881,8 +879,6 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
 
     if (pLoadLayout != NULL)
     {
-        SetLayout(IMAGE_MAPPED,pLoadLayout);
-        pLoadLayout->AddRef();
         SetLayout(IMAGE_LOADED,pLoadLayout);
         pRetVal=pLoadLayout;
     }
@@ -890,36 +886,22 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
     {
         PEImageLayoutHolder pLayout(PEImageLayout::Map(this));
 
-        bool fMarkAnyCpuImageAsLoaded = false;
-
         // Avoid mapping another image if we can. We can only do this for IL-ONLY images
         // since LoadLibrary is needed if we are to actually load code (e.g. IJW).
-        if (pLayout->HasCorHeader())
-        {
-            // IJW images must be successfully loaded by the OS to handle
-            // native dependencies, therefore they cannot be mapped.
-            if (!pLayout->IsILOnly())
-            {
-                // For compat with older CoreCLR versions we will fallback to the
-                // COR_E_BADIMAGEFORMAT error code if a failure wasn't indicated.
-                loadFailure = FAILED(loadFailure) ? loadFailure : COR_E_BADIMAGEFORMAT;
-                EEFileLoadException::Throw(GetPath(), loadFailure);
-            }
+        _ASSERTE(pLayout->HasCorHeader());
 
-            // IL only images will always be mapped. We don't bother doing a conversion
-            // of PE header on 64bit, as done for .NET Framework, since there is no
-            // appcompat burden for CoreCLR on 64bit.
-            fMarkAnyCpuImageAsLoaded = true;
+        // IJW images must be successfully loaded by the OS to handle
+        // native dependencies, therefore they cannot be mapped.
+        if (!pLayout->IsILOnly())
+        {
+            // For compat with older CoreCLR versions we will fallback to the
+            // COR_E_BADIMAGEFORMAT error code if a failure wasn't indicated.
+            loadFailure = FAILED(loadFailure) ? loadFailure : COR_E_BADIMAGEFORMAT;
+            EEFileLoadException::Throw(GetPath(), loadFailure);
         }
 
         pLayout.SuppressRelease();
-
-        SetLayout(IMAGE_MAPPED,pLayout);
-        if (fMarkAnyCpuImageAsLoaded)
-        {
-            pLayout->AddRef();
-            SetLayout(IMAGE_LOADED, pLayout);
-        }
+        SetLayout(IMAGE_LOADED,pLayout);
         pRetVal=pLayout;
     }
     else
@@ -929,7 +911,7 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
             ThrowHR(COR_E_BADIMAGEFORMAT);
 
         pRetVal=PEImageLayout::LoadFromFlat(flatPE);
-        SetLayout(IMAGE_MAPPED,pRetVal);
+        SetLayout(IMAGE_LOADED,pRetVal);
     }
 
     return pRetVal;
@@ -1007,12 +989,6 @@ PTR_PEImage PEImage::LoadImage(HMODULE hMod)
     if(pImage->m_pLayouts[IMAGE_LOADED]==NULL)
         pImage->SetLayout(IMAGE_LOADED,PEImageLayout::CreateFromHMODULE(hMod,pImage,WszGetModuleHandle(NULL)!=hMod));
 
-    if(pImage->m_pLayouts[IMAGE_MAPPED]==NULL)
-    {
-        pImage->m_pLayouts[IMAGE_LOADED]->AddRef();
-        pImage->SetLayout(IMAGE_MAPPED,pImage->m_pLayouts[IMAGE_LOADED]);
-    }
-
     RETURN dac_cast<PTR_PEImage>(pImage.Extract());
 }
 #endif // !TARGET_UNIX
@@ -1077,25 +1053,6 @@ void PEImage::Load()
             if(m_pLayouts[IMAGE_LOADED]==NULL)
                 SetLayout(IMAGE_LOADED,PEImageLayout::Load(this,TRUE));
         }
-    }
-}
-
-void PEImage::LoadFromMapped()
-{
-    STANDARD_VM_CONTRACT;
-
-    if (HasLoadedLayout())
-    {
-        _ASSERTE(GetLoadedLayout()->IsMapped());
-        return;
-    }
-
-    PEImageLayout* pLayout = GetOrCreateLayout(PEImageLayout::LAYOUT_MAPPED);
-    SimpleWriteLockHolder lock(m_pLayoutLock);
-    if (m_pLayouts[IMAGE_LOADED] == NULL)
-    {
-        pLayout->AddRef();
-        SetLayout(IMAGE_LOADED, pLayout);
     }
 }
 

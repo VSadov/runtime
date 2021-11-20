@@ -87,7 +87,6 @@ public:
 
     void   Load();
     void   LoadNoFile();
-    void   LoadFromMapped();
 #endif
 
     BOOL IsOpened();
@@ -284,9 +283,8 @@ private:
     enum
     {
         IMAGE_FLAT=0,
-        IMAGE_MAPPED=1,
-        IMAGE_LOADED=2,
-        IMAGE_COUNT=3
+        IMAGE_LOADED=1,
+        IMAGE_COUNT=2
     };
 
     SimpleRWLock *m_pLayoutLock;

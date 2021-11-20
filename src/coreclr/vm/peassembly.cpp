@@ -106,19 +106,7 @@ void PEAssembly::EnsureLoaded()
 
     if (GetPEImage()->IsFile())
     {
-#ifdef TARGET_UNIX
-        bool loadILImage = GetPEImage()->IsILOnly();
-#else // TARGET_UNIX
-        bool loadILImage = GetPEImage()->IsILOnly() && GetPEImage()->IsInBundle();
-#endif // TARGET_UNIX
-        if (loadILImage)
-        {
-            GetPEImage()->Load();
-        }
-        else
-        {
-            GetPEImage()->LoadFromMapped();
-        }
+        GetPEImage()->Load();
     }
     else
     {

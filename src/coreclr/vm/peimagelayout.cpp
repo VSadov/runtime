@@ -368,7 +368,7 @@ RawImageLayout::RawImageLayout(const void *flat, COUNT_T size, PEImage* pOwner)
     }
     Init((void*)flat,size);
 }
-RawImageLayout::RawImageLayout(const void *mapped, PEImage* pOwner, BOOL bTakeOwnership, BOOL bFixedUp)
+RawImageLayout::RawImageLayout(const void *loaded, PEImage* pOwner, BOOL bTakeOwnership, BOOL bFixedUp)
 {
     CONTRACTL
     {
@@ -380,13 +380,13 @@ RawImageLayout::RawImageLayout(const void *mapped, PEImage* pOwner, BOOL bTakeOw
     }
     CONTRACTL_END;
     m_pOwner=pOwner;
-    m_Layout=LAYOUT_MAPPED;
+    m_Layout=LAYOUT_LOADED;
 
     if (bTakeOwnership)
     {
 #ifndef TARGET_UNIX
         PathString wszDllName;
-        WszGetModuleFileName((HMODULE)mapped, wszDllName);
+        WszGetModuleFileName((HMODULE)loaded, wszDllName);
 
         m_LibraryHolder=CLRLoadLibraryEx(wszDllName,NULL,GetLoadWithAlteredSearchPathFlag());
 #else // !TARGET_UNIX
@@ -394,7 +394,7 @@ RawImageLayout::RawImageLayout(const void *mapped, PEImage* pOwner, BOOL bTakeOw
 #endif // !TARGET_UNIX
     }
 
-    IfFailThrow(Init((void*)mapped,(bool)(bFixedUp!=FALSE)));
+    IfFailThrow(Init((void*)loaded,(bool)(bFixedUp!=FALSE)));
 }
 
 ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundle)
@@ -405,7 +405,6 @@ ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundl
         STANDARD_VM_CHECK;
     }
     CONTRACTL_END;
-    m_Layout=LAYOUT_LOADED;
     m_pOwner=source->m_pOwner;
     _ASSERTE(!source->IsMapped());
 
@@ -504,7 +503,6 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
         STANDARD_VM_CHECK;
     }
     CONTRACTL_END;
-    m_Layout=LAYOUT_MAPPED;
     m_pOwner=pOwner;
 
     HANDLE hFile = pOwner->GetFileHandle();
@@ -539,7 +537,6 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
             // Throw generic exception.
             ThrowWin32(dwLastError);
         }
-
 
         return;
     }
