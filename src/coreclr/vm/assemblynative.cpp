@@ -139,6 +139,10 @@ Assembly* AssemblyNative::LoadFromPEImage(AssemblyBinder* pBinder, PEImage *pIma
 
     Assembly *pLoadedAssembly = NULL;
     ReleaseHolder<BINDER_SPACE::Assembly> pAssembly;
+
+    //TODO: VS is this needed?
+    // Force the image to be loaded.
+    pImage->GetOrCreateLayout(PEImageLayout::LAYOUT_LOADED);
     DWORD dwMessageID = IDS_EE_FILELOAD_ERROR_GENERIC;
 
     // Set the caller's assembly to be CoreLib

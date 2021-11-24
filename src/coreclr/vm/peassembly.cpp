@@ -98,14 +98,6 @@ void PEAssembly::EnsureLoaded()
     }
 #endif
 
-    // Since we couldn't call LoadLibrary, we must be an IL only image
-    // or the image may still contain unfixed up stuff
-    if (!GetPEImage()->IsILOnly())
-    {
-        if (!GetPEImage()->HasV1Metadata())
-            ThrowHR(COR_E_FIXUPSINEXE); // <TODO>@todo: better error</TODO>
-    }
-
     RETURN;
 }
 

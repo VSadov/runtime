@@ -814,7 +814,11 @@ PTR_PEImageLayout PEImage::GetOrCreateLayoutInternal(DWORD imageLayoutMask)
 
     if (pRetVal==NULL)
     {
-        _ASSERTE(HasPath());
+        // no-path layouts are filled up at creation, if image format permits.
+        if (!HasPath())
+        {
+            ThrowHR(COR_E_BADIMAGEFORMAT);
+        }
 
         BOOL bIsLoadedLayoutSuitable = ((imageLayoutMask & PEImageLayout::LAYOUT_LOADED) != 0);
         BOOL bIsFlatLayoutSuitable = ((imageLayoutMask & PEImageLayout::LAYOUT_FLAT) != 0);
@@ -901,7 +905,7 @@ PTR_PEImageLayout PEImage::CreateLayoutFlat()
 
     if (m_pLayouts[IMAGE_LOADED] == NULL &&
         pFlatLayout->CheckNTHeaders() &&
-        pFlatLayout->IsILOnly() &&
+        pFlatLayout->CheckILOnly() &&
         !pFlatLayout->HasWriteableSections() &&
         !pFlatLayout->HasReadyToRunHeader())
     {
@@ -928,8 +932,17 @@ PTR_PEImage PEImage::LoadFlat(const void *flat, COUNT_T size)
     SimpleWriteLockHolder lock(pImage->m_pLayoutLock);
 
     pImage->SetLayout(IMAGE_FLAT,pLayout);
-    pLayout->AddRef();
-    pImage->SetLayout(IMAGE_LOADED, pLayout);
+
+    // TODO: VS make a helper
+    // TODO: VS need to check R2R?
+    if (pLayout->CheckNTHeaders() &&
+        pLayout->CheckILOnly() &&
+        !pLayout->HasWriteableSections() &&
+        !pLayout->HasReadyToRunHeader())
+    {
+        pLayout->AddRef();
+        pImage->SetLayout(IMAGE_LOADED, pLayout);
+    }
 
     RETURN dac_cast<PTR_PEImage>(pImage.Extract());
 }
