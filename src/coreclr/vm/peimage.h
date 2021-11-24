@@ -84,9 +84,6 @@ public:
 
     static PTR_PEImage FindByPath(LPCWSTR pPath, BOOL isInBundle = TRUE);
     void AddToHashMap();
-
-    void   LoadFile();
-    void   LoadNoFile();
 #endif
 
     BOOL IsOpened();
@@ -160,10 +157,10 @@ private:
     PTR_PEImageLayout GetOrCreateLayoutInternal(DWORD imageLayoutMask);
 
     // Create the mapped layout
-    PTR_PEImageLayout CreateLayoutMapped();
+    PTR_PEImageLayout CreateLayoutMapped(bool throwOnFailure);
 
     // Create the flat layout
-    PTR_PEImageLayout CreateLayoutFlat(BOOL bPermitWriteableSections);
+    PTR_PEImageLayout CreateLayoutFlat();
 
     void   SetLayout(DWORD dwLayout, PTR_PEImageLayout pLayout);
 #endif

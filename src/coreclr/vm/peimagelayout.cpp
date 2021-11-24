@@ -63,6 +63,12 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* r
         return PEImageLayout::LoadConverted(pOwner, true);
     }
 
+    // TODO: VS this is always false, just to keep mapped layout alive for now (DAC failures)
+    if (!pOwner->IsFile())
+    {
+        return PEImageLayout::Map(pOwner);
+    }
+
     PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner,bNTSafeLoad,returnDontThrow));
     if (pAlloc->GetBase()==NULL)
         return NULL;
