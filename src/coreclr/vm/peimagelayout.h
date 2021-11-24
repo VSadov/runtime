@@ -95,6 +95,8 @@ public:
     RawImageLayout(const void *mapped, PEImage* pOwner, BOOL bTakeOwnerShip, BOOL bFixedUp);
 };
 
+class FlatImageLayout;
+
 // ConvertedImageView is for the case when we manually layout a flat image
 class ConvertedImageLayout: public PEImageLayout
 {
@@ -104,7 +106,7 @@ protected:
     CLRMapViewHolder m_FileView;
 public:
 #ifndef DACCESS_COMPILE
-    ConvertedImageLayout(PEImageLayout* source, BOOL isInBundle = FALSE);
+    ConvertedImageLayout(FlatImageLayout* source, BOOL isInBundle = FALSE);
     virtual ~ConvertedImageLayout();
 #endif
 private:
@@ -125,7 +127,10 @@ protected:
 public:
 #ifndef DACCESS_COMPILE
     MappedImageLayout(PEImage* pOwner);
+    virtual ~MappedImageLayout();
 #endif
+private:
+    PT_RUNTIME_FUNCTION m_pExceptionDir;
 };
 
 #if !defined(TARGET_UNIX)
@@ -158,9 +163,10 @@ class FlatImageLayout: public PEImageLayout
     VPTR_VTABLE_CLASS(FlatImageLayout,PEImageLayout)
     VPTR_UNIQUE(0x59)
 protected:
-    HandleHolder m_FileMap;
     CLRMapViewHolder m_FileView;
 public:
+    HandleHolder m_FileMap;
+
 #ifndef DACCESS_COMPILE
     FlatImageLayout(PEImage* pOwner);
 #endif

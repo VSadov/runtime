@@ -862,27 +862,24 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
         GC_TRIGGERS;
         MODE_ANY;
         PRECONDITION(m_pLayoutLock->IsWriterLock());
+        PRECONDITION(IsFile());
     }
     CONTRACTL_END;
 
     PTR_PEImageLayout pRetVal;
-
     PEImageLayout * pLoadLayout = NULL;
 
     HRESULT loadFailure = S_OK;
-    if (IsFile())
-    {
-        // Try to load all files via LoadLibrary first. If LoadLibrary did not work,
-        // retry using regular mapping.
-        pLoadLayout = PEImageLayout::Load(this, FALSE /* bNTSafeLoad */, &loadFailure);
-    }
+    // Try to load all files via LoadLibrary first. If LoadLibrary did not work,
+    // retry using regular mapping.
+    pLoadLayout = PEImageLayout::Load(this, FALSE /* bNTSafeLoad */, &loadFailure);
 
     if (pLoadLayout != NULL)
     {
         SetLayout(IMAGE_LOADED,pLoadLayout);
         pRetVal=pLoadLayout;
     }
-    else if (IsFile())
+    else
     {
         PEImageLayoutHolder pLayout(PEImageLayout::Map(this));
 
@@ -903,15 +900,6 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped()
         pLayout.SuppressRelease();
         SetLayout(IMAGE_LOADED,pLayout);
         pRetVal=pLayout;
-    }
-    else
-    {
-        PEImageLayout* flatPE = GetOrCreateLayout(PEImageLayout::LAYOUT_FLAT);
-        if (!flatPE->CheckFormat() || !flatPE->IsILOnly())
-            ThrowHR(COR_E_BADIMAGEFORMAT);
-
-        pRetVal=PEImageLayout::LoadFromFlat(flatPE);
-        SetLayout(IMAGE_LOADED,pRetVal);
     }
 
     return pRetVal;
@@ -993,9 +981,11 @@ PTR_PEImage PEImage::LoadImage(HMODULE hMod)
 }
 #endif // !TARGET_UNIX
 
-void PEImage::Load()
+void PEImage::LoadFile()
 {
     STANDARD_VM_CONTRACT;
+
+    _ASSERTE(IsFile());
 
     // Performance optimization to avoid lock acquisition
     if (HasLoadedLayout())
@@ -1039,20 +1029,8 @@ void PEImage::Load()
     }
     else
     {
-        if(!IsFile())
-        {
-            _ASSERTE(m_pLayouts[IMAGE_FLAT] != NULL);
-
-            if (!m_pLayouts[IMAGE_FLAT]->CheckILOnly())
-                ThrowHR(COR_E_BADIMAGEFORMAT);
-            if(m_pLayouts[IMAGE_LOADED]==NULL)
-                SetLayout(IMAGE_LOADED,PEImageLayout::LoadFromFlat(m_pLayouts[IMAGE_FLAT]));
-        }
-        else
-        {
-            if(m_pLayouts[IMAGE_LOADED]==NULL)
-                SetLayout(IMAGE_LOADED,PEImageLayout::Load(this,TRUE));
-        }
+        if(m_pLayouts[IMAGE_LOADED]==NULL)
+            SetLayout(IMAGE_LOADED,PEImageLayout::Load(this,TRUE));
     }
 }
 

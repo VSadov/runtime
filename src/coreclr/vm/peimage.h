@@ -85,7 +85,7 @@ public:
     static PTR_PEImage FindByPath(LPCWSTR pPath, BOOL isInBundle = TRUE);
     void AddToHashMap();
 
-    void   Load();
+    void   LoadFile();
     void   LoadNoFile();
 #endif
 

@@ -40,17 +40,11 @@ PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule,PEImage* pOwner,
     return new RawImageLayout(hModule,pOwner,bTakeOwnership,TRUE);
 }
 
-PEImageLayout* PEImageLayout::LoadFromFlat(PEImageLayout* pflatimage)
-{
-    STANDARD_VM_CONTRACT;
-    return new ConvertedImageLayout(pflatimage);
-}
-
 PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner, BOOL isInBundle)
 {
     STANDARD_VM_CONTRACT;
 
-    PEImageLayoutHolder pFlat(new FlatImageLayout(pOwner));
+    ReleaseHolder<FlatImageLayout> pFlat(new FlatImageLayout(pOwner));
     if (!pFlat->CheckFormat())
         ThrowHR(COR_E_BADIMAGEFORMAT);
 
@@ -101,7 +95,7 @@ PEImageLayout* PEImageLayout::Map(PEImage* pOwner)
     }
     CONTRACT_END;
 
-    PEImageLayoutHolder pAlloc = pOwner->GetUncompressedSize() != 0 ?
+    PEImageLayoutHolder pAlloc = pOwner->GetUncompressedSize() >= 0 ?
         LoadConverted(pOwner, /* isInBundle */ true):
         new MappedImageLayout(pOwner);
 
@@ -397,7 +391,7 @@ RawImageLayout::RawImageLayout(const void *loaded, PEImage* pOwner, BOOL bTakeOw
     IfFailThrow(Init((void*)loaded,(bool)(bFixedUp!=FALSE)));
 }
 
-ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundle)
+ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source, BOOL isInBundle)
 {
     CONTRACTL
     {
@@ -416,7 +410,7 @@ ConvertedImageLayout::ConvertedImageLayout(PEImageLayout* source, BOOL isInBundl
 
     // in bundle we may want to enable execution if the image contains R2R sections
     // so must ensure the mapping is compatible with that
-    bool enableExecution = isInBundle &&
+    bool enableExecution = 
         source->HasCorHeader() &&
         source->HasReadyToRunHeader() &&
         g_fAllowNativeImages;
@@ -495,6 +489,24 @@ ConvertedImageLayout::~ConvertedImageLayout()
 #endif
 }
 
+MappedImageLayout::~MappedImageLayout()
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        GC_TRIGGERS;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
+
+#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
+    if (m_pExceptionDir)
+    {
+        RtlDeleteFunctionTable(m_pExceptionDir);
+    }
+#endif
+}
+
 MappedImageLayout::MappedImageLayout(PEImage* pOwner)
 {
     CONTRACTL
@@ -504,6 +516,7 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
     }
     CONTRACTL_END;
     m_pOwner=pOwner;
+    m_pExceptionDir = NULL;
 
     HANDLE hFile = pOwner->GetFileHandle();
     INT64 offset = pOwner->GetOffset();
@@ -593,6 +606,8 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
     if (!HasCorHeader())
         ThrowHR(COR_E_BADIMAGEFORMAT);
 
+#endif // !TARGET_UNIX
+
     if (HasReadyToRunHeader() && g_fAllowNativeImages)
     {
         //Do base relocation for PE, if necessary.
@@ -603,8 +618,20 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
         SetRelocated();
     }
 
+    // Check if there is a static function table and install it. (Windows only, except x86)
+#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
+    COUNT_T cbSize = 0;
+    PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
+    DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
 
-#endif // !TARGET_UNIX
+    if (pExceptionDir != NULL)
+    {
+        if (!RtlAddFunctionTable(pExceptionDir, tableSize, (DWORD64)this->GetBase()))
+            ThrowLastError();
+
+        m_pExceptionDir = pExceptionDir;
+    }
+#endif //TARGET_X86
 }
 
 #if !defined(TARGET_UNIX)

@@ -145,7 +145,7 @@ Assembly* AssemblyNative::LoadFromPEImage(AssemblyBinder* pBinder, PEImage *pIma
     // map a duplicate copy.
     if (pImage->IsFile())
     {
-        pImage->Load();
+        pImage->LoadFile();
     }
     else
     {

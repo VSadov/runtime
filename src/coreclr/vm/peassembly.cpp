@@ -106,7 +106,7 @@ void PEAssembly::EnsureLoaded()
 
     if (GetPEImage()->IsFile())
     {
-        GetPEImage()->Load();
+        GetPEImage()->LoadFile();
     }
     else
     {
