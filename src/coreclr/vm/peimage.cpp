@@ -834,18 +834,18 @@ PTR_PEImageLayout PEImage::GetOrCreateLayoutInternal(DWORD imageLayoutMask)
         if (bIsFlatLayoutRequired
             || bIsFlatLayoutSuitable)
         {
-          _ASSERTE(bIsFlatLayoutSuitable);
+            _ASSERTE(bIsFlatLayoutSuitable);
 
-          BOOL bPermitWriteableSections = bIsFlatLayoutRequired;
+            BOOL bPermitWriteableSections = bIsFlatLayoutRequired;
 
-          pRetVal = PEImage::CreateLayoutFlat(bPermitWriteableSections);
+            pRetVal = PEImage::CreateLayoutFlat(bPermitWriteableSections);
         }
 
         if (pRetVal == NULL)
         {
-          _ASSERTE(bIsLoadedLayoutSuitable);
+            _ASSERTE(bIsLoadedLayoutSuitable);
 
-          pRetVal = PEImage::CreateLayoutMapped();
+            pRetVal = PEImage::CreateLayoutMapped();
         }
     }
 
@@ -951,6 +951,9 @@ PTR_PEImage PEImage::LoadFlat(const void *flat, COUNT_T size)
     SimpleWriteLockHolder lock(pImage->m_pLayoutLock);
 
     pImage->SetLayout(IMAGE_FLAT,pLayout);
+    pLayout->AddRef();
+    pImage->SetLayout(IMAGE_LOADED, pLayout);
+
     RETURN dac_cast<PTR_PEImage>(pImage.Extract());
 }
 
@@ -974,8 +977,11 @@ PTR_PEImage PEImage::LoadImage(HMODULE hMod)
 
     SimpleWriteLockHolder lock(pImage->m_pLayoutLock);
 
-    if(pImage->m_pLayouts[IMAGE_LOADED]==NULL)
-        pImage->SetLayout(IMAGE_LOADED,PEImageLayout::CreateFromHMODULE(hMod,pImage,WszGetModuleHandle(NULL)!=hMod));
+    PTR_PEImageLayout pLayout = PEImageLayout::CreateFromHMODULE(hMod, pImage, WszGetModuleHandle(NULL) != hMod);
+
+    pImage->SetLayout(IMAGE_FLAT, pLayout);
+    pLayout->AddRef();
+    pImage->SetLayout(IMAGE_LOADED, pLayout);
 
     RETURN dac_cast<PTR_PEImage>(pImage.Extract());
 }

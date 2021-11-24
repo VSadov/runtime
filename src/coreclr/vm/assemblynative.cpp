@@ -138,20 +138,7 @@ Assembly* AssemblyNative::LoadFromPEImage(AssemblyBinder* pBinder, PEImage *pIma
     CONTRACT_END;
 
     Assembly *pLoadedAssembly = NULL;
-
     ReleaseHolder<BINDER_SPACE::Assembly> pAssembly;
-
-    // Force the image to be loaded and mapped so that subsequent loads do not
-    // map a duplicate copy.
-    if (pImage->IsFile())
-    {
-        pImage->LoadFile();
-    }
-    else
-    {
-        pImage->LoadNoFile();
-    }
-
     DWORD dwMessageID = IDS_EE_FILELOAD_ERROR_GENERIC;
 
     // Set the caller's assembly to be CoreLib
