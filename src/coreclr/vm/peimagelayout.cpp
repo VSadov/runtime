@@ -101,7 +101,7 @@ PEImageLayout* PEImageLayout::Map(PEImage* pOwner)
     }
     CONTRACT_END;
 
-    PEImageLayoutHolder pAlloc = pOwner->GetUncompressedSize() >= 0 ?
+    PEImageLayoutHolder pAlloc = pOwner->GetUncompressedSize() > 0 ?
         LoadConverted(pOwner, /* isInBundle */ true):
         new MappedImageLayout(pOwner);
 
