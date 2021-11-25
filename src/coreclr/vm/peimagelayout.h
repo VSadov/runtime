@@ -47,7 +47,6 @@ public:
 #ifndef DACCESS_COMPILE
     static PEImageLayout* CreateFlat(const void *flat, COUNT_T size,PEImage* pOwner);
     static PEImageLayout* CreateFromHMODULE(HMODULE mappedbase,PEImage* pOwner, BOOL bTakeOwnership);
-    static PEImageLayout* LoadFromFlat(PEImageLayout* pflatimage);
     static PEImageLayout* Load(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* returnDontThrow = NULL);
     static PEImageLayout* LoadFlat(PEImage* pOwner);
     static PEImageLayout* LoadConverted(PEImage* pOwner, BOOL isInBundle = FALSE);

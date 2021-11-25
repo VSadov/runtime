@@ -817,6 +817,7 @@ PTR_PEImageLayout PEImage::GetOrCreateLayoutInternal(DWORD imageLayoutMask)
         // no-path layouts are filled up at creation, if image format permits.
         if (!HasPath())
         {
+            // TODO: VS we should manually map flat layouts for R2R here.
             ThrowHR(COR_E_BADIMAGEFORMAT);
         }
 
@@ -933,12 +934,10 @@ PTR_PEImage PEImage::LoadFlat(const void *flat, COUNT_T size)
 
     pImage->SetLayout(IMAGE_FLAT,pLayout);
 
-    // TODO: VS make a helper
-    // TODO: VS need to check R2R?
+    // TODO: VS allow R2R for now, meaning it will run as IL-only
     if (pLayout->CheckNTHeaders() &&
         pLayout->CheckILOnly() &&
-        !pLayout->HasWriteableSections() &&
-        !pLayout->HasReadyToRunHeader())
+        !pLayout->HasWriteableSections())
     {
         pLayout->AddRef();
         pImage->SetLayout(IMAGE_LOADED, pLayout);
