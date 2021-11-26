@@ -42,12 +42,13 @@ public:
         LAYOUT_ANY = 0xf
     };
 
-
 public:
 #ifndef DACCESS_COMPILE
     static PEImageLayout* CreateFlat(const void *flat, COUNT_T size,PEImage* pOwner);
-    static PEImageLayout* CreateFromHMODULE(HMODULE mappedbase,PEImage* pOwner, BOOL bTakeOwnership);
-    static PEImageLayout* Load(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* returnDontThrow = NULL);
+#ifndef TARGET_UNIX
+    static PEImageLayout* CreateFromHMODULE(HMODULE hModule,PEImage* pOwner);
+#endif
+    static PEImageLayout* Load(PEImage* pOwner, HRESULT* loadFailure);
     static PEImageLayout* LoadFlat(PEImage* pOwner);
     static PEImageLayout* LoadConverted(PEImage* pOwner, BOOL isInBundle = FALSE);
     static PEImageLayout* LoadNative(LPCWSTR fullPath);
@@ -60,7 +61,6 @@ public:
     // Refcount above images.
     void AddRef();
     ULONG Release();
-    const SString& GetPath();
 
     void ApplyBaseRelocations();
 
@@ -73,11 +73,9 @@ private:
     Volatile<LONG> m_refCount;
 public:
     PEImage* m_pOwner;
-    DWORD m_Layout;
 };
 
 typedef ReleaseHolder<PEImageLayout> PEImageLayoutHolder;
-
 
 //RawImageView is built on external data, does not need cleanup
 class RawImageLayout: public PEImageLayout
@@ -91,7 +89,6 @@ protected:
 
 public:
     RawImageLayout(const void *flat, COUNT_T size,PEImage* pOwner);
-    RawImageLayout(const void *mapped, PEImage* pOwner, BOOL bTakeOwnerShip, BOOL bFixedUp);
 };
 
 class FlatImageLayout;
@@ -140,7 +137,9 @@ protected:
     HINSTANCE m_Module;
 public:
 #ifndef DACCESS_COMPILE
-    LoadedImageLayout(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* returnDontThrow);
+    LoadedImageLayout(PEImage* pOwner, HRESULT* returnDontThrow);
+    LoadedImageLayout(PEImage* pOwner, HMODULE hModule);
+
     ~LoadedImageLayout()
     {
         CONTRACTL

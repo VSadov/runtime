@@ -27,8 +27,8 @@ PEImageLayout* PEImageLayout::CreateFlat(const void *flat, COUNT_T size,PEImage*
     return new RawImageLayout(flat,size,pOwner);
 }
 
-
-PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule,PEImage* pOwner, BOOL bTakeOwnership)
+#ifndef TARGET_UNIX
+PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule, PEImage* pOwner)
 {
     CONTRACTL
     {
@@ -37,8 +37,27 @@ PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule,PEImage* pOwner,
         MODE_ANY;
     }
     CONTRACTL_END;
-    return new RawImageLayout(hModule,pOwner,bTakeOwnership,TRUE);
+
+    PEImageLayout* pLoadLayout;
+    if (WszGetModuleHandle(NULL) == hModule)
+    {
+        return new LoadedImageLayout(pOwner, hModule);
+    }
+    else
+    {
+        HRESULT loadFailure = S_OK;
+        pLoadLayout = new LoadedImageLayout(pOwner, &loadFailure);
+
+        if (pLoadLayout == NULL)
+        {
+            loadFailure = FAILED(loadFailure) ? loadFailure : COR_E_BADIMAGEFORMAT;
+            EEFileLoadException::Throw(pOwner->GetPathForErrorMessages(), loadFailure);
+        }
+    }
+
+    return pLoadLayout;
 }
+#endif
 
 PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner, BOOL isInBundle)
 {
@@ -51,7 +70,7 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner, BOOL isInBundle)
     return new ConvertedImageLayout(pFlat, isInBundle);
 }
 
-PEImageLayout* PEImageLayout::Load(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* returnDontThrow)
+PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
 {
     STANDARD_VM_CONTRACT;
 
@@ -69,9 +88,10 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* r
         return PEImageLayout::Map(pOwner);
     }
 
-    PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner,bNTSafeLoad,returnDontThrow));
+    PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
     if (pAlloc->GetBase()==NULL)
         return NULL;
+
     return pAlloc.Extract();
 #endif
 }
@@ -341,7 +361,6 @@ RawImageLayout::RawImageLayout(const void *flat, COUNT_T size, PEImage* pOwner)
     }
     CONTRACTL_END;
     m_pOwner=pOwner;
-    m_Layout=LAYOUT_FLAT;
 
     if (size)
     {
@@ -372,34 +391,6 @@ RawImageLayout::RawImageLayout(const void *flat, COUNT_T size, PEImage* pOwner)
     }
     Init((void*)flat,size);
 }
-RawImageLayout::RawImageLayout(const void *loaded, PEImage* pOwner, BOOL bTakeOwnership, BOOL bFixedUp)
-{
-    CONTRACTL
-    {
-        CONSTRUCTOR_CHECK;
-        THROWS;
-        GC_TRIGGERS;
-        MODE_ANY;
-        INJECT_FAULT(COMPlusThrowOM(););
-    }
-    CONTRACTL_END;
-    m_pOwner=pOwner;
-    m_Layout=LAYOUT_LOADED;
-
-    if (bTakeOwnership)
-    {
-#ifndef TARGET_UNIX
-        PathString wszDllName;
-        WszGetModuleFileName((HMODULE)loaded, wszDllName);
-
-        m_LibraryHolder=CLRLoadLibraryEx(wszDllName,NULL,GetLoadWithAlteredSearchPathFlag());
-#else // !TARGET_UNIX
-        _ASSERTE(!"bTakeOwnership Should not be used on TARGET_UNIX");
-#endif // !TARGET_UNIX
-    }
-
-    IfFailThrow(Init((void*)loaded,(bool)(bFixedUp!=FALSE)));
-}
 
 ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source, BOOL isInBundle)
 {
@@ -415,7 +406,8 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source, BOOL isInBun
     m_pExceptionDir = NULL;
 
     if (!source->HasNTHeaders())
-        EEFileLoadException::Throw(GetPath(), COR_E_BADIMAGEFORMAT);
+        EEFileLoadException::Throw(source->m_pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
+
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
     // in bundle we may want to enable execution if the image contains R2R sections
@@ -533,7 +525,7 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
     _ASSERTE(pOwner->GetUncompressedSize() == 0);
 
     // If mapping was requested, try to do SEC_IMAGE mapping
-    LOG((LF_LOADER, LL_INFO100, "PEImage: Opening OS mapped %S (hFile %p)\n", (LPCWSTR) GetPath(), hFile));
+    LOG((LF_LOADER, LL_INFO100, "PEImage: Opening OS mapped %S (hFile %p)\n", (LPCWSTR) pOwner->GetPath(), hFile));
 
 #ifndef TARGET_UNIX
     _ASSERTE(!pOwner->IsInBundle());
@@ -609,7 +601,7 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
         return;
 
     LOG((LF_LOADER, LL_INFO1000, "PEImage: image %S (hFile %p) mapped @ %p\n",
-        (LPCWSTR) GetPath(), hFile, (void*)m_LoadedFile));
+        (LPCWSTR) pOwner->GetPath(), hFile, (void*)m_LoadedFile));
 
     IfFailThrow(Init((void *) m_LoadedFile));
 
@@ -645,7 +637,7 @@ MappedImageLayout::MappedImageLayout(PEImage* pOwner)
 }
 
 #if !defined(TARGET_UNIX)
-LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT* returnDontThrow)
+LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HRESULT* loadFailure)
 {
     CONTRACTL
     {
@@ -655,29 +647,26 @@ LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, BOOL bNTSafeLoad, HRESULT*
     }
     CONTRACTL_END;
 
-    m_Layout=LAYOUT_LOADED;
     m_pOwner=pOwner;
 
     DWORD dwFlags = GetLoadWithAlteredSearchPathFlag();
-    if (bNTSafeLoad)
-        dwFlags|=DONT_RESOLVE_DLL_REFERENCES;
-
     m_Module = CLRLoadLibraryEx(pOwner->GetPath(), NULL, dwFlags);
     if (m_Module == NULL)
     {
         // Fetch the HRESULT upfront before anybody gets a chance to corrupt it
         HRESULT hr = HRESULT_FROM_GetLastError();
-        if (returnDontThrow != NULL)
-        {
-            *returnDontThrow = hr;
-            return;
-        }
-
-        EEFileLoadException::Throw(pOwner->GetPath(), hr);
+        *loadFailure = HRESULT_FROM_GetLastError();
+        return;
     }
     IfFailThrow(Init(m_Module,true));
 
-    LOG((LF_LOADER, LL_INFO1000, "PEImage: Opened HMODULE %S\n", (LPCWSTR) GetPath()));
+    LOG((LF_LOADER, LL_INFO1000, "PEImage: Opened HMODULE %S\n", (LPCWSTR) pOwner->GetPath()));
+}
+
+LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HMODULE hModule)
+{
+    m_pOwner = pOwner;
+    PEDecoder::Init((void*)hModule, /* relocated */ true);
 }
 #endif // !TARGET_UNIX
 
@@ -690,14 +679,13 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
         PRECONDITION(CheckPointer(pOwner));
     }
     CONTRACTL_END;
-    m_Layout=LAYOUT_FLAT;
     m_pOwner=pOwner;
 
     HANDLE hFile = pOwner->GetFileHandle();
     INT64 offset = pOwner->GetOffset();
     INT64 size = pOwner->GetSize();
 
-    LOG((LF_LOADER, LL_INFO100, "PEImage: Opening flat %S\n", (LPCWSTR) GetPath()));
+    LOG((LF_LOADER, LL_INFO100, "PEImage: Opening flat %S\n", (LPCWSTR) pOwner->GetPath()));
 
     // If a size is not specified, load the whole file
     if (size == 0)

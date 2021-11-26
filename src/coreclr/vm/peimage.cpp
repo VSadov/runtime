@@ -869,9 +869,7 @@ PTR_PEImageLayout PEImage::CreateLayoutMapped(bool throwOnFailure)
     PEImageLayout * pLoadLayout = NULL;
 
     HRESULT loadFailure = S_OK;
-    // Try to load all files via LoadLibrary first. If LoadLibrary did not work,
-    // retry using regular mapping.
-    pLoadLayout = PEImageLayout::Load(this, FALSE /* bNTSafeLoad */, &loadFailure);
+    pLoadLayout = PEImageLayout::Load(this, &loadFailure);
     if (pLoadLayout != NULL)
     {
         SetLayout(IMAGE_LOADED,pLoadLayout);
@@ -918,7 +916,7 @@ PTR_PEImageLayout PEImage::CreateLayoutFlat()
 }
 
 /* static */
-PTR_PEImage PEImage::LoadFlat(const void *flat, COUNT_T size)
+PTR_PEImage PEImage::CreateFromByteArray(const BYTE* flat, COUNT_T size)
 {
     CONTRACT(PTR_PEImage)
     {
@@ -931,7 +929,6 @@ PTR_PEImage PEImage::LoadFlat(const void *flat, COUNT_T size)
     _ASSERTE(!pLayout->IsMapped());
 
     SimpleWriteLockHolder lock(pImage->m_pLayoutLock);
-
     pImage->SetLayout(IMAGE_FLAT,pLayout);
 
     // TODO: VS allow R2R for now, meaning it will run as IL-only
@@ -948,7 +945,7 @@ PTR_PEImage PEImage::LoadFlat(const void *flat, COUNT_T size)
 
 #ifndef TARGET_UNIX
 /* static */
-PTR_PEImage PEImage::LoadImage(HMODULE hMod)
+PTR_PEImage PEImage::CreateFromHMODULE(HMODULE hMod)
 {
     CONTRACT(PTR_PEImage)
     {
@@ -961,44 +958,28 @@ PTR_PEImage PEImage::LoadImage(HMODULE hMod)
     StackSString path;
     WszGetModuleFileName(hMod, path);
     PEImageHolder pImage(PEImage::OpenImage(path, MDInternalImport_Default));
+
     if (pImage->HasLoadedLayout())
+    {
+        _ASSERTE(pImage->m_pLayouts[IMAGE_FLAT] != NULL);
         RETURN dac_cast<PTR_PEImage>(pImage.Extract());
+    }
+
+    PTR_PEImageLayout pLayout = PEImageLayout::CreateFromHMODULE(hMod, pImage);
 
     SimpleWriteLockHolder lock(pImage->m_pLayoutLock);
-
-    PTR_PEImageLayout pLayout = PEImageLayout::CreateFromHMODULE(hMod, pImage, WszGetModuleHandle(NULL) != hMod);
-
-    pImage->SetLayout(IMAGE_FLAT, pLayout);
-    pLayout->AddRef();
     pImage->SetLayout(IMAGE_LOADED, pLayout);
+    if (pImage->m_pLayouts[IMAGE_FLAT] == NULL)
+    {
+        pLayout->AddRef();
+        pImage->SetLayout(IMAGE_FLAT, pLayout);
+    }
 
     RETURN dac_cast<PTR_PEImage>(pImage.Extract());
 }
 #endif // !TARGET_UNIX
 
 #endif //DACCESS_COMPILE
-
-//-------------------------------------------------------------------------------
-// Make best-case effort to obtain an image name for use in an error message.
-//
-// This routine must expect to be called before the this object is fully loaded.
-// It can return an empty if the name isn't available or the object isn't initialized
-// enough to get a name, but it mustn't crash.
-//-------------------------------------------------------------------------------
-LPCWSTR PEImage::GetPathForErrorMessages()
-{
-    CONTRACTL
-    {
-        THROWS;
-        GC_TRIGGERS;
-        INJECT_FAULT(COMPlusThrowOM(););
-        SUPPORTS_DAC_HOST_ONLY;
-    }
-    CONTRACTL_END
-
-    return m_path;
-}
-
 
 HANDLE PEImage::GetFileHandle()
 {

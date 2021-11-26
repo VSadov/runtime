@@ -73,9 +73,9 @@ public:
     ULONG Release();
 
 #ifndef DACCESS_COMPILE
-    static PTR_PEImage LoadFlat(const void *flat, COUNT_T size);
+    static PTR_PEImage CreateFromByteArray(const BYTE* flat, COUNT_T size);
 #ifndef TARGET_UNIX
-    static PTR_PEImage LoadImage(HMODULE hMod);
+    static PTR_PEImage CreateFromHMODULE(HMODULE hMod);
 #endif // !TARGET_UNIX
     static PTR_PEImage OpenImage(
         LPCWSTR pPath,
@@ -96,6 +96,7 @@ public:
     ULONG GetPathHash();
     const SString& GetPath();
     const SString& GetPathToLoad();
+    LPCWSTR GetPathForErrorMessages() { return GetPath(); }
 
     BOOL IsFile();
     BOOL IsInBundle() const;
@@ -105,8 +106,6 @@ public:
     INT64 GetUncompressedSize() const;
 
     HRESULT TryOpenFile();
-
-    LPCWSTR GetPathForErrorMessages();
 
     void GetMVID(GUID *pMvid);
     BOOL HasV1Metadata();
