@@ -125,6 +125,7 @@ public:
 #ifndef DACCESS_COMPILE
     FlatImageLayout(PEImage* pOwner);
     FlatImageLayout(PEImage* pOwner, const BYTE* array, COUNT_T size);
+    void LayoutILOnly(void* base) const;
 #endif
 
 };

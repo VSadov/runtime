@@ -67,6 +67,17 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
     if (!pFlat->CheckFormat())
         ThrowHR(COR_E_BADIMAGEFORMAT);
 
+    if (!pFlat->HasNTHeaders() || !pFlat->HasCorHeader() || !pFlat->IsILOnly())
+    {
+        return NULL;
+    }
+
+    bool enableExecution = pFlat->HasReadyToRunHeader() && pFlat->IsNativeMachineFormat() && g_fAllowNativeImages;
+    if (!enableExecution)
+    {
+        return pFlat.Extract();
+    }
+
     return new ConvertedImageLayout(pFlat);
 }
 
@@ -74,18 +85,20 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
 {
     STANDARD_VM_CONTRACT;
 
-    if (!pOwner->IsInBundle()
-#if defined(TARGET_UNIX)
-        || (pOwner->GetUncompressedSize() == 0)
-#endif
-        )
-    {
-        PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
-        if (pAlloc->GetBase() == NULL)
-            return NULL;
+// TODO: VS HACK HACK
 
-        return pAlloc.Extract();
-    }
+//    if (!pOwner->IsInBundle()
+//#if defined(TARGET_UNIX)
+//        || (pOwner->GetUncompressedSize() == 0)
+//#endif
+//        )
+//    {
+//        PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
+//        if (pAlloc->GetBase() == NULL)
+//            return NULL;
+//
+//        return pAlloc.Extract();
+//    }
 
     return PEImageLayout::LoadConverted(pOwner);
 }
@@ -329,23 +342,13 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
 
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
-    // in bundle we may want to enable execution if the image contains R2R sections
-    // so must ensure the mapping is compatible with that
-    bool enableExecution = 
-        source->HasCorHeader() &&
-        source->HasReadyToRunHeader() &&
-        g_fAllowNativeImages;
-
     DWORD mapAccess = PAGE_READWRITE;
     DWORD viewAccess = FILE_MAP_ALL_ACCESS;
 
 #if !defined(TARGET_UNIX)
-    if (enableExecution)
-    {
-        // to make sections executable on Windows the view must have EXECUTE permissions
-        mapAccess = PAGE_EXECUTE_READWRITE;
-        viewAccess = FILE_MAP_EXECUTE | FILE_MAP_WRITE;
-    }
+    // to make sections executable on Windows the view must have EXECUTE permissions
+    mapAccess = PAGE_EXECUTE_READWRITE;
+    viewAccess = FILE_MAP_EXECUTE | FILE_MAP_WRITE;
 #endif
 
     m_FileMap.Assign(WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL,
@@ -363,33 +366,31 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
     if (m_FileView == NULL)
         ThrowLastError();
 
-    source->LayoutILOnly(m_FileView, enableExecution);
+    source->LayoutILOnly(m_FileView);
+
     IfFailThrow(Init(m_FileView));
 
-    if (enableExecution)
-    {
-        if (!IsNativeMachineFormat())
-            ThrowHR(COR_E_BADIMAGEFORMAT);
+    if (!IsNativeMachineFormat())
+        ThrowHR(COR_E_BADIMAGEFORMAT);
 
-        // Do base relocation for PE, if necessary.
-        // otherwise R2R will be disabled for this image.
-        ApplyBaseRelocations();
+    // Do base relocation for PE, if necessary.
+    // otherwise R2R will be disabled for this image.
+    ApplyBaseRelocations();
 
-        // Check if there is a static function table and install it. (Windows only, except x86)
+    // Check if there is a static function table and install it. (Windows only, except x86)
 #if !defined(TARGET_UNIX) && !defined(TARGET_X86)
-        COUNT_T cbSize = 0;
-        PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
-        DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
+    COUNT_T cbSize = 0;
+    PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
+    DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
 
-        if (pExceptionDir != NULL)
-        {
-            if (!RtlAddFunctionTable(pExceptionDir, tableSize, (DWORD64)this->GetBase()))
-                ThrowLastError();
+    if (pExceptionDir != NULL)
+    {
+        if (!RtlAddFunctionTable(pExceptionDir, tableSize, (DWORD64)this->GetBase()))
+            ThrowLastError();
 
-            m_pExceptionDir = pExceptionDir;
-        }
-#endif //TARGET_X86
+        m_pExceptionDir = pExceptionDir;
     }
+#endif //TARGET_X86
 }
 
 ConvertedImageLayout::~ConvertedImageLayout()
@@ -653,6 +654,72 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner, const BYTE* array, COUNT_T siz
         memcpy(m_FileView, array, size);
         Init((void*)m_FileView, size);
     }
+}
+
+void FlatImageLayout::LayoutILOnly(void* base) const
+{
+    CONTRACT_VOID
+    {
+        INSTANCE_CHECK;
+        PRECONDITION(CheckZeroedMemory(base, VAL32(FindNTHeaders()->OptionalHeader.SizeOfImage)));
+        // Ideally we would require the layout address to honor the section alignment constraints.
+        // However, we do have 8K aligned IL only images which we load on 32 bit platforms. In this
+        // case, we can only guarantee OS page alignment (which after all, is good enough.)
+        PRECONDITION(CheckAligned((SIZE_T)base, GetOsPageSize()));
+        THROWS;
+        GC_NOTRIGGER;
+    }
+    CONTRACT_END;
+
+    // We're going to copy everything first, and write protect what we need to later.
+
+    // First, copy headers
+    CopyMemory(base, (void*)GetBase(), VAL32(FindNTHeaders()->OptionalHeader.SizeOfHeaders));
+
+    // Now, copy all sections to appropriate virtual address
+
+    IMAGE_SECTION_HEADER* sectionStart = IMAGE_FIRST_SECTION(FindNTHeaders());
+    IMAGE_SECTION_HEADER* sectionEnd = sectionStart + VAL16(FindNTHeaders()->FileHeader.NumberOfSections);
+
+    IMAGE_SECTION_HEADER* section = sectionStart;
+    while (section < sectionEnd)
+    {
+        // Raw data may be less than section size if tail is zero, but may be more since VirtualSize is
+        // not padded.
+        DWORD size = min(VAL32(section->SizeOfRawData), VAL32(section->Misc.VirtualSize));
+
+        CopyMemory((BYTE*)base + VAL32(section->VirtualAddress), (BYTE*)GetBase() + VAL32(section->PointerToRawData), size);
+
+        // Note that our memory is zeroed already, so no need to initialize any tail.
+
+        section++;
+    }
+
+    // Apply write protection to copied headers
+    DWORD oldProtection;
+    if (!ClrVirtualProtect((void*)base, VAL32(FindNTHeaders()->OptionalHeader.SizeOfHeaders),
+        PAGE_READONLY, &oldProtection))
+        ThrowLastError();
+
+    // Finally, apply proper protection to copied sections
+    for (section = sectionStart; section < sectionEnd; section++)
+    {
+        // Add appropriate page protection.
+        DWORD newProtection = section->Characteristics & IMAGE_SCN_MEM_EXECUTE ?
+            PAGE_EXECUTE_READ :
+            section->Characteristics & IMAGE_SCN_MEM_WRITE ?
+            PAGE_READWRITE :
+            PAGE_READONLY;
+
+        if (!ClrVirtualProtect((void*)((BYTE*)base + VAL32(section->VirtualAddress)),
+            VAL32(section->Misc.VirtualSize),
+            newProtection, &oldProtection))
+        {
+            ThrowLastError();
+        }
+    }
+
+    RETURN;
 }
 
 NativeImageLayout::NativeImageLayout(LPCWSTR fullPath)
