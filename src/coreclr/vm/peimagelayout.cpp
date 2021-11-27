@@ -766,7 +766,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner, const BYTE* array, COUNT_T siz
         }
 #endif // defined(TARGET_WINDOWS)
 
-        m_FileMap.Assign(WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 0, NULL));
+        m_FileMap.Assign(WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, NULL));
         if (m_FileMap == NULL)
             ThrowLastError();
 
