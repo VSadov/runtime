@@ -59,7 +59,7 @@ PEImageLayout* PEImageLayout::CreateFromHMODULE(HMODULE hModule, PEImage* pOwner
 }
 #endif
 
-PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner, BOOL isInBundle)
+PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
 {
     STANDARD_VM_CONTRACT;
 
@@ -67,33 +67,27 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner, BOOL isInBundle)
     if (!pFlat->CheckFormat())
         ThrowHR(COR_E_BADIMAGEFORMAT);
 
-    return new ConvertedImageLayout(pFlat, isInBundle);
+    return new ConvertedImageLayout(pFlat);
 }
 
 PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
 {
     STANDARD_VM_CONTRACT;
 
+    if (!pOwner->IsInBundle()
 #if defined(TARGET_UNIX)
-    return PEImageLayout::Map(pOwner);
-#else
-    if (pOwner->IsInBundle())
-    {
-        return PEImageLayout::LoadConverted(pOwner, true);
-    }
-
-    // TODO: VS this is always false, just to keep mapped layout alive for now (DAC failures)
-    if (!pOwner->IsFile())
-    {
-        return PEImageLayout::Map(pOwner);
-    }
-
-    PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
-    if (pAlloc->GetBase()==NULL)
-        return NULL;
-
-    return pAlloc.Extract();
+        || (pOwner->GetUncompressedSize() == 0)
 #endif
+        )
+    {
+        PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
+        if (pAlloc->GetBase() == NULL)
+            return NULL;
+
+        return pAlloc.Extract();
+    }
+
+    return PEImageLayout::LoadConverted(pOwner);
 }
 
 PEImageLayout* PEImageLayout::LoadFlat(PEImage* pOwner)
@@ -106,37 +100,6 @@ PEImageLayout *PEImageLayout::LoadNative(LPCWSTR fullPath)
 {
     STANDARD_VM_CONTRACT;
     return new NativeImageLayout(fullPath);
-}
-
-PEImageLayout* PEImageLayout::Map(PEImage* pOwner)
-{
-    CONTRACT(PEImageLayout*)
-    {
-        THROWS;
-        GC_TRIGGERS;
-        MODE_ANY;
-        PRECONDITION(CheckPointer(pOwner));
-        POSTCONDITION(CheckPointer(RETVAL));
-        POSTCONDITION(RETVAL->CheckFormat());
-    }
-    CONTRACT_END;
-
-    PEImageLayoutHolder pAlloc = pOwner->GetUncompressedSize() > 0 ?
-        LoadConverted(pOwner, /* isInBundle */ true):
-        new MappedImageLayout(pOwner);
-
-    if (pAlloc->GetBase()==NULL)
-    {
-        //cross-platform or a bad image
-        pAlloc = LoadConverted(pOwner);
-    }
-    else
-    {
-        if (!pAlloc->CheckFormat())
-            ThrowHR(COR_E_BADIMAGEFORMAT);
-    }
-
-    RETURN pAlloc.Extract();
 }
 
 #ifdef TARGET_UNIX
@@ -348,7 +311,7 @@ void PEImageLayout::ApplyBaseRelocations()
     }
 }
 
-ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source, BOOL isInBundle)
+ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
 {
     CONTRACTL
     {
@@ -447,152 +410,6 @@ ConvertedImageLayout::~ConvertedImageLayout()
 #endif
 }
 
-MappedImageLayout::~MappedImageLayout()
-{
-    CONTRACTL
-    {
-        NOTHROW;
-        GC_TRIGGERS;
-        MODE_ANY;
-    }
-    CONTRACTL_END;
-
-#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
-    if (m_pExceptionDir)
-    {
-        RtlDeleteFunctionTable(m_pExceptionDir);
-    }
-#endif
-}
-
-MappedImageLayout::MappedImageLayout(PEImage* pOwner)
-{
-    CONTRACTL
-    {
-        CONSTRUCTOR_CHECK;
-        STANDARD_VM_CHECK;
-    }
-    CONTRACTL_END;
-    m_pOwner=pOwner;
-    m_pExceptionDir = NULL;
-
-    HANDLE hFile = pOwner->GetFileHandle();
-    INT64 offset = pOwner->GetOffset();
-    _ASSERTE(pOwner->GetUncompressedSize() == 0);
-
-    // If mapping was requested, try to do SEC_IMAGE mapping
-    LOG((LF_LOADER, LL_INFO100, "PEImage: Opening OS mapped %S (hFile %p)\n", (LPCWSTR) pOwner->GetPath(), hFile));
-
-#ifndef TARGET_UNIX
-    _ASSERTE(!pOwner->IsInBundle());
-
-    // Let OS map file for us
-
-    // This may fail on e.g. cross-platform (32/64) loads.
-    m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL));
-    if (m_FileMap == NULL)
-    {
-
-        // Capture last error as it may get reset below.
-
-        DWORD dwLastError = GetLastError();
-        // There is no reflection-only load on CoreCLR and so we can always throw an error here.
-        // It is important on Windows Phone. All assemblies that we load must have SEC_IMAGE set
-        // so that the OS can perform signature verification.
-        if (pOwner->IsFile())
-        {
-            EEFileLoadException::Throw(pOwner->GetPathForErrorMessages(), HRESULT_FROM_WIN32(dwLastError));
-        }
-        else
-        {
-            // Throw generic exception.
-            ThrowWin32(dwLastError);
-        }
-
-        return;
-    }
-
-#ifdef _DEBUG
-    // Force relocs by occuping the preferred base while the actual mapping is performed
-    CLRMapViewHolder forceRelocs;
-    if (PEDecoder::GetForceRelocs())
-    {
-        forceRelocs.Assign(CLRMapViewOfFile(m_FileMap, 0, 0, 0, 0));
-    }
-#endif // _DEBUG
-
-    m_FileView.Assign(CLRMapViewOfFile(m_FileMap, 0, 0, 0, 0));
-    if (m_FileView == NULL)
-        ThrowLastError();
-    IfFailThrow(Init((void *) m_FileView));
-
-    if (!IsNativeMachineFormat() && !IsI386())
-    {
-        //can't rely on the image
-        Reset();
-        return;
-    }
-
-#ifdef _DEBUG
-    if (forceRelocs != NULL)
-    {
-        forceRelocs.Release();
-
-        if (CheckNTHeaders()) {
-            // Reserve the space so nobody can use it. A potential bug is likely to
-            // result in a plain AV this way. It is not a good idea to use the original
-            // mapping for the reservation since since it would lock the file on the disk.
-
-            // ignore any errors
-            ClrVirtualAlloc((void*)GetPreferredBase(), GetVirtualSize(), MEM_RESERVE, PAGE_NOACCESS);
-        }
-    }
-#endif // _DEBUG
-
-#else //!TARGET_UNIX
-
-    m_LoadedFile = PAL_LOADLoadPEFile(hFile, offset);
-
-    if (m_LoadedFile == NULL)
-        return;
-
-    LOG((LF_LOADER, LL_INFO1000, "PEImage: image %S (hFile %p) mapped @ %p\n",
-        (LPCWSTR) pOwner->GetPath(), hFile, (void*)m_LoadedFile));
-
-    IfFailThrow(Init((void *) m_LoadedFile));
-
-    if (!HasCorHeader())
-        ThrowHR(COR_E_BADIMAGEFORMAT);
-
-#endif // !TARGET_UNIX
-
-    if (HasReadyToRunHeader() && g_fAllowNativeImages)
-    {
-        //Do base relocation for PE, if necessary.
-        if (!IsNativeMachineFormat())
-            ThrowHR(COR_E_BADIMAGEFORMAT);
-
-        ApplyBaseRelocations();
-        SetRelocated();
-    }
-
-    // Check if there is a static function table and install it. (Windows only, except x86)
-#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
-    COUNT_T cbSize = 0;
-    PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
-    DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
-
-    if (pExceptionDir != NULL)
-    {
-        if (!RtlAddFunctionTable(pExceptionDir, tableSize, (DWORD64)this->GetBase()))
-            ThrowLastError();
-
-        m_pExceptionDir = pExceptionDir;
-    }
-#endif //TARGET_X86
-}
-
-#if !defined(TARGET_UNIX)
 LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HRESULT* loadFailure)
 {
     CONTRACTL
@@ -603,28 +420,87 @@ LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HRESULT* loadFailure)
     }
     CONTRACTL_END;
 
-    m_pOwner=pOwner;
+    m_pOwner = pOwner;
+    _ASSERTE(pOwner->GetUncompressedSize() == 0);
 
-    DWORD dwFlags = GetLoadWithAlteredSearchPathFlag();
-    m_Module = CLRLoadLibraryEx(pOwner->GetPath(), NULL, dwFlags);
+#ifndef TARGET_UNIX
+    _ASSERTE(!pOwner->IsInBundle());
+    m_Module = CLRLoadLibraryEx(pOwner->GetPath(), NULL, GetLoadWithAlteredSearchPathFlag());
     if (m_Module == NULL)
     {
         // Fetch the HRESULT upfront before anybody gets a chance to corrupt it
-        HRESULT hr = HRESULT_FROM_GetLastError();
         *loadFailure = HRESULT_FROM_GetLastError();
         return;
     }
-    IfFailThrow(Init(m_Module,true));
 
-    LOG((LF_LOADER, LL_INFO1000, "PEImage: Opened HMODULE %S\n", (LPCWSTR) pOwner->GetPath()));
+    IfFailThrow(Init(m_Module, true));
+    LOG((LF_LOADER, LL_INFO1000, "PEImage: Opened HMODULE %S\n", (LPCWSTR)pOwner->GetPath()));
+
+#else
+    HANDLE hFile = pOwner->GetFileHandle();
+    INT64 offset = pOwner->GetOffset();
+
+    m_LoadedFile = PAL_LOADLoadPEFile(hFile, offset);
+    if (m_LoadedFile == NULL)
+    {
+        // Fetch the HRESULT upfront before anybody gets a chance to corrupt it
+        *loadFailure = HRESULT_FROM_GetLastError();
+        return;
+    }
+
+    LOG((LF_LOADER, LL_INFO1000, "PEImage: image %S (hFile %p) mapped @ %p\n",
+        (LPCWSTR)pOwner->GetPath(), hFile, (void*)m_LoadedFile));
+
+    IfFailThrow(Init((void*)m_LoadedFile));
+
+    if (!HasCorHeader())
+    {
+        *loadFailure = COR_E_BADIMAGEFORMAT;
+        Reset();
+        return;
+    }
+
+    if (HasReadyToRunHeader() && g_fAllowNativeImages)
+    {
+        //Do base relocation for PE, if necessary.
+        if (!IsNativeMachineFormat())
+        {
+            *loadFailure = COR_E_BADIMAGEFORMAT;
+            Reset();
+            return;
+        }
+
+        ApplyBaseRelocations();
+        SetRelocated();
+    }
+#endif
 }
 
+#if !defined(TARGET_UNIX)
 LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HMODULE hModule)
 {
     m_pOwner = pOwner;
     PEDecoder::Init((void*)hModule, /* relocated */ true);
 }
 #endif // !TARGET_UNIX
+
+LoadedImageLayout::~LoadedImageLayout()
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        GC_TRIGGERS;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
+
+#if !defined(TARGET_UNIX)
+    if (m_Module)
+        CLRFreeLibrary(m_Module);
+#endif // !TARGET_UNIX
+}
+
+
 
 FlatImageLayout::FlatImageLayout(PEImage* pOwner)
 {
