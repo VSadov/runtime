@@ -770,16 +770,11 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner, const BYTE* array, COUNT_T siz
         if (m_FileMap == NULL)
             ThrowLastError();
 
-        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, FILE_MAP_WRITE, 0, 0, 0));
+        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, FILE_MAP_ALL_ACCESS, 0, 0, 0));
         if (m_FileView == NULL)
             ThrowLastError();
 
         memcpy(m_FileView, array, size);
-
-        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, FILE_MAP_READ, 0, 0, 0));
-        if (m_FileView == NULL)
-            ThrowLastError();
-
         Init((void*)m_FileView, size);
     }
 }
