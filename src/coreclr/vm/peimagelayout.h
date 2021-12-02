@@ -89,11 +89,11 @@ public:
 #ifndef DACCESS_COMPILE
     ConvertedImageLayout(FlatImageLayout* source);
     virtual ~ConvertedImageLayout();
-    void  Undo_LayoutILOnly2();
+    void  UndoMappedImageParts();
 #endif
 private:
     PT_RUNTIME_FUNCTION m_pExceptionDir;
-    PVOID               mappings[16];
+    PVOID               m_mappedImageParts[16];
 };
 
 class LoadedImageLayout: public PEImageLayout
@@ -129,7 +129,7 @@ public:
     FlatImageLayout(PEImage* pOwner, const BYTE* array, COUNT_T size);
     void LayoutILOnly(void* base) const;
 
-    void* LayoutILOnly2(SIZE_T offset, PVOID* mappings) const;
+    void* LoadImageByMappingParts(SIZE_T offset, PVOID* m_mappedImageParts) const;
 #endif
 
 };

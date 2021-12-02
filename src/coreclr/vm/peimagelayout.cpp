@@ -100,6 +100,15 @@ static PVOID MapIntoPlaceholder(
     return pMapViewOfFile3(FileMapping, ::GetCurrentProcess(), ToAddress, FromOffset, ViewSize, MEM_REPLACE_PLACEHOLDER, PageProtection, NULL, 0);
 }
 
+static PVOID CommitIntoPlaceholder(
+    PVOID                  ToAddress,
+    SIZE_T                 Size,
+    ULONG                  PageProtection
+)
+{
+    return pVirtualAlloc2(::GetCurrentProcess(), ToAddress, Size, MEM_COMMIT | MEM_RESERVE | MEM_REPLACE_PLACEHOLDER, PageProtection, NULL, 0);
+}
+
 static PVOID SplitPlaceholder(
     PVOID&  placeholderStart,
     PVOID   placeholderEnd,
@@ -179,20 +188,11 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
 {
     STANDARD_VM_CONTRACT;
 
+    // TODO: VS check if owner already has flat
     ReleaseHolder<FlatImageLayout> pFlat(new FlatImageLayout(pOwner));
-    if (!pFlat->CheckFormat())
-        ThrowHR(COR_E_BADIMAGEFORMAT);
 
-    if (!pFlat->HasNTHeaders() || !pFlat->HasCorHeader() || !pFlat->IsILOnly())
-    {
-        return NULL;
-    }
-
-    bool enableExecution = pFlat->HasReadyToRunHeader() && pFlat->IsNativeMachineFormat() && g_fAllowNativeImages;
-    if (!enableExecution)
-    {
-        return pFlat.Extract();
-    }
+    if (!pFlat->CheckILOnlyFormat())
+        EEFileLoadException::Throw(pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
 
     return new ConvertedImageLayout(pFlat);
 }
@@ -201,7 +201,7 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
 {
     STANDARD_VM_CONTRACT;
 
-// TODO: VS HACK HACK
+    // TODO: VS HACK HACK
 
 //    if (!pOwner->IsInBundle()
 //#if defined(TARGET_UNIX)
@@ -210,10 +210,8 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
 //        )
 //    {
 //        PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
-//        if (pAlloc->GetBase() == NULL)
-//            return NULL;
-//
-//        return pAlloc.Extract();
+//        if (pAlloc->GetBase() != NULL)
+//            return pAlloc.Extract();
 //    }
 
     return PEImageLayout::LoadConverted(pOwner);
@@ -325,9 +323,6 @@ void PEImageLayout::ApplyBaseRelocations()
             // Restore the protection
             if (dwOldProtection != 0)
             {
-                BOOL bExecRegion = (dwOldProtection & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
-                    PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
-
                 if (!ClrVirtualProtect(pWriteableRegion, cbWriteableRegion,
                                        dwOldProtection, &dwOldProtection))
                     ThrowLastError();
@@ -440,14 +435,16 @@ void PEImageLayout::ApplyBaseRelocations()
     }
 }
 
-void ConvertedImageLayout::Undo_LayoutILOnly2()
+void ConvertedImageLayout::UndoMappedImageParts()
 {
     for (int i = 0; i < 16; i++)
     {
-        PVOID curMapping = this->mappings[i];
+        PVOID curMapping = this->m_mappedImageParts[i];
         if (curMapping == 0)
             break;
 
+        // memory projected into placeholders is page-aligned.
+        // we are using "+1" to distinguish committed memory from mapped views, so that we know how to free them
         if ((SIZE_T)curMapping & 1)
         {
             VirtualFree((char*)curMapping - 1, 0, MEM_RELEASE);
@@ -457,7 +454,7 @@ void ConvertedImageLayout::Undo_LayoutILOnly2()
             UnmapViewOfFile(curMapping);
         }
 
-        this->mappings[i] = NULL;
+        this->m_mappedImageParts[i] = NULL;
     }
 }
 
@@ -469,30 +466,30 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
         STANDARD_VM_CHECK;
     }
     CONTRACTL_END;
-    m_pOwner=source->m_pOwner;
-    _ASSERTE(!source->IsMapped());
 
+    _ASSERTE(source->CheckILOnlyFormat());
+
+    m_pOwner = source->m_pOwner;
     m_pExceptionDir = NULL;
+    memset(m_mappedImageParts, 0, sizeof(m_mappedImageParts));
 
-    if (!source->HasNTHeaders())
-        EEFileLoadException::Throw(source->m_pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
+    void* loadedImage = NULL;
 
     // TODO: VS deal with LOG things.
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
-    void* mapped = NULL;
-
-    memset(mappings, 0, sizeof(mappings));
+#ifdef TARGET_WINDOWS
     if (HavePlaceholderAPI())
     {
-        mapped = source->LayoutILOnly2(0, this->mappings);
-        if (mapped == NULL)
+        loadedImage = source->LoadImageByMappingParts(0, this->m_mappedImageParts);
+        if (loadedImage == NULL)
         {
-            Undo_LayoutILOnly2();
+            UndoMappedImageParts();
         }
     }
+#endif //TARGET_WINDOWS
 
-    if (mapped == NULL)
+    if (loadedImage == NULL)
     {
         DWORD mapAccess = PAGE_READWRITE;
         DWORD viewAccess = FILE_MAP_ALL_ACCESS;
@@ -510,43 +507,49 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
         if (m_FileMap == NULL)
             ThrowLastError();
 
-        // TODO: VS we shoud not generally do this.
-        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0,
-            (void*)source->GetPreferredBase()));
+        void* preferreedBase = NULL;
+#ifdef FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
+        if (g_useDefaultBaseAddr)
+        {
+            preferreedBase = (void*)source->GetPreferredBase();
+        }
+#endif // FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
 
-        if (m_FileView == NULL)
-            m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0));
-
+        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0, preferreedBase));
         if (m_FileView == NULL)
             ThrowLastError();
 
         source->LayoutILOnly(m_FileView);
-        mapped = m_FileView;
+        loadedImage = m_FileView;
     }
 
-    IfFailThrow(Init(mapped));
+    IfFailThrow(Init(loadedImage));
 
-    if (!IsNativeMachineFormat())
-        ThrowHR(COR_E_BADIMAGEFORMAT);
-
-    // Do base relocation for PE, if necessary.
-    // otherwise R2R will be disabled for this image.
-    ApplyBaseRelocations();
-
-    // Check if there is a static function table and install it. (Windows only, except x86)
-#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
-    COUNT_T cbSize = 0;
-    PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
-    DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
-
-    if (pExceptionDir != NULL)
+    if (IsNativeMachineFormat() && g_fAllowNativeImages)
     {
-        if (!RtlAddFunctionTable(pExceptionDir, tableSize, (DWORD64)this->GetBase()))
-            ThrowLastError();
+        // Do base relocation for PE and exception hookup, if necessary.
+        // otherwise R2R will be disabled for this image.
 
-        m_pExceptionDir = pExceptionDir;
-    }
+        ApplyBaseRelocations();
+
+        // Check if there is a static function table and install it. (Windows only, except x86)
+#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
+        COUNT_T cbSize = 0;
+        PT_RUNTIME_FUNCTION   pExceptionDir = (PT_RUNTIME_FUNCTION)GetDirectoryEntryData(IMAGE_DIRECTORY_ENTRY_EXCEPTION, &cbSize);
+        DWORD tableSize = cbSize / sizeof(T_RUNTIME_FUNCTION);
+
+        if (pExceptionDir != NULL)
+        {
+            // the only native code that we expect here is from R2R images
+            _ASSERTE(HasReadyToRunHeader());
+
+            if (!RtlAddFunctionTable(pExceptionDir, tableSize, (DWORD64)this->GetBase()))
+                ThrowLastError();
+
+            m_pExceptionDir = pExceptionDir;
+        }
 #endif //TARGET_X86
+    }
 }
 
 ConvertedImageLayout::~ConvertedImageLayout()
@@ -559,12 +562,17 @@ ConvertedImageLayout::~ConvertedImageLayout()
     }
     CONTRACTL_END;
 
-#if !defined(TARGET_UNIX) && !defined(TARGET_X86)
+#ifdef TARGET_WINDOWS
+    UndoMappedImageParts();
+
+#ifndef TARGET_X86
     if (m_pExceptionDir)
     {
         RtlDeleteFunctionTable(m_pExceptionDir);
     }
-#endif
+#endif   //!TARGET_X86
+
+#endif   //TARGET_WINDOWS
 }
 
 LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HRESULT* loadFailure)
@@ -878,7 +886,7 @@ void FlatImageLayout::LayoutILOnly(void* base) const
     RETURN;
 }
 
-void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
+void* FlatImageLayout::LoadImageByMappingParts(SIZE_T offset, PVOID* m_mappedImageParts) const
 {
     CONTRACTL
     {
@@ -888,13 +896,15 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
     }
     CONTRACTL_END;
 
-    int currentMapping = 0;
+    _ASSERTE(HasNTHeaders());
+
+    int imagePartIndex = 0;
+    PVOID pReserved = NULL;
     IMAGE_NT_HEADERS* ntHeader = FindNTHeaders();
 
-    if  ((VAL32(IMAGE_NT_SIGNATURE) != VAL32(ntHeader->Signature))
-        || (VAL16(IMAGE_NT_OPTIONAL_HDR_MAGIC) != VAL16(ntHeader->OptionalHeader.Magic)))
+    if  (ntHeader->OptionalHeader.FileAlignment < GetOsPageSize())
     {
-        _ASSERTE(!"Magic number mismatch\n");
+        goto UNSUPPORTED;
     }
 
     SIZE_T preferredBase = ntHeader->OptionalHeader.ImageBase;
@@ -909,16 +919,15 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
     }
 #endif // FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
 
-    PVOID pReserved = AllocPlaceholder(usedBaseAddr, reserveSize);
+    pReserved = AllocPlaceholder(usedBaseAddr, reserveSize);
     if (pReserved == NULL)
-        ThrowLastError();
+        goto FAILED;
 
     PVOID loadedBase = pReserved;
     PVOID reservedEnd = (char*)loadedBase + reserveSize;
 
     // map the header, round up to page size
     SIZE_T headerSize = ROUND_UP_TO_PAGE(ntHeader->OptionalHeader.SizeOfHeaders);
-
 
     //first, map the PE header to the first page in the image.  Get pointers to the section headers
     IMAGE_DOS_HEADER* loadedHeader = (IMAGE_DOS_HEADER*)((SIZE_T)loadedBase + OffsetWithinPage(offset));
@@ -927,13 +936,13 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
     SIZE_T mapFrom = ROUND_DOWN_TO_PAGE(offset);
     PVOID  pHeader = SplitPlaceholder(pReserved, reservedEnd, headerSize);
     if (!pHeader)
-        ThrowLastError();
+        goto FAILED;
 
     pHeader = MapIntoPlaceholder(m_FileMap, mapFrom, pHeader, headerSize, PAGE_READONLY);
     if (!pHeader)
-        ThrowLastError();
+        goto FAILED;
 
-    mappings[currentMapping++] = pHeader;
+    m_mappedImageParts[imagePartIndex++] = pHeader;
 
     IMAGE_SECTION_HEADER* firstSection = (IMAGE_SECTION_HEADER*)(((SIZE_T)loadedHeader)
         + loadedHeader->e_lfanew
@@ -942,8 +951,8 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
 
     unsigned numSections = ntHeader->FileHeader.NumberOfSections;
     if (numSections + 2 > 16)
-        // too many sections. we do not want to handle this here, but it is not an error.
-        return NULL;
+        // too many sections. we do not expect this and do not want to handle here, but it is not an error.
+        goto UNSUPPORTED;
 
     for (unsigned i = 0; i < numSections; ++i)
     {
@@ -961,7 +970,7 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
             SIZE_T holeSize = (SIZE_T)sectionBaseAligned - (SIZE_T)pReserved;
             PVOID pHole = SplitPlaceholder(pReserved, reservedEnd, holeSize);
             if (!pHole)
-                ThrowLastError();
+                goto FAILED;
 
             VirtualFree(pHole, 0, MEM_RELEASE);
         }
@@ -984,13 +993,13 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
         SIZE_T mapSize = mapEnd - mapFrom;
         PVOID pSection = SplitPlaceholder(pReserved, reservedEnd, mapSize);
         if (!pSection)
-            ThrowLastError();
+            goto FAILED;
 
         pSection = MapIntoPlaceholder(m_FileMap, mapFrom, pSection, mapSize, pageProtection);
         if (!pSection)
-            ThrowLastError();
+            goto FAILED;
 
-        mappings[currentMapping++] = pSection;
+        m_mappedImageParts[imagePartIndex++] = pSection;
 
         if (mapEnd < dataEnd)
         {
@@ -998,14 +1007,15 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
             SIZE_T toCommit = ROUND_UP_TO_PAGE(toCopy);
             PVOID pCopy = SplitPlaceholder(pReserved, reservedEnd, toCommit);
             if (!pCopy)
-                ThrowLastError();
+                goto FAILED;
 
-            pCopy = pVirtualAlloc2(GetCurrentProcess(), pCopy, toCommit, MEM_COMMIT | MEM_RESERVE | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+            pCopy = CommitIntoPlaceholder(pCopy, toCommit, PAGE_READWRITE);
             if (!pSection)
-                ThrowLastError();
+                goto FAILED;
 
-            // add "1" to distinguish alloc from a mapped view.
-            mappings[currentMapping++] = (char*)pSection + 1;
+            // memory projected into placeholders is page-aligned.
+            // we are using "+1" to distinguish committed memory from mapped views, so that we know how to free them
+            m_mappedImageParts[imagePartIndex++] = (char*)pSection + 1;
 
             CopyMemory(pCopy, (char*)this->GetBase() + mapEnd, toCopy);
             VirtualProtect(pCopy, toCommit, pageProtection, &pageProtection);
@@ -1019,6 +1029,18 @@ void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
     }
 
     return loadedHeader;
+
+FAILED:
+    if (pReserved && pReserved < reservedEnd)
+        m_mappedImageParts[imagePartIndex++] = (char*)pReserved + 1;
+
+    ThrowLastError();
+
+UNSUPPORTED:
+    if (pReserved && pReserved < reservedEnd)
+        m_mappedImageParts[imagePartIndex++] = (char*)pReserved + 1;
+
+    return NULL;
 }
 
 NativeImageLayout::NativeImageLayout(LPCWSTR fullPath)
