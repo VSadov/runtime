@@ -20,6 +20,118 @@ extern "C"
 }
 #endif
 
+#if TARGET_WINDOWS
+
+// VirtualAlloc2
+typedef PVOID(WINAPI* VirtualAlloc2Fn)(
+    HANDLE                 Process,
+    PVOID                  BaseAddress,
+    SIZE_T                 Size,
+    ULONG                  AllocationType,
+    ULONG                  PageProtection,
+    MEM_EXTENDED_PARAMETER* ExtendedParameters,
+    ULONG                  ParameterCount);
+
+VirtualAlloc2Fn pVirtualAlloc2 = NULL;
+
+// MapViewOfFile3
+typedef PVOID(WINAPI* MapViewOfFile3Fn)(
+    HANDLE                 FileMapping,
+    HANDLE                 Process,
+    PVOID                  BaseAddress,
+    ULONG64                Offset,
+    SIZE_T                 ViewSize,
+    ULONG                  AllocationType,
+    ULONG                  PageProtection,
+    MEM_EXTENDED_PARAMETER* ExtendedParameters,
+    ULONG                  ParameterCount);
+
+MapViewOfFile3Fn pMapViewOfFile3 = NULL;
+
+static bool HavePlaceholderAPI()
+{
+    const MapViewOfFile3Fn INVALID_ADDRESS_CENTINEL = (MapViewOfFile3Fn)1;
+    if (pMapViewOfFile3 == INVALID_ADDRESS_CENTINEL)
+    {
+        return false;
+    }
+
+    if (pMapViewOfFile3 == NULL)
+    {
+        HMODULE hm = LoadLibraryW(_T("kernelbase.dll"));
+        if (hm != NULL)
+        {
+            pVirtualAlloc2 = (VirtualAlloc2Fn)GetProcAddress(hm, "VirtualAlloc2");
+            pMapViewOfFile3 = (MapViewOfFile3Fn)GetProcAddress(hm, "MapViewOfFile3");
+
+            FreeLibrary(hm);
+        }
+
+        if (pMapViewOfFile3 == NULL || pVirtualAlloc2 == NULL)
+        {
+            pMapViewOfFile3 = INVALID_ADDRESS_CENTINEL;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static PVOID AllocPlaceholder(PVOID BaseAddress, SIZE_T Size)
+{
+    return pVirtualAlloc2(
+        ::GetCurrentProcess(),
+        BaseAddress,
+        Size,
+        MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+        PAGE_NOACCESS,
+        NULL,
+        0);
+}
+
+static PVOID MapIntoPlaceholder(
+    HANDLE                 FileMapping,
+    ULONG64                FromOffset,
+    PVOID                  ToAddress,
+    SIZE_T                 ViewSize,
+    ULONG                  PageProtection
+)
+{
+    return pMapViewOfFile3(FileMapping, ::GetCurrentProcess(), ToAddress, FromOffset, ViewSize, MEM_REPLACE_PLACEHOLDER, PageProtection, NULL, 0);
+}
+
+static PVOID Split(
+    PVOID&   placeholder,
+    SIZE_T  size
+)
+{
+    PVOID result = placeholder;
+    if (VirtualFree(
+        placeholder,
+        size,
+        MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER))
+    {
+        placeholder = PVOID((SIZE_T)placeholder + size);
+        return result;
+    }
+
+    return NULL;
+}
+
+SIZE_T OffsetWithinPage(SIZE_T addr)
+{
+    return addr & (GetOsPageSize() - 1);
+}
+
+static SIZE_T RoundToPage(SIZE_T size, SIZE_T offset)
+{
+    size_t result = size + OffsetWithinPage(offset);
+    _ASSERTE(result >= size);
+    return ROUND_UP_TO_PAGE(result);
+}
+
+#endif
+
 #ifndef DACCESS_COMPILE
 PEImageLayout* PEImageLayout::CreateFromByteArray(PEImage* pOwner, const BYTE* array, COUNT_T size)
 {
@@ -340,35 +452,44 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
     if (!source->HasNTHeaders())
         EEFileLoadException::Throw(source->m_pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
 
+    // TODO: VS deal with LOG things.
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
-    DWORD mapAccess = PAGE_READWRITE;
-    DWORD viewAccess = FILE_MAP_ALL_ACCESS;
+    if (HavePlaceholderAPI())
+    {
+        void* mapped = source->LayoutILOnly2();
+        IfFailThrow(Init(mapped));
+    }
+    else
+    {
+        DWORD mapAccess = PAGE_READWRITE;
+        DWORD viewAccess = FILE_MAP_ALL_ACCESS;
 
 #if !defined(TARGET_UNIX)
-    // to make sections executable on Windows the view must have EXECUTE permissions
-    mapAccess = PAGE_EXECUTE_READWRITE;
-    viewAccess = FILE_MAP_EXECUTE | FILE_MAP_WRITE;
+        // to make sections executable on Windows the view must have EXECUTE permissions
+        mapAccess = PAGE_EXECUTE_READWRITE;
+        viewAccess = FILE_MAP_EXECUTE | FILE_MAP_WRITE;
 #endif
 
-    m_FileMap.Assign(WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL,
-        mapAccess, 0,
-        source->GetVirtualSize(), NULL));
+        m_FileMap.Assign(WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL,
+            mapAccess, 0,
+            source->GetVirtualSize(), NULL));
 
-    if (m_FileMap == NULL)
-        ThrowLastError();
+        if (m_FileMap == NULL)
+            ThrowLastError();
 
-    m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0,
-                                (void *) source->GetPreferredBase()));
-    if (m_FileView == NULL)
-        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0));
+        m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0,
+            (void*)source->GetPreferredBase()));
+        if (m_FileView == NULL)
+            m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0));
 
-    if (m_FileView == NULL)
-        ThrowLastError();
+        if (m_FileView == NULL)
+            ThrowLastError();
 
-    source->LayoutILOnly(m_FileView);
+        source->LayoutILOnly(m_FileView);
 
-    IfFailThrow(Init(m_FileView));
+        IfFailThrow(Init(m_FileView));
+    }
 
     if (!IsNativeMachineFormat())
         ThrowHR(COR_E_BADIMAGEFORMAT);
@@ -535,7 +656,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
     // It's okay if resource files are length zero
     if (size > 0)
     {
-        m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL));
+        m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, PAGE_EXECUTE_READ, 0, 0, NULL));
         if (m_FileMap == NULL)
             ThrowLastError();
 
@@ -720,6 +841,173 @@ void FlatImageLayout::LayoutILOnly(void* base) const
     }
 
     RETURN;
+}
+
+void* FlatImageLayout::LayoutILOnly2() const
+{
+    CONTRACTL
+    {
+        INSTANCE_CHECK;
+        THROWS;
+        GC_NOTRIGGER;
+    }
+    CONTRACTL_END;
+
+    SIZE_T offset = 0;
+//    bool forceOveralign = false;
+    IMAGE_DOS_HEADER* loadedHeader = NULL;
+
+    IMAGE_NT_HEADERS* ntHeader = FindNTHeaders();
+
+    if  ((VAL32(IMAGE_NT_SIGNATURE) != VAL32(ntHeader->Signature))
+        || (VAL16(IMAGE_NT_OPTIONAL_HDR_MAGIC) != VAL16(ntHeader->OptionalHeader.Magic)))
+    {
+        _ASSERTE(!"Magic number mismatch\n");
+    }
+
+    SIZE_T preferredBase = ntHeader->OptionalHeader.ImageBase;
+    SIZE_T virtualSize = ntHeader->OptionalHeader.SizeOfImage;
+    SIZE_T reserveSize = RoundToPage(virtualSize, offset);
+
+    // TODO: VS HACK
+    PVOID usedBaseAddr = NULL; // (PVOID)preferredBase;
+#ifdef FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
+    if (g_useDefaultBaseAddr)
+    {
+        usedBaseAddr = (PVOID)preferredBase;
+    }
+#endif // FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
+
+    PVOID pReserved = AllocPlaceholder(usedBaseAddr, reserveSize);
+
+    PVOID loadedBase = pReserved;
+    PVOID imageEnd = (char*)loadedBase + reserveSize;
+
+    // map the header, round up to page size
+    SIZE_T headerSize = ROUND_UP_TO_PAGE(ntHeader->OptionalHeader.SizeOfHeaders);
+
+    //if (forceOveralign)
+    //{
+    //    // TODO: VS we would need to make a hole here.
+    //    loadedBase = ALIGN_UP(loadedBase, ntHeader->OptionalHeader.SectionAlignment);
+    //    headerSize = ntHeader->OptionalHeader.SectionAlignment;
+    //}
+
+    _ASSERTE(OffsetWithinPage((SIZE_T)loadedBase) == 0);
+
+    //first, map the PE header to the first page in the image.  Get pointers to the section headers
+    loadedHeader = (IMAGE_DOS_HEADER*)((SIZE_T)loadedBase + OffsetWithinPage(offset));
+
+    PVOID loadedHeaderBase = NULL;
+
+    _ASSERTE(OffsetWithinPage(offset) == OffsetWithinPage((SIZE_T)loadedHeader));
+
+    SIZE_T mapFrom = ROUND_DOWN_TO_PAGE(offset);
+    PVOID  pHeader = Split(pReserved, headerSize);
+    MapIntoPlaceholder(m_FileMap, mapFrom, pHeader, headerSize, PAGE_READONLY);
+
+    IMAGE_SECTION_HEADER* firstSection = (IMAGE_SECTION_HEADER*)(((SIZE_T)loadedHeader)
+        + loadedHeader->e_lfanew
+        + offsetof(IMAGE_NT_HEADERS, OptionalHeader)
+        + VAL16(ntHeader->FileHeader.SizeOfOptionalHeader));
+
+    unsigned numSections = ntHeader->FileHeader.NumberOfSections;
+
+    for (unsigned i = 0; i < numSections; ++i)
+    {
+        //for each section, map the section of the file to the correct virtual offset.
+        IMAGE_SECTION_HEADER& currentHeader = firstSection[i];
+        SIZE_T sectionBase = (SIZE_T)loadedHeader + currentHeader.VirtualAddress;
+        SIZE_T sectionBaseAligned = ROUND_DOWN_TO_PAGE(sectionBase);
+
+        // can't allow sections to overlap
+        _ASSERTE((SIZE_T)pReserved <= sectionBaseAligned);
+
+        // Is there space between the previous section and this one? If so, split an unmapped placeholder to cover it.
+        if ((SIZE_T)pReserved < sectionBaseAligned)
+        {
+            SIZE_T holeSize = (SIZE_T)sectionBaseAligned - (SIZE_T)pReserved;
+            PVOID pHole = Split(pReserved, holeSize);
+            VirtualFree(pHole, 0, MEM_RELEASE);
+        }
+
+        DWORD pageProtection = currentHeader.Characteristics & IMAGE_SCN_MEM_EXECUTE ?
+            PAGE_EXECUTE_READ :
+            currentHeader.Characteristics & IMAGE_SCN_MEM_WRITE ?
+                PAGE_WRITECOPY :
+                PAGE_READONLY;
+
+        mapFrom = ROUND_DOWN_TO_PAGE(offset + currentHeader.PointerToRawData);
+        SIZE_T dataEnd = offset + currentHeader.PointerToRawData + currentHeader.SizeOfRawData;
+        SIZE_T mapEnd  = ROUND_UP_TO_PAGE(dataEnd);
+        while (mapEnd > this->GetSize())
+        {
+            mapEnd -= GetOsPageSize();
+        }
+
+        _ASSERTE(mapEnd > mapFrom);
+        SIZE_T mapSize = mapEnd - mapFrom;
+        PVOID pSection = pReserved;
+        if ((char*)pReserved + mapSize < imageEnd)
+        {
+            pSection = Split(pReserved, mapSize);
+        }
+        else
+        {
+            pReserved = (char*)pReserved + mapSize;
+        }
+
+        pSection = MapIntoPlaceholder(m_FileMap, mapFrom, pSection, mapSize, pageProtection);
+        if (pSection == NULL)
+        {
+            //ERROR_(LOADER)("mmap of section %d failed\n", i);
+            //goto doneReleaseMappingCriticalSection;
+            _ASSERTE(!"map failed1 \n");
+        }
+
+        if (mapEnd < dataEnd)
+        {
+            SIZE_T toCopy = dataEnd - mapEnd;
+            SIZE_T toCommit = ROUND_UP_TO_PAGE(toCopy);
+
+            PVOID pCopy = pReserved;
+            if ((char*)pReserved + toCommit < imageEnd)
+            {
+                pCopy = Split(pReserved, toCommit);
+            }
+            else
+            {
+                pReserved = (char*)pReserved + toCommit;
+            }
+
+            pCopy = pVirtualAlloc2(GetCurrentProcess(), pCopy, toCommit, MEM_COMMIT | MEM_RESERVE | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+            if (pCopy == NULL)
+            {
+                //ERROR_(LOADER)("mmap of section %d failed\n", i);
+                //goto doneReleaseMappingCriticalSection;
+                _ASSERTE(!"map failed2 \n");
+            }
+
+            CopyMemory(pCopy, (char*)this->GetBase() + mapEnd, toCopy);
+            VirtualProtect(pCopy, toCommit, pageProtection, &pageProtection);
+        }
+    }
+
+    // Is there space after the last section and before the end of the mapped image? If so, add a PROT_NONE mapping to cover it.
+    if (pReserved < imageEnd)
+    {
+        SIZE_T unusedSize = (SIZE_T)imageEnd - (SIZE_T)pReserved;
+        PVOID pUnused = MapIntoPlaceholder(m_FileMap, 0, pReserved, unusedSize, PAGE_NOACCESS);
+
+        if (pUnused == NULL)
+        {
+            //ERROR_(LOADER)("recording end of image gap section failed\n");
+            //goto doneReleaseMappingCriticalSection;
+            _ASSERTE(!"map failed3 \n");
+        }
+    }
+
+    return loadedHeader;
 }
 
 NativeImageLayout::NativeImageLayout(LPCWSTR fullPath)
