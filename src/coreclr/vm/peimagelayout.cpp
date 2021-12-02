@@ -100,22 +100,26 @@ static PVOID MapIntoPlaceholder(
     return pMapViewOfFile3(FileMapping, ::GetCurrentProcess(), ToAddress, FromOffset, ViewSize, MEM_REPLACE_PLACEHOLDER, PageProtection, NULL, 0);
 }
 
-static PVOID Split(
-    PVOID&   placeholder,
+static PVOID SplitPlaceholder(
+    PVOID&  placeholderStart,
+    PVOID   placeholderEnd,
     SIZE_T  size
 )
 {
-    PVOID result = placeholder;
-    if (VirtualFree(
-        placeholder,
-        size,
-        MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER))
+    _ASSERTE((char*)placeholderStart + size <= placeholderEnd);
+
+    if ((char*)placeholderStart + size < placeholderEnd)
     {
-        placeholder = PVOID((SIZE_T)placeholder + size);
-        return result;
+        if (!VirtualFree(placeholderStart, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER))
+        {
+            return NULL;
+        }
     }
 
-    return NULL;
+    PVOID result = placeholderStart;
+    placeholderStart = (char*)placeholderStart + size;
+
+    return result;
 }
 
 SIZE_T OffsetWithinPage(SIZE_T addr)
@@ -436,6 +440,27 @@ void PEImageLayout::ApplyBaseRelocations()
     }
 }
 
+void ConvertedImageLayout::Undo_LayoutILOnly2()
+{
+    for (int i = 0; i < 16; i++)
+    {
+        PVOID curMapping = this->mappings[i];
+        if (curMapping == 0)
+            break;
+
+        if ((SIZE_T)curMapping & 1)
+        {
+            VirtualFree((char*)curMapping - 1, 0, MEM_RELEASE);
+        }
+        else
+        {
+            UnmapViewOfFile(curMapping);
+        }
+
+        this->mappings[i] = NULL;
+    }
+}
+
 ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
 {
     CONTRACTL
@@ -455,12 +480,19 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
     // TODO: VS deal with LOG things.
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
+    void* mapped = NULL;
+
+    memset(mappings, 0, sizeof(mappings));
     if (HavePlaceholderAPI())
     {
-        void* mapped = source->LayoutILOnly2();
-        IfFailThrow(Init(mapped));
+        mapped = source->LayoutILOnly2(0, this->mappings);
+        if (mapped == NULL)
+        {
+            Undo_LayoutILOnly2();
+        }
     }
-    else
+
+    if (mapped == NULL)
     {
         DWORD mapAccess = PAGE_READWRITE;
         DWORD viewAccess = FILE_MAP_ALL_ACCESS;
@@ -478,8 +510,10 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
         if (m_FileMap == NULL)
             ThrowLastError();
 
+        // TODO: VS we shoud not generally do this.
         m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0,
             (void*)source->GetPreferredBase()));
+
         if (m_FileView == NULL)
             m_FileView.Assign(CLRMapViewOfFile(m_FileMap, viewAccess, 0, 0, 0));
 
@@ -487,9 +521,10 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
             ThrowLastError();
 
         source->LayoutILOnly(m_FileView);
-
-        IfFailThrow(Init(m_FileView));
+        mapped = m_FileView;
     }
+
+    IfFailThrow(Init(mapped));
 
     if (!IsNativeMachineFormat())
         ThrowHR(COR_E_BADIMAGEFORMAT);
@@ -843,7 +878,7 @@ void FlatImageLayout::LayoutILOnly(void* base) const
     RETURN;
 }
 
-void* FlatImageLayout::LayoutILOnly2() const
+void* FlatImageLayout::LayoutILOnly2(SIZE_T offset, PVOID* mappings) const
 {
     CONTRACTL
     {
@@ -853,10 +888,7 @@ void* FlatImageLayout::LayoutILOnly2() const
     }
     CONTRACTL_END;
 
-    SIZE_T offset = 0;
-//    bool forceOveralign = false;
-    IMAGE_DOS_HEADER* loadedHeader = NULL;
-
+    int currentMapping = 0;
     IMAGE_NT_HEADERS* ntHeader = FindNTHeaders();
 
     if  ((VAL32(IMAGE_NT_SIGNATURE) != VAL32(ntHeader->Signature))
@@ -869,8 +901,7 @@ void* FlatImageLayout::LayoutILOnly2() const
     SIZE_T virtualSize = ntHeader->OptionalHeader.SizeOfImage;
     SIZE_T reserveSize = RoundToPage(virtualSize, offset);
 
-    // TODO: VS HACK
-    PVOID usedBaseAddr = NULL; // (PVOID)preferredBase;
+    PVOID usedBaseAddr = NULL;
 #ifdef FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
     if (g_useDefaultBaseAddr)
     {
@@ -879,32 +910,30 @@ void* FlatImageLayout::LayoutILOnly2() const
 #endif // FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
 
     PVOID pReserved = AllocPlaceholder(usedBaseAddr, reserveSize);
+    if (pReserved == NULL)
+        ThrowLastError();
 
     PVOID loadedBase = pReserved;
-    PVOID imageEnd = (char*)loadedBase + reserveSize;
+    PVOID reservedEnd = (char*)loadedBase + reserveSize;
 
     // map the header, round up to page size
     SIZE_T headerSize = ROUND_UP_TO_PAGE(ntHeader->OptionalHeader.SizeOfHeaders);
 
-    //if (forceOveralign)
-    //{
-    //    // TODO: VS we would need to make a hole here.
-    //    loadedBase = ALIGN_UP(loadedBase, ntHeader->OptionalHeader.SectionAlignment);
-    //    headerSize = ntHeader->OptionalHeader.SectionAlignment;
-    //}
-
-    _ASSERTE(OffsetWithinPage((SIZE_T)loadedBase) == 0);
 
     //first, map the PE header to the first page in the image.  Get pointers to the section headers
-    loadedHeader = (IMAGE_DOS_HEADER*)((SIZE_T)loadedBase + OffsetWithinPage(offset));
-
-    PVOID loadedHeaderBase = NULL;
-
+    IMAGE_DOS_HEADER* loadedHeader = (IMAGE_DOS_HEADER*)((SIZE_T)loadedBase + OffsetWithinPage(offset));
     _ASSERTE(OffsetWithinPage(offset) == OffsetWithinPage((SIZE_T)loadedHeader));
 
     SIZE_T mapFrom = ROUND_DOWN_TO_PAGE(offset);
-    PVOID  pHeader = Split(pReserved, headerSize);
-    MapIntoPlaceholder(m_FileMap, mapFrom, pHeader, headerSize, PAGE_READONLY);
+    PVOID  pHeader = SplitPlaceholder(pReserved, reservedEnd, headerSize);
+    if (!pHeader)
+        ThrowLastError();
+
+    pHeader = MapIntoPlaceholder(m_FileMap, mapFrom, pHeader, headerSize, PAGE_READONLY);
+    if (!pHeader)
+        ThrowLastError();
+
+    mappings[currentMapping++] = pHeader;
 
     IMAGE_SECTION_HEADER* firstSection = (IMAGE_SECTION_HEADER*)(((SIZE_T)loadedHeader)
         + loadedHeader->e_lfanew
@@ -912,6 +941,9 @@ void* FlatImageLayout::LayoutILOnly2() const
         + VAL16(ntHeader->FileHeader.SizeOfOptionalHeader));
 
     unsigned numSections = ntHeader->FileHeader.NumberOfSections;
+    if (numSections + 2 > 16)
+        // too many sections. we do not want to handle this here, but it is not an error.
+        return NULL;
 
     for (unsigned i = 0; i < numSections; ++i)
     {
@@ -927,7 +959,10 @@ void* FlatImageLayout::LayoutILOnly2() const
         if ((SIZE_T)pReserved < sectionBaseAligned)
         {
             SIZE_T holeSize = (SIZE_T)sectionBaseAligned - (SIZE_T)pReserved;
-            PVOID pHole = Split(pReserved, holeSize);
+            PVOID pHole = SplitPlaceholder(pReserved, reservedEnd, holeSize);
+            if (!pHole)
+                ThrowLastError();
+
             VirtualFree(pHole, 0, MEM_RELEASE);
         }
 
@@ -947,64 +982,40 @@ void* FlatImageLayout::LayoutILOnly2() const
 
         _ASSERTE(mapEnd > mapFrom);
         SIZE_T mapSize = mapEnd - mapFrom;
-        PVOID pSection = pReserved;
-        if ((char*)pReserved + mapSize < imageEnd)
-        {
-            pSection = Split(pReserved, mapSize);
-        }
-        else
-        {
-            pReserved = (char*)pReserved + mapSize;
-        }
+        PVOID pSection = SplitPlaceholder(pReserved, reservedEnd, mapSize);
+        if (!pSection)
+            ThrowLastError();
 
         pSection = MapIntoPlaceholder(m_FileMap, mapFrom, pSection, mapSize, pageProtection);
-        if (pSection == NULL)
-        {
-            //ERROR_(LOADER)("mmap of section %d failed\n", i);
-            //goto doneReleaseMappingCriticalSection;
-            _ASSERTE(!"map failed1 \n");
-        }
+        if (!pSection)
+            ThrowLastError();
+
+        mappings[currentMapping++] = pSection;
 
         if (mapEnd < dataEnd)
         {
             SIZE_T toCopy = dataEnd - mapEnd;
             SIZE_T toCommit = ROUND_UP_TO_PAGE(toCopy);
-
-            PVOID pCopy = pReserved;
-            if ((char*)pReserved + toCommit < imageEnd)
-            {
-                pCopy = Split(pReserved, toCommit);
-            }
-            else
-            {
-                pReserved = (char*)pReserved + toCommit;
-            }
+            PVOID pCopy = SplitPlaceholder(pReserved, reservedEnd, toCommit);
+            if (!pCopy)
+                ThrowLastError();
 
             pCopy = pVirtualAlloc2(GetCurrentProcess(), pCopy, toCommit, MEM_COMMIT | MEM_RESERVE | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
-            if (pCopy == NULL)
-            {
-                //ERROR_(LOADER)("mmap of section %d failed\n", i);
-                //goto doneReleaseMappingCriticalSection;
-                _ASSERTE(!"map failed2 \n");
-            }
+            if (!pSection)
+                ThrowLastError();
+
+            // add "1" to distinguish alloc from a mapped view.
+            mappings[currentMapping++] = (char*)pSection + 1;
 
             CopyMemory(pCopy, (char*)this->GetBase() + mapEnd, toCopy);
             VirtualProtect(pCopy, toCommit, pageProtection, &pageProtection);
         }
     }
 
-    // Is there space after the last section and before the end of the mapped image? If so, add a PROT_NONE mapping to cover it.
-    if (pReserved < imageEnd)
+    // Is there space after the last section and before the end of the mapped image? If so, release it.
+    if (pReserved < reservedEnd)
     {
-        SIZE_T unusedSize = (SIZE_T)imageEnd - (SIZE_T)pReserved;
-        PVOID pUnused = MapIntoPlaceholder(m_FileMap, 0, pReserved, unusedSize, PAGE_NOACCESS);
-
-        if (pUnused == NULL)
-        {
-            //ERROR_(LOADER)("recording end of image gap section failed\n");
-            //goto doneReleaseMappingCriticalSection;
-            _ASSERTE(!"map failed3 \n");
-        }
+        VirtualFree(pReserved, 0, MEM_RELEASE);
     }
 
     return loadedHeader;
