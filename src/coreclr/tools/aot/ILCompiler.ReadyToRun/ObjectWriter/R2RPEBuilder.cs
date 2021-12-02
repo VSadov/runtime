@@ -440,7 +440,8 @@ namespace ILCompiler.PEWriter
 
             // Patch SizeOfImage to point past the end of the last section
             outputStream.Seek(DosHeaderSize + PESignatureSize + COFFHeaderSize + OffsetOfSizeOfImage, SeekOrigin.Begin);
-            int sizeOfImage = AlignmentHelper.AlignUp(_sectionRVAs[sectionCount - 1] + _sectionRawSizes[sectionCount - 1], Header.SectionAlignment);
+            int alignedLastSectionSize = AlignmentHelper.AlignUp(_sectionRawSizes[sectionCount - 1], Header.SectionAlignment);
+            int sizeOfImage = AlignmentHelper.AlignUp(_sectionRVAs[sectionCount - 1] + alignedLastSectionSize, Header.SectionAlignment);
             byte[] sizeOfImageBytes = BitConverter.GetBytes(sizeOfImage);
             Debug.Assert(sizeOfImageBytes.Length == sizeof(int));
             outputStream.Write(sizeOfImageBytes, 0, sizeOfImageBytes.Length);
@@ -597,7 +598,7 @@ namespace ILCompiler.PEWriter
                 location = new SectionLocation(sectionStartRva, newSectionPointerToRawData);
             }
 
-            if (!_target.IsWindows)
+            //if (!_target.IsWindows)
             {
                 if (outputSectionIndex > 0)
                 {
@@ -683,19 +684,19 @@ namespace ILCompiler.PEWriter
             ulong imageBase = is64BitTarget ? PE64HeaderConstants.DllImageBase : PE32HeaderConstants.ImageBase;
 
             int fileAlignment = 0x200;
-            if (!target.IsWindows && !is64BitTarget)
-            {
-                // To minimize wasted VA space on 32-bit systems, align file to page boundaries (presumed to be 4K)
-                fileAlignment = 0x1000;
-            }
+            //if (!target.IsWindows && !is64BitTarget)
+            //{
+            //    // To minimize wasted VA space on 32-bit systems, align file to page boundaries (presumed to be 4K)
+            //    fileAlignment = 0x1000;
+            //}
 
-            int sectionAlignment = 0x1000;
-            if (!target.IsWindows && is64BitTarget)
-            {
-                // On Linux, we must match the bottom 12 bits of section RVA's to their file offsets. For this reason
-                // we need the same alignment for both.
-                sectionAlignment = fileAlignment;
-            }
+            int sectionAlignment = 0x200;
+            //if (!target.IsWindows && is64BitTarget)
+            //{
+            //    // On Linux, we must match the bottom 12 bits of section RVA's to their file offsets. For this reason
+            //    // we need the same alignment for both.
+            //    sectionAlignment = fileAlignment;
+            //}
 
             // Without NxCompatible the PE executable cannot execute on Windows ARM64
             DllCharacteristics dllCharacteristics =
