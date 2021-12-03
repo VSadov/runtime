@@ -63,11 +63,24 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
 {
     STANDARD_VM_CONTRACT;
 
-    // TODO: VS check if owner already has flat
-    ReleaseHolder<FlatImageLayout> pFlat(new FlatImageLayout(pOwner));
+    _ASSERTE(!pOwner->HasLoadedLayout());
 
-    if (!pFlat->CheckILOnlyFormat())
+    ReleaseHolder<FlatImageLayout> pFlat;
+    if (pOwner->IsOpened())
+    {
+        pFlat = (FlatImageLayout*)pOwner->GetFlatLayout();
+        pFlat.SuppressRelease();
+    }
+    else if (pOwner->IsFile())
+    {
+        pFlat = new FlatImageLayout(pOwner);
+    }
+
+    if (pFlat == NULL || !pFlat->CheckILOnlyFormat())
         EEFileLoadException::Throw(pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
+
+    // TODO: VS consider returning flat with no writeable sections on Unix
+    //       also assert that R2R has loaded.
 
     return new ConvertedImageLayout(pFlat);
 }
@@ -76,18 +89,19 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
 {
     STANDARD_VM_CONTRACT;
 
-    // TODO: VS HACK HACK
-
-//    if (!pOwner->IsInBundle()
-//#if defined(TARGET_UNIX)
-//        || (pOwner->GetUncompressedSize() == 0)
-//#endif
-//        )
-//    {
-//        PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
-//        if (pAlloc->GetBase() != NULL)
-//            return pAlloc.Extract();
-//    }
+    if (pOwner->IsFile())
+    {
+        if (!pOwner->IsInBundle()
+#if defined(TARGET_UNIX)
+            || (pOwner->GetUncompressedSize() == 0)
+#endif
+            )
+        {
+            PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
+            if (pAlloc->GetBase() != NULL)
+                return pAlloc.Extract();
+        }
+    }
 
     return PEImageLayout::LoadConverted(pOwner);
 }
@@ -332,7 +346,7 @@ static SIZE_T IsAllocatedPart(SIZE_T part)
 
 void ConvertedImageLayout::FreeImageParts()
 {
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < ConvertedImageLayout::MAX_PARTS; i++)
     {
         SIZE_T imagePart = this->m_imageParts[i];
         if (imagePart == 0)
@@ -961,7 +975,7 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
         + VAL16(ntHeader->FileHeader.SizeOfOptionalHeader));
 
     unsigned numSections = ntHeader->FileHeader.NumberOfSections;
-    if (numSections + 2 > 16)
+    if (numSections + 2 > ConvertedImageLayout::MAX_PARTS)
         // too many sections. we do not expect this and do not want to handle here, but it is not an error.
         goto UNSUPPORTED;
 

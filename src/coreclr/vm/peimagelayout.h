@@ -83,6 +83,7 @@ class ConvertedImageLayout: public PEImageLayout
 {
     VPTR_VTABLE_CLASS(ConvertedImageLayout,PEImageLayout)
 public:
+    static const int MAX_PARTS = 16;
 #ifndef DACCESS_COMPILE
     ConvertedImageLayout(FlatImageLayout* source);
     virtual ~ConvertedImageLayout();
@@ -90,7 +91,7 @@ public:
 #endif
 private:
     PT_RUNTIME_FUNCTION m_pExceptionDir;
-    SIZE_T              m_imageParts[16];
+    SIZE_T              m_imageParts[MAX_PARTS];
 };
 
 class LoadedImageLayout: public PEImageLayout
