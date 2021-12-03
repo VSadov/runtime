@@ -82,18 +82,15 @@ class FlatImageLayout;
 class ConvertedImageLayout: public PEImageLayout
 {
     VPTR_VTABLE_CLASS(ConvertedImageLayout,PEImageLayout)
-protected:
-    HandleHolder m_FileMap;
-    CLRMapViewHolder m_FileView;
 public:
 #ifndef DACCESS_COMPILE
     ConvertedImageLayout(FlatImageLayout* source);
     virtual ~ConvertedImageLayout();
-    void  UndoMappedImageParts();
+    void  FreeImageParts();
 #endif
 private:
     PT_RUNTIME_FUNCTION m_pExceptionDir;
-    PVOID               m_mappedImageParts[16];
+    SIZE_T              m_imageParts[16];
 };
 
 class LoadedImageLayout: public PEImageLayout
@@ -127,9 +124,11 @@ public:
 #ifndef DACCESS_COMPILE
     FlatImageLayout(PEImage* pOwner);
     FlatImageLayout(PEImage* pOwner, const BYTE* array, COUNT_T size);
-    void LayoutILOnly(void* base) const;
+    void* LoadImageByCopyingParts(SIZE_T* m_imageParts) const;
 
-    void* LoadImageByMappingParts(SIZE_T offset, PVOID* m_mappedImageParts) const;
+#if TARGET_WINDOWS
+    void* LoadImageByMappingParts(SIZE_T* m_imageParts) const;
+#endif
 #endif
 
 };
