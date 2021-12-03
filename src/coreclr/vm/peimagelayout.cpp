@@ -906,8 +906,10 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
 
     _ASSERTE(HasNTHeaders());
 
+    // offset in m_FileMap is nonzero when the data is in a singlefile bundle.
+    // unless it is compressed, then m_FileMap is an anonymous copy containing just our data.
+    SIZE_T offset = m_pOwner->GetUncompressedSize() > 0 ? 0 : m_pOwner->GetOffset();
     int imagePartIndex = 0;
-    SIZE_T offset = 0;
     PVOID pReserved = NULL;
     IMAGE_NT_HEADERS* ntHeader = FindNTHeaders();
 
@@ -970,8 +972,14 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
         SIZE_T sectionBase = (SIZE_T)loadedHeader + currentHeader.VirtualAddress;
         SIZE_T sectionBaseAligned = ROUND_DOWN_TO_PAGE(sectionBase);
 
-        // can't allow sections to overlap
-        _ASSERTE((SIZE_T)pReserved <= sectionBaseAligned);
+        if ((SIZE_T)pReserved > sectionBaseAligned)
+        {
+            // can't allow section mappings to overlap.
+            // this could happen with legacy bundles and sub-page aligned data
+            // we can't handle such cases here, but it is not an error.
+            _ASSERTE(!"can't allow section mappings to overlap");
+            goto UNSUPPORTED;
+        }
 
         // Is there space between the previous section and this one? If so, split an unmapped placeholder to cover it.
         if ((SIZE_T)pReserved < sectionBaseAligned)
