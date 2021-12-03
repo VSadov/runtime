@@ -967,7 +967,11 @@ HANDLE PEImage::GetFileHandle()
     {
         ErrorModeHolder mode(SEM_NOOPENFILEERRORBOX|SEM_FAILCRITICALERRORS);
         m_hFile=WszCreateFile((LPCWSTR) GetPathToLoad(),
-                               GENERIC_READ | GENERIC_EXECUTE,
+                               GENERIC_READ
+#if TARGET_WINDOWS
+                                   // the file may have native code sections, make sure we can execute them, if needed
+                                   | GENERIC_EXECUTE,
+#endif
                                FILE_SHARE_READ|FILE_SHARE_DELETE,
                                NULL,
                                OPEN_EXISTING,
@@ -998,7 +1002,11 @@ HRESULT PEImage::TryOpenFile()
     {
         ErrorModeHolder mode(SEM_NOOPENFILEERRORBOX | SEM_FAILCRITICALERRORS);
         m_hFile=WszCreateFile((LPCWSTR)GetPathToLoad(),
-                              GENERIC_READ | GENERIC_EXECUTE,
+                              GENERIC_READ
+#if TARGET_WINDOWS
+                                  // the file may have native code sections, make sure we can execute them, if needed
+                                  | GENERIC_EXECUTE,
+#endif
                               FILE_SHARE_READ|FILE_SHARE_DELETE,
                               NULL,
                               OPEN_EXISTING,
