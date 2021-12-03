@@ -574,7 +574,12 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
     // It's okay if resource files are length zero
     if (size > 0)
     {
-        m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, PAGE_EXECUTE_READ, 0, 0, NULL));
+        DWORD mapAccess = PAGE_READONLY;
+#if !defined(TARGET_UNIX)
+        // to map sections into executable views on Windows the mapping must have EXECUTE permissions
+        mapAccess = PAGE_EXECUTE_READ;
+#endif
+        m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, mapAccess, 0, 0, NULL));
         if (m_FileMap == NULL)
             ThrowLastError();
 
@@ -603,7 +608,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
             // We will create another anonymous memory-only mapping and uncompress file there.
             // The flat image will refer to the anonymous mapping instead and we will release the original mapping.
 
-            DWORD mapAccess = PAGE_READWRITE;
+            mapAccess = PAGE_READWRITE;
 #if !defined(TARGET_UNIX)
             // to map sections into executable views on Windows the mapping must have EXECUTE permissions
             mapAccess = PAGE_EXECUTE_READWRITE;
