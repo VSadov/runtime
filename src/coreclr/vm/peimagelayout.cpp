@@ -80,7 +80,14 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
         EEFileLoadException::Throw(pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
 
     // TODO: VS consider returning flat with no writeable sections on Unix
-    //       also assert that R2R has loaded.
+
+#ifdef TARGET_UNIX
+    // we should not see R2R files here on Unix.
+    // ConvertedImageLayout can handle them, but the fact thet we were unable to load
+    // implies that PAL_LOADLoadPEFile could not consume what crossgen produced -
+    // that is suspicious, one or another might have a bug.
+    _ASSERTE(!pFlat->HasReadyToRunHeader());
+#endif
 
     return new ConvertedImageLayout(pFlat);
 }
