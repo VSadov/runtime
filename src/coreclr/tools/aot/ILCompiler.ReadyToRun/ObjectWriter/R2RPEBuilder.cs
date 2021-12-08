@@ -598,7 +598,7 @@ namespace ILCompiler.PEWriter
                 location = new SectionLocation(sectionStartRva, newSectionPointerToRawData);
             }
 
-            //if (!_target.IsWindows)
+            if (!_target.IsWindows)
             {
                 if (outputSectionIndex > 0)
                 {
@@ -684,19 +684,27 @@ namespace ILCompiler.PEWriter
             ulong imageBase = is64BitTarget ? PE64HeaderConstants.DllImageBase : PE32HeaderConstants.ImageBase;
 
             int fileAlignment = 0x200;
-            //if (!target.IsWindows && !is64BitTarget)
-            //{
-            //    // To minimize wasted VA space on 32-bit systems, align file to page boundaries (presumed to be 4K)
-            //    fileAlignment = 0x1000;
-            //}
+            if (target.IsWindows || !is64BitTarget)
+            {
+                // To minimize wasted VA space on 32-bit systems, align file to page boundaries (presumed to be 4K)
+                //
+                // On Windows we use 4K file alignment, so that we could load the PE manually, if needed, using
+                // placeholdr APIs (MapViewOfFile3, etc), which have 4K granularity.
+                fileAlignment = 0x1000;
+            }
 
-            int sectionAlignment = 0x200;
-            //if (!target.IsWindows && is64BitTarget)
-            //{
-            //    // On Linux, we must match the bottom 12 bits of section RVA's to their file offsets. For this reason
-            //    // we need the same alignment for both.
-            //    sectionAlignment = fileAlignment;
-            //}
+            int sectionAlignment = 0x1000;
+            if (!target.IsWindows && is64BitTarget)
+            {
+                // On 64bit Linux, we must match the bottom 12 bits of section RVA's to their file offsets. For this reason
+                // we need the same alignment for both.
+                //
+                // In addition to that we specify section RVAs to be at least 64K apart, which is > page on most systems.
+                // It ensures that the sections will not overlap when mapped from a singlefile bundle, which introduces a sub-page skew.
+                //
+                // Such format would not be accepted by OS loader on Windows, but it is not a problem on Unix.
+                sectionAlignment = fileAlignment;
+            }
 
             // Without NxCompatible the PE executable cannot execute on Windows ARM64
             DllCharacteristics dllCharacteristics =

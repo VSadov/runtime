@@ -69,7 +69,7 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
     if (pOwner->IsOpened())
     {
         pFlat = (FlatImageLayout*)pOwner->GetFlatLayout();
-        pFlat.SuppressRelease();
+        pFlat->AddRef();
     }
     else if (pOwner->IsFile())
     {
@@ -79,15 +79,19 @@ PEImageLayout* PEImageLayout::LoadConverted(PEImage* pOwner)
     if (pFlat == NULL || !pFlat->CheckILOnlyFormat())
         EEFileLoadException::Throw(pOwner->GetPathForErrorMessages(), COR_E_BADIMAGEFORMAT);
 
-    // TODO: VS consider returning flat with no writeable sections on Unix
-
 #ifdef TARGET_UNIX
     // we should not see R2R files here on Unix.
-    // ConvertedImageLayout may be able to handle them, but the fact thet we were unable to
+    // ConvertedImageLayout may be able to handle them, but the fact that we were unable to
     // load directly implies that MAPMapPEFile could not consume what crossgen produced.
     // that is suspicious, one or another might have a bug.
     _ASSERTE(!pFlat->HasReadyToRunHeader());
 #endif
+
+    if (!pFlat->HasReadyToRunHeader() && !pFlat->HasWriteableSections())
+    {
+        // we can use flat layout for this
+        return pFlat.Extract();
+    }
 
     return new ConvertedImageLayout(pFlat);
 }
@@ -107,6 +111,12 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
             PEImageLayoutHolder pAlloc(new LoadedImageLayout(pOwner, loadFailure));
             if (pAlloc->GetBase() != NULL)
                 return pAlloc.Extract();
+
+#if TARGET_WINDOWS
+            // OS loader is always right. If a file cannot be loaded, do not try any further.
+            // Even if we may be able to load it, we do not want to support such files.
+            return NULL;
+#endif
         }
     }
 
@@ -394,16 +404,13 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
     // TODO: VS deal with LOG things.
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
 
-//#ifdef TARGET_WINDOWS
-//    if (HavePlaceholderAPI())
-//    {
-//        loadedImage = source->LoadImageByMappingParts(this->m_imageParts);
-//        if (loadedImage == NULL)
-//        {
-//            FreeImageParts();
-//        }
-//    }
-//#endif //TARGET_WINDOWS
+#ifdef TARGET_WINDOWS
+    loadedImage = source->LoadImageByMappingParts(this->m_imageParts);
+    if (loadedImage == NULL)
+    {
+        FreeImageParts();
+    }
+#endif //TARGET_WINDOWS
 
     if (loadedImage == NULL)
     {
@@ -581,10 +588,15 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
     // It's okay if resource files are length zero
     if (size > 0)
     {
+        INT64 uncompressedSize = pOwner->GetUncompressedSize();
+
         DWORD mapAccess = PAGE_READONLY;
 #if !defined(TARGET_UNIX)
         // to map sections into executable views on Windows the mapping must have EXECUTE permissions
-        mapAccess = PAGE_EXECUTE_READ;
+        if (uncompressedSize == 0)
+        {
+            mapAccess = PAGE_EXECUTE_READ;
+        }
 #endif
         m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, mapAccess, 0, 0, NULL));
         if (m_FileMap == NULL)
@@ -607,7 +619,6 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
         m_FileView.Assign(view);
         addr = (LPVOID)((size_t)view + offset - mapBegin);
 
-        INT64 uncompressedSize = pOwner->GetUncompressedSize();
         if (uncompressedSize > 0)
         {
 #if defined(CORECLR_EMBEDDED)
@@ -615,13 +626,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
             // We will create another anonymous memory-only mapping and uncompress file there.
             // The flat image will refer to the anonymous mapping instead and we will release the original mapping.
 
-            mapAccess = PAGE_READWRITE;
-#if !defined(TARGET_UNIX)
-            // to map sections into executable views on Windows the mapping must have EXECUTE permissions
-            mapAccess = PAGE_EXECUTE_READWRITE;
-#endif
-
-            HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, mapAccess, uncompressedSize >> 32, (DWORD)uncompressedSize, NULL);
+            HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, uncompressedSize >> 32, (DWORD)uncompressedSize, NULL);
             if (anonMap == NULL)
                 ThrowLastError();
 
@@ -930,16 +935,26 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
     }
     CONTRACTL_END;
 
+    if (!HavePlaceholderAPI() || m_pOwner->GetUncompressedSize() != 0)
+    {
+        return NULL;
+    }
+
     _ASSERTE(HasNTHeaders());
 
     // offset in m_FileMap is nonzero when the data is in a singlefile bundle.
-    // unless it is compressed, then m_FileMap is an anonymous copy containing just our data.
-    SIZE_T offset = m_pOwner->GetUncompressedSize() > 0 ? 0 : m_pOwner->GetOffset();
+    SIZE_T offset = m_pOwner->GetOffset();
     int imagePartIndex = 0;
     PVOID pReserved = NULL;
     IMAGE_NT_HEADERS* ntHeader = FindNTHeaders();
 
-    if  (ntHeader->OptionalHeader.FileAlignment < GetOsPageSize())
+    if  ((ntHeader->OptionalHeader.FileAlignment < GetOsPageSize()) &&
+         (ntHeader->OptionalHeader.FileAlignment != ntHeader->OptionalHeader.SectionAlignment))
+    {
+        goto UNSUPPORTED;
+    }
+
+    if (this->GetSize() < GetOsPageSize() * 2)
     {
         goto UNSUPPORTED;
     }
@@ -958,29 +973,38 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
 
     pReserved = AllocPlaceholder(usedBaseAddr, reserveSize);
     if (pReserved == NULL)
+    {
+        _ASSERTE(!"FAILED");
         goto FAILED;
+    }
 
-    PVOID loadedBase = pReserved;
-    PVOID reservedEnd = (char*)loadedBase + reserveSize;
-
-    // map the header, round up to page size
-    SIZE_T headerSize = ROUND_UP_TO_PAGE(ntHeader->OptionalHeader.SizeOfHeaders);
-
-    //first, map the PE header to the first page in the image.  Get pointers to the section headers
-    IMAGE_DOS_HEADER* loadedHeader = (IMAGE_DOS_HEADER*)((SIZE_T)loadedBase + OffsetWithinPage(offset));
+    PVOID reservedEnd = (char*)pReserved + reserveSize;
+    IMAGE_DOS_HEADER* loadedHeader = (IMAGE_DOS_HEADER*)((SIZE_T)pReserved + OffsetWithinPage(offset));
     _ASSERTE(OffsetWithinPage(offset) == OffsetWithinPage((SIZE_T)loadedHeader));
 
-    SIZE_T mapFrom = ROUND_DOWN_TO_PAGE(offset);
-    PVOID  pHeader = SplitPlaceholder(pReserved, reservedEnd, headerSize);
-    if (!pHeader)
+    //first, map the PE header to the first page in the image.
+    SIZE_T dataStart = offset;
+    SIZE_T mapFrom = ROUND_DOWN_TO_PAGE(dataStart);
+    SIZE_T dataEnd = dataStart + ntHeader->OptionalHeader.SizeOfHeaders;
+    SIZE_T mapEnd  = ROUND_UP_TO_PAGE(dataEnd);
+    SIZE_T mapSize = mapEnd - mapFrom;
+    PVOID  pMapped = SplitPlaceholder(pReserved, reservedEnd, mapSize);
+    if (!pMapped)
+    {
+        _ASSERTE(!"FAILED");
         goto FAILED;
+    }
 
-    pHeader = MapIntoPlaceholder(m_FileMap, mapFrom, pHeader, headerSize, PAGE_READONLY);
-    if (!pHeader)
+    pMapped = MapIntoPlaceholder(m_FileMap, mapFrom, pMapped, mapSize, PAGE_READONLY);
+    if (!pMapped)
+    {
+        _ASSERTE(!"FAILED");
         goto FAILED;
+    }
 
-    m_imageParts[imagePartIndex++] = MappedPart(pHeader);
+    m_imageParts[imagePartIndex++] = MappedPart(pMapped);
 
+    //Get pointers to the section headers
     IMAGE_SECTION_HEADER* firstSection = (IMAGE_SECTION_HEADER*)(((SIZE_T)loadedHeader)
         + loadedHeader->e_lfanew
         + offsetof(IMAGE_NT_HEADERS, OptionalHeader)
@@ -988,8 +1012,11 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
 
     unsigned numSections = ntHeader->FileHeader.NumberOfSections;
     if (numSections + 2 > ConvertedImageLayout::MAX_PARTS)
+    {
         // too many sections. we do not expect this and do not want to handle here, but it is not an error.
+        _ASSERTE(!"too many sections");
         goto UNSUPPORTED;
+    }
 
     for (unsigned i = 0; i < numSections; ++i)
     {
@@ -1011,9 +1038,13 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
         if ((SIZE_T)pReserved < sectionBaseAligned)
         {
             SIZE_T holeSize = (SIZE_T)sectionBaseAligned - (SIZE_T)pReserved;
+            _ASSERTE((char*)pReserved + holeSize <= reservedEnd);
             PVOID pHole = SplitPlaceholder(pReserved, reservedEnd, holeSize);
             if (!pHole)
+            {
+                _ASSERTE(!"FAILED");
                 goto FAILED;
+            }
 
             VirtualFree(pHole, 0, MEM_RELEASE);
         }
@@ -1024,48 +1055,68 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
                 PAGE_WRITECOPY :
                 PAGE_READONLY;
 
-        mapFrom = ROUND_DOWN_TO_PAGE(offset + currentHeader.PointerToRawData);
-        SIZE_T dataEnd = offset + currentHeader.PointerToRawData + currentHeader.SizeOfRawData;
-        SIZE_T mapEnd  = ROUND_UP_TO_PAGE(dataEnd);
-        while (mapEnd > this->GetSize())
+        dataStart = offset + currentHeader.PointerToRawData;
+        mapFrom = ROUND_DOWN_TO_PAGE(dataStart);
+        dataEnd = dataStart + currentHeader.SizeOfRawData;
+        mapEnd  = ROUND_UP_TO_PAGE(dataEnd);
+
+        // the aligned end could extend beyond the end of the file.
+        // then map only the aligned chunk that fits, the rest we will copy.
+        while (mapEnd > offset + this->GetSize())
         {
             mapEnd -= GetOsPageSize();
         }
 
-        _ASSERTE(mapEnd > mapFrom);
-        SIZE_T mapSize = mapEnd - mapFrom;
-        PVOID pSection = SplitPlaceholder(pReserved, reservedEnd, mapSize);
-        if (!pSection)
-            goto FAILED;
+        // if we have something to map at page granularity, map it
+        if (mapEnd > mapFrom)
+        {
+            mapSize = mapEnd - mapFrom;
+            _ASSERTE((char*)pReserved + mapSize <= reservedEnd);
+            pMapped = SplitPlaceholder(pReserved, reservedEnd, mapSize);
+            if (!pMapped)
+            {
+                _ASSERTE(!"FAILED");
+                goto FAILED;
+            }
 
-        pSection = MapIntoPlaceholder(m_FileMap, mapFrom, pSection, mapSize, pageProtection);
-        if (!pSection)
-            goto FAILED;
+            pMapped = MapIntoPlaceholder(m_FileMap, mapFrom, pMapped, mapSize, pageProtection);
+            if (!pMapped)
+            {
+                _ASSERTE(!"FAILED");
+                goto FAILED;
+            }
 
-        m_imageParts[imagePartIndex++] = MappedPart(pSection);
+            m_imageParts[imagePartIndex++] = MappedPart(pMapped);
+        }
 
+        // if we have something left, copy it
         if (mapEnd < dataEnd)
         {
             SIZE_T toCopy = dataEnd - mapEnd;
-            SIZE_T toCommit = ROUND_UP_TO_PAGE(toCopy);
-            PVOID pCopy = SplitPlaceholder(pReserved, reservedEnd, toCommit);
-            if (!pCopy)
+            SIZE_T toAllocate = ROUND_UP_TO_PAGE(toCopy);
+            _ASSERTE((char*)pReserved + toAllocate <= reservedEnd);
+            PVOID pAllocated = SplitPlaceholder(pReserved, reservedEnd, toAllocate);
+            if (!pAllocated)
+            {
+                _ASSERTE(!"FAILED");
                 goto FAILED;
+            }
 
-            pCopy = CommitIntoPlaceholder(pCopy, toCommit, PAGE_READWRITE);
-            if (!pSection)
+            pAllocated = CommitIntoPlaceholder(pAllocated, toAllocate, PAGE_READWRITE);
+            if (!pAllocated)
+            {
+                _ASSERTE(!"FAILED");
                 goto FAILED;
+            }
 
-            // memory projected into placeholders is page-aligned.
-            // we are using "+1" to distinguish committed memory from mapped views, so that we know how to free them
-            m_imageParts[imagePartIndex++] = AllocatedPart(pSection);
+            m_imageParts[imagePartIndex++] = AllocatedPart(pAllocated);
 
-            CopyMemory(pCopy, (char*)this->GetBase() + mapEnd, toCopy);
-            VirtualProtect(pCopy, toCommit, pageProtection, &pageProtection);
+            CopyMemory(pAllocated, (char*)this->GetBase() + mapEnd - offset, toCopy);
+            VirtualProtect(pAllocated, toAllocate, pageProtection, &pageProtection);
         }
     }
 
-    // Is there space after the last section and before the end of the mapped image? If so, release it.
+    // Is there reserved space that we did not use? If so, release it.
     if (pReserved < reservedEnd)
     {
         VirtualFree(pReserved, 0, MEM_RELEASE);
@@ -1074,6 +1125,7 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
     return loadedHeader;
 
 FAILED:
+    _ASSERTE(!"FAILED");
     if (pReserved && pReserved < reservedEnd)
         m_imageParts[imagePartIndex++] = AllocatedPart(pReserved);
 
