@@ -943,7 +943,7 @@ void* FlatImageLayout::LoadImageByMappingParts(SIZE_T* m_imageParts) const
     _ASSERTE(HasNTHeaders());
 
     // offset in m_FileMap is nonzero when the data is in a singlefile bundle.
-    SIZE_T offset = m_pOwner->GetOffset();
+    SIZE_T offset = (SIZE_T)m_pOwner->GetOffset();
     int imagePartIndex = 0;
     PVOID pReserved = NULL;
     IMAGE_NT_HEADERS* ntHeader = FindNTHeaders();
