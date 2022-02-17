@@ -2545,7 +2545,11 @@ ReplaceExceptionContextRecord(CONTEXT *pTarget, CONTEXT *pSource)
     {
         if (pTarget->ContextFlags & CONTEXT_EXTENDED_BIT)
         {   // Source and Target have EXTENDED bit set.
-            *pTarget = *pSource;
+            if (!CopyContext(pTarget, pTarget->ContextFlags, pSource))
+            {
+                STRESS_LOG1(LF_EH, LL_ERROR, "ERROR: Could not set context record, lastError = 0x%x\n", GetLastError());
+                ThrowLastError();
+            }
         }
         else
         {   // Source has but Target doesn't have EXTENDED bit set.  (Target is shorter than Source.)
