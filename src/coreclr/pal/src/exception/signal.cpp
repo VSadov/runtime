@@ -802,7 +802,7 @@ static void inject_activation_handler(int code, siginfo_t *siginfo, void *contex
             &winContext,
             CONTEXT_CONTROL | CONTEXT_INTEGER);
 
-        if (g_safeActivationCheckFunction(CONTEXTGetPC(&winContext), /* checkingCurrentThread */ TRUE))
+        if (g_safeActivationCheckFunction(CONTEXTGetPC(&winContext)))
         {
             int savedErrNo = errno; // Make sure that errno is not modified
             g_activationFunction(&winContext);

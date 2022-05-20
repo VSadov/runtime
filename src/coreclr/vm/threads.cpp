@@ -8317,6 +8317,7 @@ void Thread::StaticInitialize()
     WRAPPER_NO_CONTRACT;
 
 #ifdef FEATURE_SPECIAL_USER_MODE_APC
+                printf("IIIIIIIIIIIIIIIIIII----");
     InitializeSpecialUserModeApc();
 
     // When CET shadow stacks are enabled, support for special user-mode APCs with the necessary functionality is required
@@ -8344,6 +8345,7 @@ void Thread::InitializeSpecialUserModeApc()
     QueueUserAPC2Proc pfnQueueUserAPC2Proc = (QueueUserAPC2Proc)GetProcAddress(hKernel32, "QueueUserAPC2");
     if (pfnQueueUserAPC2Proc == nullptr)
     {
+            printf("------------------------------------");
         return;
     }
 
@@ -8351,15 +8353,12 @@ void Thread::InitializeSpecialUserModeApc()
     // user-mode APC can interrupt a thread that is in user mode and not in a non-alertable wait.
     if (!(*pfnQueueUserAPC2Proc)(EmptyApcCallback, GetCurrentThread(), 0, SpecialUserModeApcWithContextFlags))
     {
+            printf("##########---------");
         return;
     }
 
-    // In the future, once code paths using the special user-mode APC get some bake time, it should be used regardless of
-    // whether CET shadow stacks are enabled
-    if (AreCetShadowStacksEnabled())
-    {
-        s_pfnQueueUserAPC2Proc = pfnQueueUserAPC2Proc;
-    }
+    printf("++++++++++++++++++++++++++++++++++++++");
+   s_pfnQueueUserAPC2Proc = pfnQueueUserAPC2Proc;
 }
 
 #endif // FEATURE_SPECIAL_USER_MODE_APC
