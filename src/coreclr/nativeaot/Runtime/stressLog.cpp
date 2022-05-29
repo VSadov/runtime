@@ -138,9 +138,6 @@ ThreadStressLog* StressLog::CreateThreadStressLog(Thread * pThread) {
     if (pThread == NULL)
         pThread = ThreadStore::GetCurrentThread();
 
-    //if we are not allowed to allocate stress log, we should not even try to take the lock
-    _ASSERTE(!pThread->IsInForbidBlockingRegion());
-
     ThreadStressLog* msgs = reinterpret_cast<ThreadStressLog*>(pThread->GetThreadStressLog());
     if (msgs != NULL)
     {
@@ -260,7 +257,6 @@ void StressLog::ThreadDetach(ThreadStressLog *msgs) {
 bool StressLog::AllowNewChunk (long numChunksInCurThread)
 {
     Thread* pCurrentThread = ThreadStore::GetCurrentThread();
-    _ASSERTE(!pCurrentThread->IsInForbidBlockingRegion());
 
     _ASSERTE (numChunksInCurThread <= VolatileLoad(&theLog.totalChunk));
     uint32_t perThreadLimit = theLog.MaxSizePerThread;
