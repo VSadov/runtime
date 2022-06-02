@@ -140,6 +140,7 @@ class ICodeManager
 {
 public:
     virtual bool IsManaged(PTR_VOID pvAddress) = 0;
+    virtual bool IsSafePoint(PTR_VOID pvAddress) = 0;
 
     virtual bool FindMethodInfo(PTR_VOID        ControlPC,
                                 MethodInfo *    pMethodInfoOut) = 0;

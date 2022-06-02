@@ -655,14 +655,20 @@ UInt32_BOOL Thread::HijackCallback(HANDLE /*hThread*/, PAL_LIMITED_CONTEXT* pThr
         return true;
     }
 
-    if (!GetRuntimeInstance()->IsManaged((PTR_VOID)pThreadContext->IP))
+    void* pvAddress = (void*)pThreadContext->IP;
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    ICodeManager* codeManager = runtime->GetCodeManagerForAddress(pvAddress);
+    if (codeManager == NULL)
     {
         // Running in cooperative mode, but not managed.
         // We cannot continue.
         return false;
     }
 
-    // TODO: attempt to redirect 
+    if (codeManager->IsSafePoint(pvAddress))
+    {
+        // TODO: attempt to redirect
+    }
 
     return pThread->InternalHijack(pThreadContext, NormalHijackTargets);
 }
