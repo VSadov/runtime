@@ -830,4 +830,32 @@ NESTED_ENTRY RhpGcPollRare, _TEXT
 
 NESTED_END RhpGcPollRare, _TEXT
 
+NESTED_ENTRY RhpGcRedirect, _TEXT
+    PTFF_SAVE_RAX       = 0x00000100,
+    PTFF_SAVE_RCX       = 0x00000200,
+    PTFF_SAVE_RDX       = 0x00000400,
+    PTFF_SAVE_R8        = 0x00000800,
+    PTFF_SAVE_R9        = 0x00001000,
+    PTFF_SAVE_R10       = 0x00002000,
+    
+        push_vol_reg r11
+        push_vol_reg r10
+        push_vol_reg r9
+        push_vol_reg r8
+        push_vol_reg rdx
+        push_vol_reg rcx
+        push_vol_reg rax
+
+        PUSH_COOP_PINVOKE_FRAME rcx
+        END_PROLOGUE
+
+        ; R9: transition frame
+
+        ;; Call the rest of the suspension helper.
+        ;; void RhpSuspendRedirected(PInvokeTransitionFrame * pFrame)
+        call        RhpSuspendRedirected
+
+        ;; the call above never returns
+NESTED_END RhpGcRedirect, _TEXT
+
         end
