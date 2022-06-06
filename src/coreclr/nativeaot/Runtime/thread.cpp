@@ -1027,6 +1027,9 @@ EXTERN_C NOINLINE void FASTCALL RhpWaitForSuspend2()
 EXTERN_C NOINLINE void FASTCALL RhpWaitForGC2(PInvokeTransitionFrame * pFrame)
 {
     Thread * pThread = pFrame->m_pThread;
+    if (pThread->IsDoNotTriggerGcSet())
+        return;
+
     pThread->WaitForGC(pFrame);
 }
 
