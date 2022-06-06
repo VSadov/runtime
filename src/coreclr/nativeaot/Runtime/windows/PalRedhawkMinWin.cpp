@@ -407,6 +407,7 @@ REDHAWK_PALEXPORT _Success_(return) bool REDHAWK_PALAPI PalGetCompleteThreadCont
 {
     _ASSERTE((pCtx->ContextFlags & CONTEXT_COMPLETE) == CONTEXT_COMPLETE);
 
+#if defined(TARGET_X86) || defined(TARGET_AMD64)
     // Make sure that AVX feature mask is set, if supported. This should not normally fail.
     // The system silently ignores any feature specified in the FeatureMask which is not enabled on the processor.
     if (!SetXStateFeaturesMask(pCtx, XSTATE_MASK_AVX))
@@ -414,6 +415,7 @@ REDHAWK_PALEXPORT _Success_(return) bool REDHAWK_PALAPI PalGetCompleteThreadCont
         _ASSERTE(!"Could not apply XSTATE_MASK_AVX");
         return FALSE;
     }
+#endif //defined(TARGET_X86) || defined(TARGET_AMD64)
 
     return GetThreadContext(hThread, pCtx);
 }
