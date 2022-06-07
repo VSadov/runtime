@@ -93,11 +93,13 @@ StackFrameIterator::StackFrameIterator(Thread * pThreadToWalk, PInvokeTransition
     STRESS_LOG0(LF_STACKWALK, LL_INFO10000, "----Init---- [ GC ]\n");
     ASSERT(!pThreadToWalk->DangerousCrossThreadIsHijacked());
 
+#ifdef FEATURE_SUSPEND_REDIRECTION
     if (pInitialTransitionFrame == REDIRECTED_THREAD_MARKER)
     {
         InternalInit(pThreadToWalk, pThreadToWalk->GetRedirectionContext(), GcStackWalkFlags);
     }
     else
+#endif
     {
         InternalInit(pThreadToWalk, pInitialTransitionFrame, GcStackWalkFlags);
     }
@@ -551,8 +553,8 @@ void StackFrameIterator::InternalInit(Thread * pThreadToWalk, CONTEXT* pCtx, uin
     m_RegDisplay.pX26 = PTR_TO_MEMBER(CONTEXT, pCtx, X26);
     m_RegDisplay.pX27 = PTR_TO_MEMBER(CONTEXT, pCtx, X27);
     m_RegDisplay.pX28 = PTR_TO_MEMBER(CONTEXT, pCtx, X28);
-    m_RegDisplay.pFP = PTR_TO_MEMBER(CONTEXT, pCtx, FP);
-    m_RegDisplay.pLR = PTR_TO_MEMBER(CONTEXT, pCtx, LR);
+    m_RegDisplay.pFP = PTR_TO_MEMBER(CONTEXT, pCtx, Fp);
+    m_RegDisplay.pLR = PTR_TO_MEMBER(CONTEXT, pCtx, Lr);
 
     //
     // scratch regs
