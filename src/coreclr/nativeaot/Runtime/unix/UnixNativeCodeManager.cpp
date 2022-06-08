@@ -136,7 +136,7 @@ bool UnixNativeCodeManager::IsSafePoint(PTR_VOID pvAddress)
 void UnixNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
                                        PTR_VOID        safePointAddress,
                                        REGDISPLAY *    pRegisterSet,
-                                       GCEnumContext * hCallback
+                                       GCEnumContext * hCallback,
                                        bool            isActiveStackFrame)
 {
     UnixNativeMethodInfo * pNativeMethodInfo = (UnixNativeMethodInfo *)pMethodInfo;
