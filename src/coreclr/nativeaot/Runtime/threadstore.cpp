@@ -85,6 +85,9 @@ ThreadStore * ThreadStore::Create(RuntimeInstance * pRuntimeInstance)
     if (!pNewThreadStore->m_SuspendCompleteEvent.CreateManualEventNoThrow(true))
         return NULL;
 
+    if (!PalRegisterHijackCallback(Thread::HijackCallback))
+        return NULL;
+
     pNewThreadStore->m_pRuntimeInstance = pRuntimeInstance;
 
     pNewThreadStore.SuppressRelease();
