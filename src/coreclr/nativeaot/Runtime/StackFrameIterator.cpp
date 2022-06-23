@@ -586,28 +586,28 @@ void StackFrameIterator::InternalInit(Thread * pThreadToWalk, CONTEXT* pCtx, uin
     //
     // preserved regs
     //
-    m_RegDisplay.pRbp = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rbp);
-    m_RegDisplay.pRsi = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rsi);
-    m_RegDisplay.pRdi = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rdi);
-    m_RegDisplay.pRbx = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rbx);
+    m_RegDisplay.pRbp = PTR_TO_MEMBER(CONTEXT, pCtx, Rbp);
+    m_RegDisplay.pRsi = PTR_TO_MEMBER(CONTEXT, pCtx, Rsi);
+    m_RegDisplay.pRdi = PTR_TO_MEMBER(CONTEXT, pCtx, Rdi);
+    m_RegDisplay.pRbx = PTR_TO_MEMBER(CONTEXT, pCtx, Rbx);
 #ifdef TARGET_AMD64     
-    m_RegDisplay.pR12 = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R12);
-    m_RegDisplay.pR13 = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R13);
-    m_RegDisplay.pR14 = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R14);
-    m_RegDisplay.pR15 = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R15);
+    m_RegDisplay.pR12 = PTR_TO_MEMBER(CONTEXT, pCtx, R12);
+    m_RegDisplay.pR13 = PTR_TO_MEMBER(CONTEXT, pCtx, R13);
+    m_RegDisplay.pR14 = PTR_TO_MEMBER(CONTEXT, pCtx, R14);
+    m_RegDisplay.pR15 = PTR_TO_MEMBER(CONTEXT, pCtx, R15);
 #endif // TARGET_AMD64  
                         
     //                  
     // scratch regs     
     //                  
-    m_RegDisplay.pRax = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rax);
-    m_RegDisplay.pRcx = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rcx);
-    m_RegDisplay.pRdx = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, Rdx);
+    m_RegDisplay.pRax = PTR_TO_MEMBER(CONTEXT, pCtx, Rax);
+    m_RegDisplay.pRcx = PTR_TO_MEMBER(CONTEXT, pCtx, Rcx);
+    m_RegDisplay.pRdx = PTR_TO_MEMBER(CONTEXT, pCtx, Rdx);
 #ifdef TARGET_AMD64     
-    m_RegDisplay.pR8  = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R8);
-    m_RegDisplay.pR9  = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R9);
-    m_RegDisplay.pR10 = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R10);
-    m_RegDisplay.pR11 = (PTR_UIntNative)PTR_TO_MEMBER(CONTEXT, pCtx, R11);
+    m_RegDisplay.pR8  = PTR_TO_MEMBER(CONTEXT, pCtx, R8);
+    m_RegDisplay.pR9  = PTR_TO_MEMBER(CONTEXT, pCtx, R9);
+    m_RegDisplay.pR10 = PTR_TO_MEMBER(CONTEXT, pCtx, R10);
+    m_RegDisplay.pR11 = PTR_TO_MEMBER(CONTEXT, pCtx, R11);
 #endif // TARGET_AMD64
 #else
     PORTABILITY_ASSERT("StackFrameIterator::InternalInit");

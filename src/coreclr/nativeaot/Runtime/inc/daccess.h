@@ -2305,7 +2305,12 @@ typedef DPTR(PTR_PTR_UInt8) PTR_PTR_PTR_UInt8;
 typedef DPTR(uint16_t)        PTR_UInt16;
 typedef DPTR(uint32_t)        PTR_UInt32;
 typedef DPTR(uint64_t)        PTR_UInt64;
-typedef DPTR(uintptr_t)    PTR_UIntNative;
+
+#if defined(HOST_64BIT)
+typedef DPTR(uint64_t)        PTR_UIntNative;
+#else
+typedef DPTR(uint32_t)        PTR_UIntNative;
+#endif
 
 typedef DPTR(size_t)  PTR_size_t;
 
