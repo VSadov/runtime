@@ -15,6 +15,7 @@
 #include "gcenv.h"
 #include "holder.h"
 #include "UnixSignals.h"
+#include "UnixContext.h"
 #include "HardwareExceptions.h"
 #include "cgroupcpu.h"
 
@@ -961,7 +962,7 @@ static void ActivationHandler(int code, siginfo_t* siginfo, void* context)
     {
         PAL_LIMITED_CONTEXT palContext;
         NativeContextToPalContext(context, &palContext);
-        g_pHijackCallback(palContext, NULL);
+        g_pHijackCallback(&palContext, NULL);
         //TODO: VS update conditionally, this is rare
         UpdateNativeContextFromPalContext(context, &palContext);
     }
@@ -995,8 +996,8 @@ REDHAWK_PALEXPORT uint32_t REDHAWK_PALAPI PalRegisterHijackCallback(_In_ PalHija
 
 REDHAWK_PALEXPORT uint32_t REDHAWK_PALAPI PalHijack(HANDLE hThread, _In_opt_ void* pCallbackContext)
 {
-    ThreadUnixHandle* threadHandle = (ThreadUnixHandle*)handle;
-    int status = pthread_kill(threadHandle->GetObject(), INJECT_ACTIVATION_SIGNAL);
+    ThreadUnixHandle* threadHandle = (ThreadUnixHandle*)hThread;
+    int status = pthread_kill(*threadHandle->GetObject(), INJECT_ACTIVATION_SIGNAL);
     // We can get EAGAIN when printing stack overflow stack trace and when other threads hit
     // stack overflow too. Those are held in the sigsegv_handler with blocked signals until
     // the process exits.
@@ -1005,7 +1006,7 @@ REDHAWK_PALEXPORT uint32_t REDHAWK_PALAPI PalHijack(HANDLE hThread, _In_opt_ voi
     // On Apple, pthread_kill is not allowed to be sent to dispatch queue threads
     if (status == ENOTSUP)
     {
-        return ERROR_NOT_SUPPORTED;
+        return status;
     }
 #endif
 
@@ -1017,7 +1018,7 @@ REDHAWK_PALEXPORT uint32_t REDHAWK_PALAPI PalHijack(HANDLE hThread, _In_opt_ voi
         abort();
     }
 
-    return NO_ERROR;
+    return status;
 }
 
 extern "C" uint32_t WaitForSingleObjectEx(HANDLE handle, uint32_t milliseconds, UInt32_BOOL alertable)
