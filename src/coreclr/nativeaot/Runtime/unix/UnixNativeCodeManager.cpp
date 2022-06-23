@@ -127,19 +127,9 @@ PTR_VOID UnixNativeCodeManager::GetFramePointer(MethodInfo *   pMethodInfo,
     return NULL;
 }
 
-bool UnixNativeCodeManager::IsSafePoint(PTR_VOID pvAddress)
+uint32_t UnixNativeCodeManager::GetCodeOffset(MethodInfo* pMethodInfo, PTR_VOID address, /*out*/ PTR_UInt8* gcInfo)
 {
-    // @TODO: IsSafePoint
-    return false;
-}
-
-void UnixNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
-                                       PTR_VOID        safePointAddress,
-                                       REGDISPLAY *    pRegisterSet,
-                                       GCEnumContext * hCallback,
-                                       bool            isActiveStackFrame)
-{
-    UnixNativeMethodInfo * pNativeMethodInfo = (UnixNativeMethodInfo *)pMethodInfo;
+    UnixNativeMethodInfo* pNativeMethodInfo = (UnixNativeMethodInfo*)pMethodInfo;
 
     PTR_UInt8 p = pNativeMethodInfo->pMainLSDA;
 
@@ -151,23 +141,71 @@ void UnixNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
     if ((unwindBlockFlags & UBF_FUNC_HAS_EHINFO) != 0)
         p += sizeof(int32_t);
 
+    *gcInfo = p;
+
     uint32_t codeOffset = (uint32_t)(PINSTRToPCODE(dac_cast<TADDR>(safePointAddress)) - PINSTRToPCODE(dac_cast<TADDR>(pNativeMethodInfo->pMethodStartAddress)));
+    return codeOffset;
+}
+
+bool UnixNativeCodeManager::IsSafePoint(PTR_VOID pvAddress)
+{
+    MethodInfo pMethodInfo;
+    if (!FindMethodInfo(pvAddress, &pMethodInfo))
+    {
+        return false;
+    }
+
+    PTR_UInt8 gcInfo;
+    uint32_t codeOffset = GetCodeOffset(&pMethodInfo, pvAddress, &gcInfo);
 
     GcInfoDecoder decoder(
-        GCInfoToken(p),
+        GCInfoToken(gcInfo),
+        GcInfoDecoderFlags(DECODE_INTERRUPTIBILITY),
+        codeOffset
+    );
+
+    return decoder.IsInterruptible();
+}
+
+void UnixNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
+                                       PTR_VOID        safePointAddress,
+                                       REGDISPLAY *    pRegisterSet,
+                                       GCEnumContext * hCallback,
+                                       bool            isActiveStackFrame)
+{
+    PTR_UInt8 gcInfo;
+    uint32_t codeOffset = GetCodeOffset(pMethodInfo, safePointAddress, &gcInfo);
+
+    if (!isActiveStackFrame)
+    {
+        // If we are not in the active method, we are currently pointing
+        // to the return address. That may not be reachable after a call (if call does not return)
+        // or reachable via a jump and thus have a different live set.
+        // Therefore we simply adjust the offset to inside of call instruction.
+        // NOTE: The GcInfoDecoder depends on this; if you change it, you must
+        // revisit the GcInfoEncoder/Decoder
+        codeOffset--;
+    }
+
+    GcInfoDecoder decoder(
+        GCInfoToken(gcInfo),
         GcInfoDecoderFlags(DECODE_GC_LIFETIMES | DECODE_SECURITY_OBJECT | DECODE_VARARG),
-        codeOffset - 1 // TODO: isActiveStackFrame
+        codeOffset
     );
 
     ICodeManagerFlags flags = (ICodeManagerFlags)0;
     if (pNativeMethodInfo->executionAborted)
         flags = ICodeManagerFlags::ExecutionAborted;
+
     if (IsFilter(pMethodInfo))
         flags = (ICodeManagerFlags)(flags | ICodeManagerFlags::NoReportUntracked);
 
+    if (isActiveStackFrame)
+        flags = (ICodeManagerFlags)(flags | ICodeManagerFlags::ActiveStackFrame);
+
     if (!decoder.EnumerateLiveSlots(
         pRegisterSet,
-        false /* reportScratchSlots */,
+        isActiveStackFrame /* reportScratchSlots */,
         flags,
         hCallback->pCallback,
         hCallback
