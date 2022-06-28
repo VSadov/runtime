@@ -547,7 +547,11 @@ void StackFrameIterator::InternalInit(Thread * pThreadToWalk, NATIVE_CONTEXT* pC
     m_RegDisplay.SP   = pCtx->GetSp();
     m_RegDisplay.IP   = pCtx->GetIp();
 
+#ifdef TARGET_UNIX
 #define PTR_TO_REG(type, ptr, reg) (&((ptr)->reg()))
+#else
+#define PTR_TO_REG(type, ptr, reg) (&((ptr)->reg))
+#endif
 
 #ifdef TARGET_ARM64
 
@@ -625,6 +629,8 @@ void StackFrameIterator::InternalInit(Thread * pThreadToWalk, NATIVE_CONTEXT* pC
 #else
     PORTABILITY_ASSERT("StackFrameIterator::InternalInit");
 #endif // TARGET_ARM
+
+#undef PTR_TO_REG
 }
 
 PTR_VOID StackFrameIterator::HandleExCollide(PTR_ExInfo pExInfo)
