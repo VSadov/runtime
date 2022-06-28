@@ -34,6 +34,7 @@ class StackFrameIterator
 public:
     StackFrameIterator() {}
     StackFrameIterator(Thread * pThreadToWalk, PInvokeTransitionFrame* pInitialTransitionFrame);
+    StackFrameIterator(Thread* pThreadToWalk, NATIVE_CONTEXT* pCtx);
     StackFrameIterator(Thread * pThreadToWalk, PTR_PAL_LIMITED_CONTEXT pCtx);
 
     bool             IsValid();

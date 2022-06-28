@@ -109,7 +109,14 @@ StackFrameIterator::StackFrameIterator(Thread * pThreadToWalk, PInvokeTransition
 
 StackFrameIterator::StackFrameIterator(Thread * pThreadToWalk, PTR_PAL_LIMITED_CONTEXT pCtx)
 {
-    STRESS_LOG0(LF_STACKWALK, LL_INFO10000, "----Init---- [ hijack ]\n");
+    STRESS_LOG0(LF_STACKWALK, LL_INFO10000, "----Init with limited ctx---- [ hijack ]\n");
+    InternalInit(pThreadToWalk, pCtx, 0);
+    PrepareToYieldFrame();
+}
+
+StackFrameIterator::StackFrameIterator(Thread* pThreadToWalk, NATIVE_CONTEXT* pCtx)
+{
+    STRESS_LOG0(LF_STACKWALK, LL_INFO10000, "----Init with full ctx---- [ hijack ]\n");
     InternalInit(pThreadToWalk, pCtx, 0);
     PrepareToYieldFrame();
 }

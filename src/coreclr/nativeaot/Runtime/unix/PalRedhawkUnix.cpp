@@ -958,15 +958,9 @@ static void ActivationHandler(int code, siginfo_t* siginfo, void* context)
 #endif
         ))
     {
-        PAL_LIMITED_CONTEXT palContext;
-        NativeContextToPalContext(context, &palContext);
-        int savedErrNo = errno; // Make sure that errno is not modified
-        g_pHijackCallback(&palContext, NULL);
+        int savedErrNo = errno; // Make sure that errno is not modified 
+        g_pHijackCallback((NATIVE_CONTEXT*)context, NULL);
         errno = savedErrNo;
-
-        //TODO: VS update conditionally, this is rare
-        // Activation function may have modified the context, so update it.
-        UpdateNativeContextFromPalContext(context, &palContext);
     }
     else
     {

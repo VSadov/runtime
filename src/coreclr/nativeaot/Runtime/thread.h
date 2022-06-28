@@ -141,8 +141,10 @@ private:
     void ClearState(ThreadStateFlags flags);
     bool IsStateSet(ThreadStateFlags flags);
 
-    static UInt32_BOOL HijackCallback(PAL_LIMITED_CONTEXT* pThreadContext, void* pThreadToHijack);
-    bool HijackReturnAddress(PAL_LIMITED_CONTEXT * pSuspendCtx, void * pvHijackTargets[]);
+    static UInt32_BOOL HijackCallback(NATIVE_CONTEXT* pThreadContext, void* pThreadToHijack);
+    bool HijackReturnAddress(PAL_LIMITED_CONTEXT* pSuspendCtx, void * pvHijackTargets[]);
+    bool HijackReturnAddress(NATIVE_CONTEXT* pSuspendCtx, void* pvHijackTargets[]);
+    bool Thread::HijackReturnAddressWorker(StackFrameIterator* frameIterator, void* pvHijackTargets[]);
 
 #ifdef FEATURE_SUSPEND_REDIRECTION
     bool Redirect();
