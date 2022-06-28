@@ -704,58 +704,58 @@ bool VirtualUnwind(REGDISPLAY* pRegisterSet)
 
 #ifdef TARGET_ARM64
 
-    uint64_t& UNIX_CONTEXT::X0() { return MCREG_X0(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X1() { return MCREG_X1(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X2() { return MCREG_X2(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X3() { return MCREG_X3(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X4() { return MCREG_X4(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X5() { return MCREG_X5(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X6() { return MCREG_X6(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X7() { return MCREG_X7(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X8() { return MCREG_X8(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X9() { return MCREG_X9(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X10() { return MCREG_X10(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X11() { return MCREG_X11(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X12() { return MCREG_X12(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X13() { return MCREG_X13(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X14() { return MCREG_X14(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X15() { return MCREG_X15(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X16() { return MCREG_X16(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X17() { return MCREG_X17(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X18() { return MCREG_X18(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X19() { return MCREG_X19(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X20() { return MCREG_X20(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X21() { return MCREG_X21(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X22() { return MCREG_X22(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X23() { return MCREG_X23(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X24() { return MCREG_X24(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X25() { return MCREG_X25(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X26() { return MCREG_X26(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X27() { return MCREG_X27(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::X28() { return MCREG_X28(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Fp() { return MCREG_Fp(ctx.uc_mcontext); } // X29
-    uint64_t& UNIX_CONTEXT::Lr() { return MCREG_Lr(ctx.uc_mcontext); } // X30
-    uint64_t& UNIX_CONTEXT::Sp() { return MCREG_Sp(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Pc() { return MCREG_Pc(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X0() { return (uint64_t&)MCREG_X0(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X1() { return (uint64_t&)MCREG_X1(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X2() { return (uint64_t&)MCREG_X2(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X3() { return (uint64_t&)MCREG_X3(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X4() { return (uint64_t&)MCREG_X4(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X5() { return (uint64_t&)MCREG_X5(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X6() { return (uint64_t&)MCREG_X6(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X7() { return (uint64_t&)MCREG_X7(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X8() { return (uint64_t&)MCREG_X8(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X9() { return (uint64_t&)MCREG_X9(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X10() { return (uint64_t&)MCREG_X10(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X11() { return (uint64_t&)MCREG_X11(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X12() { return (uint64_t&)MCREG_X12(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X13() { return (uint64_t&)MCREG_X13(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X14() { return (uint64_t&)MCREG_X14(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X15() { return (uint64_t&)MCREG_X15(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X16() { return (uint64_t&)MCREG_X16(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X17() { return (uint64_t&)MCREG_X17(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X18() { return (uint64_t&)MCREG_X18(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X19() { return (uint64_t&)MCREG_X19(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X20() { return (uint64_t&)MCREG_X20(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X21() { return (uint64_t&)MCREG_X21(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X22() { return (uint64_t&)MCREG_X22(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X23() { return (uint64_t&)MCREG_X23(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X24() { return (uint64_t&)MCREG_X24(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X25() { return (uint64_t&)MCREG_X25(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X26() { return (uint64_t&)MCREG_X26(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X27() { return (uint64_t&)MCREG_X27(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::X28() { return (uint64_t&)MCREG_X28(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Fp() { return (uint64_t&)MCREG_Fp(ctx.uc_mcontext); } // X29
+    uint64_t& UNIX_CONTEXT::Lr() { return (uint64_t&)MCREG_Lr(ctx.uc_mcontext); } // X30
+    uint64_t& UNIX_CONTEXT::Sp() { return (uint64_t&)MCREG_Sp(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Pc() { return (uint64_t&)MCREG_Pc(ctx.uc_mcontext); }
 
 #elif defined(TARGET_AMD64)
-    uint64_t& UNIX_CONTEXT::Rax(){ return MCREG_Rax(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rcx(){ return MCREG_Rcx(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rdx(){ return MCREG_Rdx(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rbx(){ return MCREG_Rbx(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rsp(){ return MCREG_Rsp(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rbp(){ return MCREG_Rbp(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rsi(){ return MCREG_Rsi(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rdi(){ return MCREG_Rdi(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R8(){ return MCREG_R8(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R9(){ return MCREG_R9(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R10(){ return MCREG_R10(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R11(){ return MCREG_R11(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R12(){ return MCREG_R12(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R13(){ return MCREG_R13(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R14(){ return MCREG_R14(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::R15(){ return MCREG_R15(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Rip(){ return MCREG_Rip(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rax(){ return (uint64_t&)MCREG_Rax(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rcx(){ return (uint64_t&)MCREG_Rcx(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rdx(){ return (uint64_t&)MCREG_Rdx(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rbx(){ return (uint64_t&)MCREG_Rbx(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rsp(){ return (uint64_t&)MCREG_Rsp(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rbp(){ return (uint64_t&)MCREG_Rbp(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rsi(){ return (uint64_t&)MCREG_Rsi(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rdi(){ return (uint64_t&)MCREG_Rdi(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R8(){ return (uint64_t&)MCREG_R8(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R9(){ return (uint64_t&)MCREG_R9(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R10(){ return (uint64_t&)MCREG_R10(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R11(){ return (uint64_t&)MCREG_R11(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R12(){ return (uint64_t&)MCREG_R12(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R13(){ return (uint64_t&)MCREG_R13(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R14(){ return (uint64_t&)MCREG_R14(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::R15(){ return (uint64_t&)MCREG_R15(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Rip(){ return (uint64_t&)MCREG_Rip(ctx.uc_mcontext); }
 
 #else
     PORTABILITY_ASSERT("UNIX_CONTEXT");
