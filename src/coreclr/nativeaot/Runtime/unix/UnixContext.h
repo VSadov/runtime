@@ -80,9 +80,9 @@ struct UNIX_CONTEXT
     uint64_t& Rbp();
     uint64_t& Rsi();
     uint64_t& Rdi();
-    uint64_t& R8; ()
-        uint64_t& R9; ()
-        uint64_t& R10();
+    uint64_t& R8 ();
+    uint64_t& R9 ();
+    uint64_t& R10();
     uint64_t& R11();
     uint64_t& R12();
     uint64_t& R13();

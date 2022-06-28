@@ -27,6 +27,10 @@
 #include "stressLog.h"
 #include "RhConfig.h"
 
+#ifdef TARGET_UNIX
+#include "UnixContext.h"
+#endif
+
 #ifndef DACCESS_COMPILE
 
 EXTERN_C NATIVEAOT_API void* REDHAWK_CALLCONV RhpHandleAlloc(void* pObject, int type);

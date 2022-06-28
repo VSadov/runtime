@@ -733,10 +733,10 @@ bool VirtualUnwind(REGDISPLAY* pRegisterSet)
     uint64_t& UNIX_CONTEXT::X26() { return MCREG_X26(ctx.uc_mcontext); }
     uint64_t& UNIX_CONTEXT::X27() { return MCREG_X27(ctx.uc_mcontext); }
     uint64_t& UNIX_CONTEXT::X28() { return MCREG_X28(ctx.uc_mcontext); }
-    uint64_t& UNIX_CONTEXT::Fp() { return MCREG_Fp(ctx.uc_mcontext); }; // X29
-    uint64_t& UNIX_CONTEXT::Lr() { return MCREG_Lr(ctx.uc_mcontext); }; // X30
-    uint64_t& UNIX_CONTEXT::Sp() { return MCREG_Sp(ctx.uc_mcontext); };
-    uint64_t& UNIX_CONTEXT::Pc() { return MCREG_Pc(ctx.uc_mcontext); };
+    uint64_t& UNIX_CONTEXT::Fp() { return MCREG_Fp(ctx.uc_mcontext); } // X29
+    uint64_t& UNIX_CONTEXT::Lr() { return MCREG_Lr(ctx.uc_mcontext); } // X30
+    uint64_t& UNIX_CONTEXT::Sp() { return MCREG_Sp(ctx.uc_mcontext); }
+    uint64_t& UNIX_CONTEXT::Pc() { return MCREG_Pc(ctx.uc_mcontext); }
 
 #elif defined(TARGET_AMD64)
     uint64_t& UNIX_CONTEXT::Rax(){ return MCREG_Rax(ctx.uc_mcontext); }
@@ -760,4 +760,4 @@ bool VirtualUnwind(REGDISPLAY* pRegisterSet)
 #else
     PORTABILITY_ASSERT("UNIX_CONTEXT");
 #endif // TARGET_ARM
-};
+
