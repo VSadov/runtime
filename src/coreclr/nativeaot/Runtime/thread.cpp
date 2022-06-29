@@ -836,17 +836,19 @@ bool Thread::HijackReturnAddressWorker(StackFrameIterator* frameIterator, void* 
     return true;
 }
 
-#ifdef FEATURE_SUSPEND_REDIRECTION
 CONTEXT* Thread::GetRedirectionContext()
 {
+#ifdef FEATURE_SUSPEND_REDIRECTION
     if (m_redirectionContext == NULL)
     {
         m_redirectionContext = PalAllocateCompleteOSContext(&m_redirectionContextBuffer);
     }
+#endif
 
     return m_redirectionContext;
 }
 
+#ifdef FEATURE_SUSPEND_REDIRECTION
 bool Thread::Redirect()
 {
     if (IsDoNotTriggerGcSet())
