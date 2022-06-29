@@ -994,7 +994,7 @@ REDHAWK_PALEXPORT uint32_t REDHAWK_PALAPI PalRegisterHijackCallback(_In_ PalHija
 REDHAWK_PALEXPORT uint32_t REDHAWK_PALAPI PalHijack(HANDLE hThread, _In_opt_ void* pThreadToHijack)
 {
     ThreadUnixHandle* threadHandle = (ThreadUnixHandle*)hThread;
-    int status = 0; // pthread_kill(*threadHandle->GetObject(), INJECT_ACTIVATION_SIGNAL);
+    int status = pthread_kill(*threadHandle->GetObject(), INJECT_ACTIVATION_SIGNAL);
     // We can get EAGAIN when printing stack overflow stack trace and when other threads hit
     // stack overflow too. Those are held in the sigsegv_handler with blocked signals until
     // the process exits.
