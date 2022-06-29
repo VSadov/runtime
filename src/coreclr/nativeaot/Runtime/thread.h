@@ -281,8 +281,8 @@ public:
     Object* GetThreadStaticStorageForModule(uint32_t moduleIndex);
     bool SetThreadStaticStorageForModule(Object* pStorage, uint32_t moduleIndex);
 
+    NATIVE_CONTEXT* GetRedirectionContext();
 #ifdef FEATURE_SUSPEND_REDIRECTION
-    CONTEXT* GetRedirectionContext();
 #endif //FEATURE_SUSPEND_REDIRECTION
 };
 

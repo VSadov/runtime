@@ -546,9 +546,13 @@ REDHAWK_PALEXPORT void REDHAWK_PALAPI PalSleep(uint32_t milliseconds)
 
 REDHAWK_PALEXPORT UInt32_BOOL REDHAWK_PALAPI __stdcall PalSwitchToThread()
 {
-    // sched_yield yields to another thread in the current process. This implementation
-    // won't work well for cross-process synchronization.
-    return sched_yield() == 0;
+    // sched_yield yields to another thread in the current process.
+    sched_yield();
+
+    // The return value of sched_yield indicates the success of the call and does not tell whether a context switch happened.
+    // On Linux sched_yield is documented as never failing.
+    // Since we do not know if there was a context switch, we will just return `false`.
+    return false;
 }
 
 extern "C" UInt32_BOOL CloseHandle(HANDLE handle)
