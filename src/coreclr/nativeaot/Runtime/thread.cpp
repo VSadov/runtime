@@ -836,7 +836,7 @@ bool Thread::HijackReturnAddressWorker(StackFrameIterator* frameIterator, void* 
     return true;
 }
 
-CONTEXT* Thread::GetRedirectionContext()
+NATIVE_CONTEXT* Thread::GetRedirectionContext()
 {
 #ifdef FEATURE_SUSPEND_REDIRECTION
     if (m_redirectionContext == NULL)
@@ -854,7 +854,7 @@ bool Thread::Redirect()
     if (IsDoNotTriggerGcSet())
         return false;
 
-    CONTEXT* redirectionContext = GetRedirectionContext();
+    NATIVE_CONTEXT* redirectionContext = GetRedirectionContext();
     if (redirectionContext == NULL)
         return false;
 
