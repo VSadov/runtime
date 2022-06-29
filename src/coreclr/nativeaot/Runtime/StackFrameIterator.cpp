@@ -555,7 +555,7 @@ void StackFrameIterator::InternalInit(Thread * pThreadToWalk, NATIVE_CONTEXT* pC
 
 #ifdef TARGET_ARM64
 
-    m_RegDisplay.pIP  = (PTR_PCODE)PTR_TO_MEMBER(CONTEXT, pCtx, Pc);
+    m_RegDisplay.pIP  = (PTR_PCODE)PTR_TO_REG(CONTEXT, pCtx, Pc);
 
     //
     // preserved regs
