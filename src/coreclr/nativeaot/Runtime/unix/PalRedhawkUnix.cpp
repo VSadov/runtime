@@ -949,21 +949,21 @@ static struct sigaction g_previousActivationHandler;
 
 static void ActivationHandler(int code, siginfo_t* siginfo, void* context)
 {
-    // Only accept activations from the current process
-    if (g_pHijackCallback != NULL && (siginfo->si_pid == getpid()
-#ifdef HOST_OSX
-        // On OSX si_pid is sometimes 0. It was confirmed by Apple to be expected, as the si_pid is tracked at the process level. So when multiple
-        // signals are in flight in the same process at the same time, it may be overwritten / zeroed.
-        || siginfo->si_pid == 0
-#endif
-        ))
-    {
-        // Make sure that errno is not modified 
-        int savedErrNo = errno;
-        g_pHijackCallback((NATIVE_CONTEXT*)context, NULL);
-        errno = savedErrNo;
-    }
-    else
+//    // Only accept activations from the current process
+//    if (g_pHijackCallback != NULL && (siginfo->si_pid == getpid()
+//#ifdef HOST_OSX
+//        // On OSX si_pid is sometimes 0. It was confirmed by Apple to be expected, as the si_pid is tracked at the process level. So when multiple
+//        // signals are in flight in the same process at the same time, it may be overwritten / zeroed.
+//        || siginfo->si_pid == 0
+//#endif
+//        ))
+//    {
+//        // Make sure that errno is not modified 
+//        int savedErrNo = errno;
+//        g_pHijackCallback((NATIVE_CONTEXT*)context, NULL);
+//        errno = savedErrNo;
+//    }
+//    else
     {
         // Call the original handler when it is not ignored or default (terminate).
         if (g_previousActivationHandler.sa_flags & SA_SIGINFO)
