@@ -508,7 +508,7 @@ class ThreadTest
         TestMaxStackSize();
         TestStartShutdown();
         
-        TestConcurrentIsBackgroundProperty();
+        // TestConcurrentIsBackgroundProperty();
 
         return (s_failed == 0) ? BasicThreading.Pass : BasicThreading.Fail;
     }
