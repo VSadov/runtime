@@ -758,11 +758,6 @@ void Thread::HijackReturnAddress(NATIVE_CONTEXT* pSuspendCtx, void * pvHijackTar
 
 void Thread::HijackReturnAddressWorker(StackFrameIterator* frameIterator, void* pvHijackTargets[])
 {
-#ifdef TARGET_UNIX
-    // TODO: Disabled for now
-    return;
-#endif
-
     PTR_PTR_VOID ppvRetAddrLocation;
     GCRefKind retValueKind;
 
@@ -857,11 +852,6 @@ bool Thread::Redirect()
 bool Thread::InlineSuspend(NATIVE_CONTEXT* interruptedContext)
 {
     ASSERT(!IsDoNotTriggerGcSet());
-
-    // TODO: async suspend should work on ARM64/UNIX, but not tested yet
-#ifdef TARGET_ARM64
-    return false;
-#endif
 
     // TODO: HACK HACK
     // The following is a crude test for cases where VirtualUnwind cannot work
