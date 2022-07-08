@@ -375,9 +375,6 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     // and obtain the location of the return address on the stack
 #if defined(TARGET_AMD64)
 
-    // TODO: Disble
-    return false;
-
     if (!VirtualUnwind(pRegisterSet))
     {
         return false;

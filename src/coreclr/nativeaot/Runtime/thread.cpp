@@ -665,16 +665,8 @@ void Thread::HijackCallback(NATIVE_CONTEXT* pThreadContext, void* pThreadToHijac
         if (pThreadToHijack == NULL)
         {
             ASSERT(pThread->m_interruptedContext == NULL);
-
-// TODO: async suspend should work on ARM64/UNIX, but
-//       considering that return address hijaking for ARM64/UNIX is NYI,
-//       enabling this may just cause more tests to fail, so not enabling for now
-#ifndef TARGET_ARM64
-            pThread->m_interruptedContext = pThreadContext;
-            pThread->WaitForGC(INTERRUPTED_THREAD_MARKER);
-            pThread->m_interruptedContext = NULL;
+            pThread->InlineSuspend(pThreadContext);
             return;
-#endif
         }
 
 #ifdef FEATURE_SUSPEND_REDIRECTION
@@ -766,6 +758,11 @@ void Thread::HijackReturnAddress(NATIVE_CONTEXT* pSuspendCtx, void * pvHijackTar
 
 void Thread::HijackReturnAddressWorker(StackFrameIterator* frameIterator, void* pvHijackTargets[])
 {
+#ifdef TARGET_UNIX
+    // TODO: Disabled for now
+    return;
+#endif
+
     PTR_PTR_VOID ppvRetAddrLocation;
     GCRefKind retValueKind;
 
@@ -856,6 +853,44 @@ bool Thread::Redirect()
     return true;
 }
 #endif //FEATURE_SUSPEND_REDIRECTION
+
+bool Thread::InlineSuspend(NATIVE_CONTEXT* interruptedContext)
+{
+    ASSERT(!IsDoNotTriggerGcSet());
+
+    // TODO: async suspend should work on ARM64/UNIX, but not tested yet
+#ifdef TARGET_ARM64
+    return false;
+#endif
+
+    // TODO: HACK HACK
+    // The following is a crude test for cases where VirtualUnwind cannot work
+    // If we cannot unwind, we cannot do inline suspend either, since the stack would be useless for the GC
+    // We should come up with a better way though.
+
+    PTR_PTR_VOID ppvRetAddrLocation;
+    GCRefKind retValueKind;
+
+    StackFrameIterator frameIterator(this, interruptedContext);
+    ASSERT(frameIterator.IsValid());
+    frameIterator.CalculateCurrentMethodState();
+    if (!frameIterator.GetCodeManager()->GetReturnAddressHijackInfo(frameIterator.GetMethodInfo(),
+        frameIterator.GetRegisterSet(),
+        &ppvRetAddrLocation,
+        &retValueKind))
+    {
+        return false;
+    }
+
+    if (!StackFrameIterator::IsValidReturnAddress(*ppvRetAddrLocation))
+        return false;
+
+    m_interruptedContext = interruptedContext;
+    WaitForGC(INTERRUPTED_THREAD_MARKER);
+    m_interruptedContext = NULL;
+
+    return true;
+}
 
 // This is the standard Unhijack, which is only allowed to be called on your own thread.
 // Note that all the asm-implemented Unhijacks should also only be operating on their
