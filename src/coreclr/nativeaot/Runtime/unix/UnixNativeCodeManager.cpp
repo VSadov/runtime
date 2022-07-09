@@ -388,9 +388,14 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
             // in rbx setup prologue  "push rbp; sub rsp,XX, lea rbp,[rsp + XX]"
             return false;
         }
+        else if (*(int8_t*)pRegisterSet->IP == 0x5d)
+        {
+            // on "pop rbp" part of rbp restore epilogue "add rsp,XX; pop rbp; retq"
+            return false;
+        }
         else if (*(int8_t*)pRegisterSet->IP == 0xC3)
         {
-            // on "retq" part of rbp restore epilogue "pop rbp; retq"
+            // on "retq" part of rbp restore epilogue "add rsp,XX; pop rbp; retq"
             return false;
         }
     }
