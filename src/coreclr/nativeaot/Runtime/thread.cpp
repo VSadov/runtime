@@ -878,6 +878,8 @@ bool Thread::InlineSuspend(NATIVE_CONTEXT* interruptedContext)
         return false;
     }
 
+    Unhijack();
+
     if (!StackFrameIterator::IsValidReturnAddress(*ppvRetAddrLocation))
         return false;
 
