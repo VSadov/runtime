@@ -383,9 +383,9 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     }
     else
     {
-        if ((TADDR)pNativeMethodInfo->pMethodStartAddress + 5 > (TADDR)pRegisterSet->IP)
+        if ((TADDR)pNativeMethodInfo->pMethodStartAddress + 10 > (TADDR)pRegisterSet->IP)
         {
-            // in rbx setup prologue  "push rbp; lea rbp, [rsp + XX]"
+            // in rbx setup prologue  "push rbp; sub rsp,XX, lea rbp,[rsp + XX]"
             return false;
         }
         else if (*(int8_t*)pRegisterSet->IP == 0xC3)
