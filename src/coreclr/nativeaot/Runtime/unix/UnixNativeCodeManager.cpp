@@ -355,7 +355,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             printf("HELLO");
         }
 
-        if (codeOffset < (decoder.GetPrologSize() + 4))
+        if (codeOffset < (decoder.GetPrologSize() + 9))
         {
             // in prologue
             return false;
