@@ -671,7 +671,7 @@ void Thread::HijackCallback(NATIVE_CONTEXT* pThreadContext, void* pThreadToHijac
         if (pThreadToHijack == NULL)
         {
             ASSERT(pThread->m_interruptedContext == NULL);
-            // pThread->InlineSuspend(pThreadContext);
+            pThread->InlineSuspend(pThreadContext);
             return;
         }
 
@@ -870,6 +870,8 @@ bool Thread::InlineSuspend(NATIVE_CONTEXT* interruptedContext)
     {
         return false;
     }
+
+    CrossThreadUnhijack();
 
     ASSERT(StackFrameIterator::IsValidReturnAddress(*ppvRetAddrLocation));
 
