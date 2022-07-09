@@ -388,7 +388,7 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
             // in rbx setup prologue  "push rbp; lea rbp, [rsp + XX]"
             return false;
         }
-        else if (*(size8_t*)pRegisterSet->IP == 0xC3)
+        else if (*(int8_t*)pRegisterSet->IP == 0xC3)
         {
             // on "retq" part of rbp restore epilogue "pop rbp; retq"
             return false;
