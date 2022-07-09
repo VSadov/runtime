@@ -786,15 +786,8 @@ void Thread::HijackReturnAddressWorker(StackFrameIterator* frameIterator, void* 
         CrossThreadUnhijack();
 
         void* pvRetAddr = *ppvRetAddrLocation;
-        // ASSERT(pvRetAddr != NULL);
-        // ASSERT(StackFrameIterator::IsValidReturnAddress(pvRetAddr));
-
-        // TODO:      HACK, HACK
-        //            We should always get a valid address or explicitly be unable to get one.
-        //            This is a workaround for VirtualUnwind returning bogus location for some prolog/epilog scenarios.
-        //            We need to find a more reliable way to detect cases when VirtualUnwind may not work.
-        if (!StackFrameIterator::IsValidReturnAddress(pvRetAddr))
-            return;
+        ASSERT(pvRetAddr != NULL);
+        ASSERT(StackFrameIterator::IsValidReturnAddress(pvRetAddr));
 
         m_ppvHijackedReturnAddressLocation = ppvRetAddrLocation;
         m_pvHijackedReturnAddress = pvRetAddr;
@@ -878,8 +871,7 @@ bool Thread::InlineSuspend(NATIVE_CONTEXT* interruptedContext)
         return false;
     }
 
-    if (!StackFrameIterator::IsValidReturnAddress(*ppvRetAddrLocation))
-        return false;
+    ASSERT(StackFrameIterator::IsValidReturnAddress(*ppvRetAddrLocation));
 
     m_interruptedContext = interruptedContext;
     WaitForGC(INTERRUPTED_THREAD_MARKER);

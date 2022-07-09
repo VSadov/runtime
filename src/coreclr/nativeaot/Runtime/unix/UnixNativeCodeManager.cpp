@@ -366,10 +366,34 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     GcInfoDecoderFlags flags = DECODE_RETURN_KIND;
 #if defined(TARGET_ARM) || defined(TARGET_ARM64)
     flags = (GcInfoDecoderFlags)(flags | DECODE_HAS_TAILCALLS);
+#else
+    flags = (GcInfoDecoderFlags)(flags | GC_INFO_HAS_STACK_BASE_REGISTER);
 #endif // TARGET_ARM || TARGET_ARM64
+
     GcInfoDecoder decoder(GCInfoToken(p), flags);
 
     *pRetValueKind = GetGcRefKind(decoder.GetReturnKind());
+
+    TADDR expectedRetAddrLocation = (TADDR)*pRegisterSet->pRbp + 8;
+    bool isInPrologueOrEpilogue = false;
+
+    if (decoder.GetStackBaseRegister() == NO_STACK_BASE_REGISTER)
+    {
+        expectedRetAddrLocation = (TADDR)pRegisterSet->SP + 8;
+    }
+    else
+    {
+        if ((TADDR)pNativeMethodInfo->pMethodStartAddress + 5 > (TADDR)pMethodInfo->IP)
+        {
+            // in prologue
+            return false;
+        }
+        else if (*(PTR_UIntNative)pRegisterSet->SP == *pRegisterSet->pRbp)
+        {
+            // in epilogue
+            return false;
+        }
+    }
 
     // Unwind the current method context to the caller's context to get its stack pointer
     // and obtain the location of the return address on the stack
@@ -381,6 +405,12 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     }
 
     *ppvRetAddrLocation = (PTR_PTR_VOID)(pRegisterSet->GetSP() - sizeof(TADDR));
+
+    if (expectedRetAddrLocation != (TADDR)*ppvRetAddrLocation)
+    {
+        return false;
+    }
+
     return true;
 
 #elif defined(TARGET_ARM64)
