@@ -385,12 +385,12 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     {
         if ((TADDR)pNativeMethodInfo->pMethodStartAddress + 5 > (TADDR)pRegisterSet->IP)
         {
-            // in prologue
+            // in rbx setup prologue  "push rbp; lea rbp, [rsp + XX]"
             return false;
         }
-        else if (*(PTR_UIntNative)pRegisterSet->SP == *pRegisterSet->pRbp)
+        else if (*(size8_t*)pRegisterSet->IP == 0xC3)
         {
-            // in epilogue
+            // on "retq" part of rbp restore epilogue "pop rbp; retq"
             return false;
         }
     }
