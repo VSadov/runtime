@@ -168,7 +168,8 @@ GcInfoDecoder::GcInfoDecoder(
         m_ValidRangeEnd = (UINT32) DENORMALIZE_CODE_OFFSET(normCodeLength - normEpilogSize);
         _ASSERTE(m_ValidRangeStart < m_ValidRangeEnd);
     }
-    else if (hasSecurityObject || hasGenericsInstContext)
+    else if (hasSecurityObject || hasGenericsInstContext ||
+        (flags & DECODE_PROLOG_LENGTH))
     {
         // Decode prolog information
         UINT32 normPrologSize = (UINT32) m_Reader.DecodeVarLengthUnsigned(NORM_PROLOG_SIZE_ENCBASE) + 1;

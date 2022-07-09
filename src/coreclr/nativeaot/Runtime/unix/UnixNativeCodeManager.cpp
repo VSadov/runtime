@@ -339,7 +339,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
     GcInfoDecoder decoder(
         GCInfoToken(gcInfo),
-        GcInfoDecoderFlags(GC_INFO_HAS_STACK_BASE_REGISTER),
+        GcInfoDecoderFlags(GC_INFO_HAS_STACK_BASE_REGISTER | DECODE_PROLOG_LENGTH),
         0
     );
 
@@ -350,19 +350,19 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     }
     else
     {
-        if (codeOffset < 10)
+        if (codeOffset < decoder.GetPrologSize())
         {
-            // in rbx setup prologue  "push rbp; sub rsp,XX, lea rbp,[rsp + XX]"
+            // in prologue
             return false;
         }
         else if (*(uint8_t*)pvAddress == 0x5d)
         {
-            // on "pop rbp" part of rbp restore epilogue "add rsp,XX; pop rbp; retq"
+            // on the "pop rbp" part of rbp restore epilogue "add rsp,XX; pop rbx; ...; pop rbp; ret"
             return false;
         }
         else if (*(uint8_t*)pvAddress == 0xC3)
         {
-            // on "retq"    part of rbp restore epilogue "add rsp,XX; pop rbp; retq"
+            // on the "ret"    part of rbp restore epilogue "add rsp,XX; pop rbx; ...; pop rbp; ret"
             return false;
         }
     }
