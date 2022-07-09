@@ -383,7 +383,7 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     }
     else
     {
-        if ((TADDR)pNativeMethodInfo->pMethodStartAddress + 5 > (TADDR)pMethodInfo->IP)
+        if ((TADDR)pNativeMethodInfo->pMethodStartAddress + 5 > (TADDR)pRegisterSet->IP)
         {
             // in prologue
             return false;
