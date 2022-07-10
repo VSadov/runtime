@@ -351,10 +351,15 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     else
     {
         char* instr = (char*)pvAddress - codeOffset;
+
+        // method should start with "push rbp"
+        if (*instr != 85)
+            return false;
+
         int prologueSize;
-        for (prologueSize = 0; prologueSize < 20; prologueSize++)
+        for (prologueSize = 1; prologueSize < 20; prologueSize++)
         {
-            if (instr[prologueSize] == 72)  // searxh for start of "leaq  0x??(%rsp), %rbp"
+            if (instr[prologueSize] == 72)  // search for start of "leaq  0x??(%rsp), %rbp"
                 break;
         }
 
