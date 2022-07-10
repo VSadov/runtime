@@ -354,11 +354,13 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
         int prologSize;
         for (prologSize = 0; prologSize < 20; prologSize++)
         {
-            if (instr[prologSize] == 72)
+            if (instr[prologSize] == 72)  // searxh for start of "leaq  0x??(%rsp), %rbp"
                 break;
         }
 
         ASSERT(prologSize < 20);
+        prologSize += 5; //  skip   "leaq  0x??(%rsp), %rbp"
+
         if (codeOffset < prologSize)
         {
             // in prologue
