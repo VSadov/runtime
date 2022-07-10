@@ -360,13 +360,13 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
         const int maxPushLength = 11; // pushing all callee saved takes 11 bytes.
         int prologueSize;
-        for (prologueSize = 1; prologueSize < maxPushLength; prologueSize++)
+        for (prologueSize = 1; prologueSize < maxPushLength + 1; prologueSize++)
         {
             if (start[prologueSize] == 0x48)  // search for start of "lea    rbp, [rsp + 0x??]"
                 break;
         }
 
-        ASSERT(prologueSize < maxPushLength);
+        ASSERT(prologueSize < maxPushLength + 1);
 
         if (start[prologueSize + 1] == 0x83)
         {
