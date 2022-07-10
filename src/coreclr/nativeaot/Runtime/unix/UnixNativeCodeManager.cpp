@@ -351,7 +351,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     else
     {
         char* instr = (char*)pvAddress - codeOffset;
-        for (int prologSize = 0; prologSize < 20; prologSize++)
+        int prologSize;
+        for (prologSize = 0; prologSize < 20; prologSize++)
         {
             if (instr[prologSize] == 72)
                 break;
