@@ -392,7 +392,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             if (opcode == 0x41)
                 opcode = ((uint8_t*)pvAddress)[1];
 
-            if (opcode >= 0x5d && opcode < 0x5d)
+            if (opcode >= 0x5d && opcode <= 0x5f)
             // on the "pop ??" part of "pop ??; pop ??; ret"
             return false;
         }
