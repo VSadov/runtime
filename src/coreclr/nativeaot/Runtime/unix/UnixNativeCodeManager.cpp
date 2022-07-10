@@ -359,7 +359,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
         }
 
         ASSERT(prologSize < 20);
-        if (codeOffset < prplogSize)
+        if (codeOffset < prologSize)
         {
             // in prologue
             return false;
