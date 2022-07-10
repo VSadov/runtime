@@ -351,29 +351,29 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     else
     {
         char* instr = (char*)pvAddress - codeOffset;
-        int prologSize;
-        for (prologSize = 0; prologSize < 20; prologSize++)
+        int prologueSize;
+        for (prologueSize = 0; prologueSize < 20; prologueSize++)
         {
-            if (instr[prologSize] == 72)  // searxh for start of "leaq  0x??(%rsp), %rbp"
+            if (instr[prologueSize] == 72)  // searxh for start of "leaq  0x??(%rsp), %rbp"
                 break;
         }
 
-        ASSERT(prologSize < 20);
-        prologSize += 5; //  skip   "leaq  0x??(%rsp), %rbp"
+        ASSERT(prologueSize < 20);
+        prologueSize += 4; //  skip   "leaq  0x??(%rsp), %rbp"
 
-        if (codeOffset < prologSize)
+        if (codeOffset < prologueSize)
         {
             // in prologue
             return false;
         }
         else if (*(uint8_t*)pvAddress == 0x5d)
         {
-            // on the "pop rbp" part of rbp restore epilogue "add rsp,XX; pop rbx; ...; pop rbp; ret"
+            // on the "pop rbp" part of "pop rbp; ret"
             return false;
         }
         else if (*(uint8_t*)pvAddress == 0xC3)
         {
-            // on the "ret"    part of rbp restore epilogue "add rsp,XX; pop rbx; ...; pop rbp; ret"
+            // on the "ret"     part of "pop rbp; ret"
             return false;
         }
     }
