@@ -362,12 +362,19 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
         int prologueSize;
         for (prologueSize = 1; prologueSize < maxPushLength; prologueSize++)
         {
-            if (start[prologueSize] == 0x48)  // search for start of "leaq  0x??(%rsp), %rbp"
+            if (start[prologueSize] == 0x48)  // search for start of "lea    rbp, [rsp + 0x??]"
                 break;
         }
 
         ASSERT(prologueSize < maxPushLength);
-        prologueSize += 4; //  skip   "leaq  0x??(%rsp), %rbp"
+
+        if (start[prologueSize + 1] == 0x83)
+        {
+            prologueSize += 4; // skip "sub    rsp, 0x??"
+        }
+
+        ASSERT(start[prologueSize] == 0x48);
+        prologueSize += 4;     // skip "lea    rbp, [rsp + 0x??]"
 
         if (codeOffset < prologueSize)
         {
