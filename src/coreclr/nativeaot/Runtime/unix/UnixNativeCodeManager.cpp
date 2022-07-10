@@ -379,7 +379,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
         ASSERT(start[prologueSize] == 0x48);
 
-        if(start[prologueSize + 1] == 0x8b);  // mov
+        if(start[prologueSize + 1] == 0x8b)   // mov
         {
             ASSERT(start[prologueSize + 2] == 0xec); // mov, rbp, rsp
             prologueSize += 3;                       // skip 
