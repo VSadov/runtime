@@ -330,7 +330,7 @@ bool UnixNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 {
 
-#ifdef TARGET_AMD64
+//#ifdef TARGET_AMD64
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
 
@@ -339,7 +339,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
     GcInfoDecoder decoder(
         GCInfoToken(gcInfo),
-        GcInfoDecoderFlags(GC_INFO_HAS_STACK_BASE_REGISTER | DECODE_PROLOG_LENGTH),
+        GcInfoDecoderFlags(GC_INFO_HAS_STACK_BASE_REGISTER),
         0
     );
 
@@ -350,12 +350,15 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     }
     else
     {
-        if (decoder.GetPrologSize() > 1)
+        char* instr = (char*)pvAddress - codeOffset;
+        for (int prologSize = 0; prologSize < 20; prologSize++)
         {
-            printf("HELLO");
+            if (instr[prologSize] == 72)
+                break;
         }
 
-        if (codeOffset < (decoder.GetPrologSize() + 9))
+        ASSERT(prologSize < 20);
+        if (codeOffset < prplogSize)
         {
             // in prologue
             return false;
@@ -371,7 +374,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             return false;
         }
     }
-#endif
+//#endif
 
     return true;
 }
