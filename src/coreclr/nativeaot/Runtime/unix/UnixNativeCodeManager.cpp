@@ -414,7 +414,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             if (opcode == 0x41)
                 opcode = ((uint8_t*)pvAddress)[1];
 
-            if (opcode >= 0x5d && opcode <= 0x5f)
+            if (opcode >= 0x5b && opcode <= 0x5f)   // pop rbx through pop r15 and some others, TODO: VS perhaps switch for nonvol?
             // on the "pop ??" part of "pop ??; pop ??; ret"
             return false;
         }
