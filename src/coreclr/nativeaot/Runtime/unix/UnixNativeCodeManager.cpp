@@ -350,20 +350,23 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     }
     else
     {
-        char* instr = (char*)pvAddress - codeOffset;
+        uint8_t* start = (uint8_t*)pvAddress - codeOffset;
 
         // method should start with "push rbp"
-        if (*instr != 85)
+        // TODO: how a method not startig with "push rpb" is still marked as rbp based?
+        //       are those ok?
+        if (*start != 85)
             return false;
 
+        const int maxPushLength = 11; // pushing all callee saved takes 11 bytes.
         int prologueSize;
-        for (prologueSize = 1; prologueSize < 20; prologueSize++)
+        for (prologueSize = 1; prologueSize < maxPushLength; prologueSize++)
         {
-            if (instr[prologueSize] == 72)  // search for start of "leaq  0x??(%rsp), %rbp"
+            if (start[prologueSize] == 0x48)  // search for start of "leaq  0x??(%rsp), %rbp"
                 break;
         }
 
-        ASSERT(prologueSize < 20);
+        ASSERT(prologueSize < maxPushLength);
         prologueSize += 4; //  skip   "leaq  0x??(%rsp), %rbp"
 
         if (codeOffset < prologueSize)
@@ -371,14 +374,19 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             // in prologue
             return false;
         }
-        else if (*(uint8_t*)pvAddress == 0x5d)
-        {
-            // on the "pop rbp" part of "pop rbp; ret"
-            return false;
-        }
         else if (*(uint8_t*)pvAddress == 0xC3)
         {
-            // on the "ret"     part of "pop rbp; ret"
+            // on the "ret"     part of "pop ??; pop ??; ret"
+            return false;
+        }
+        else 
+        {
+            uint8_t opcode = *(uint8_t*)pvAddress;
+            if (opcode == 0x41)
+                opcode = ((uint8_t*)pvAddress)[1];
+
+            if (opcode >= 0x5d && opcode < 0x5d)
+            // on the "pop ??" part of "pop ??; pop ??; ret"
             return false;
         }
     }
