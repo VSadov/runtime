@@ -370,11 +370,24 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
         if (start[prologueSize + 1] == 0x83)
         {
-            prologueSize += 4; // skip "sub    rsp, 0x??"
+            prologueSize += 4; // skip "sub    rsp, 0x??"  // B operand
+        }
+        else if (start[prologueSize + 1] == 0x81)
+        {
+            prologueSize += 7; // skip "sub    rsp, 0x??"  // W operand
         }
 
         ASSERT(start[prologueSize] == 0x48);
-        prologueSize += 4;     // skip "lea    rbp, [rsp + 0x??]"
+        ASSERT(start[prologueSize + 1] == 0x8d);  // lea
+
+        if (start[prologueSize + 2] == 0xac)
+        {
+            prologueSize += 8;     // skip "lea    rbp, [rsp + 0x??]"  W operand
+        }
+        else
+        {
+            prologueSize += 5;     // skip "lea    rbp, [rsp + 0x??]"  B operand
+        }
 
         if (codeOffset < prologueSize)
         {
