@@ -403,12 +403,12 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             // in prologue
             return false;
         }
-        else if (*(uint8_t*)pvAddress == 0xC3)
+        else if (((uint8_t*)pvAddress)[-1] == 0x5d)
         {
-            // on the "ret"     part of "pop ??; pop ??; ret"
+            // right after "pop   rbp". This could be "ret" or "jmp" 
             return false;
         }
-        else 
+        else
         {
             uint8_t opcode = *(uint8_t*)pvAddress;
             if (opcode == 0x41)
