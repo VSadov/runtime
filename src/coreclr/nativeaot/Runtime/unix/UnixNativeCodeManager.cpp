@@ -414,9 +414,13 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             if (opcode == 0x41)
                 opcode = ((uint8_t*)pvAddress)[1];
 
-            if (opcode >= 0x5b && opcode <= 0x5f)   // pop rbx through pop r15 and some others, TODO: VS perhaps switch for nonvol?
-            // on the "pop ??" part of "pop ??; pop ??; ret"
-            return false;
+            if (opcode >= 0x5b && opcode <= 0x5f)   // pop rbx through pop r15 and some others, TODO: VS perhaps switch for nonvol?           
+                return false; // on the "pop ??" part of "pop ??; pop ??; ret"
+
+            // TODO VS Also need to reject funclets ? (for SP)
+            // TODO: VS just reject pushes (for finallies). 
+            if (opcode >= 0x50 && opcode <= 0x57)
+                return false;
         }
     }
 //#endif
