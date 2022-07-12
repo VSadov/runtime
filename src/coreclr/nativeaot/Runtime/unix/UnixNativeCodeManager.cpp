@@ -329,6 +329,8 @@ bool UnixNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 
 bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 {
+    return true;
+
 #ifdef TARGET_AMD64
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
