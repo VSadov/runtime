@@ -329,8 +329,6 @@ bool UnixNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 
 bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 {
-    return true;
-
 #ifdef TARGET_AMD64
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
@@ -445,8 +443,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
                 return false;
 
             // push rax through r15.
-            if (opcode >= 0x50 && opcode <= 0x57)
-                return false;
+            //if (opcode >= 0x50 && opcode <= 0x57)
+            //    return false;
         }
     }
 #endif
