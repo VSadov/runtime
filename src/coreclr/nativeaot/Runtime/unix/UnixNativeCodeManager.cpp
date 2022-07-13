@@ -412,7 +412,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
         if (codeOffset < prologueSize)
         {
             // in prologue
-            return false;
+            // return false;
+            printf("IN PROLOGUE \n");
         }
 
 
