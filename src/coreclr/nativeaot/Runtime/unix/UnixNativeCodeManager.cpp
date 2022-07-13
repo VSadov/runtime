@@ -414,6 +414,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             // in prologue
             // return false;
             printf("IN PROLOGUE \n");
+            return true;
         }
 
 
