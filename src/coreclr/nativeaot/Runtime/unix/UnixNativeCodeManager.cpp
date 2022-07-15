@@ -329,7 +329,13 @@ bool UnixNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 
 bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 {
-#ifdef TARGET_AMD64
+//#ifdef TARGET_AMD64
+
+    uint8_t opcode = *(uint8_t*)pvAddress;
+    // detect near and far RET, it is always in epilogue  (we could actuallly get ret addr in this case).
+    if (opcode == 0xC3 || opcode == 0xCB)
+        return false;
+
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
 
@@ -346,95 +352,15 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
     if (decoder.GetStackBaseRegister() == NO_STACK_BASE_REGISTER)
     {
-        // TODO: can we detect not unwindable ranges in RSP based code or we need extra info for epilogues?
-        return false;
-    }
-    else
-    {
-        // we are looking for prologue pattern like the following. If IP falls on these instructions, we cannot unwind.
-        //     push  rbp
-        //     push  ??
-        //     push  ??
-        //     . . .
-        //     sub   rsp, ??                // optional
-        //     lea   rbp, [rsp + 0x??]      // also could be "mov, rbp, rsp"
-
-
-        uint8_t* start = (uint8_t*)pvAddress - codeOffset;
-
-        // RBP based methods not starting with "push rbp".
-        //       assume these are not unwindable for now.
-        if (*start != 0x55)
-            return false;
-
-        const int maxPushLength = 11; // pushing all callee saved registers takes up to 11 bytes.
-        int prologueSize;
-        for (prologueSize = 1; prologueSize < maxPushLength + 1; prologueSize++)
+        // any pop or instruction after pop
         {
-            if ((start[prologueSize] & 0x48) == 0x48)  // REX.W means we are done with pushes
-                break;
+            uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
+
+            // pop rax through r15.
+            if (prevOpcode >= 0x58 && prevOpcode <= 0x5f)
+                return false;
         }
 
-        ASSERT(prologueSize < maxPushLength + 1);
-
-        // skip optional sub rsp
-        if (start[prologueSize + 1] == 0x83)
-        {
-            prologueSize += 4; // skip "sub    rsp, 0x??"  // B operand
-        }
-        else if (start[prologueSize + 1] == 0x81)
-        {
-            prologueSize += 7; // skip "sub    rsp, 0x??"  // W operand
-        }
-
-        ASSERT((start[prologueSize] & 0x48) == 0x48);
-
-        // mov or lea rbp concludes the un-unwindable prologue.
-        if(start[prologueSize + 1] == 0x8b)   // mov
-        {
-            ASSERT(start[prologueSize + 2] == 0xec); // mov, rbp, rsp
-            prologueSize += 3;                       // skip 
-        }
-        else
-        {
-            ASSERT(start[prologueSize + 1] == 0x8d);  // lea
-
-            if (start[prologueSize + 2] == 0xac)
-            {
-                prologueSize += 8;     // skip "lea    rbp, [rsp + 0x??]"  W operand
-            }
-            else
-            {
-                prologueSize += 5;     // skip "lea    rbp, [rsp + 0x??]"  B operand
-            }
-        }
-
-        if (codeOffset < prologueSize)
-        {
-            // in prologue
-            // return false;
-            printf("IN PROLOGUE \n");
-            return true;
-        }
-
-
-        // now check if we are in un-unwindable epilogue that looks like:
-        //      pop rbx
-        //      pop r12
-        //      . . .
-        //      pop rbp
-        //      ret            // can also be a jmp
-        //
-        if (((uint8_t*)pvAddress)[-1] == 0x5d)
-        {
-            // right after "pop   rbp". This could be "ret" or "jmp" 
-            return false;
-        }
-
-        // we see a bunch of push/pop instructions in finallies and VirtualUnwind cannot handle them.
-        // same issue with pops in epilogs
-        // just reject any kind of push or pop
-        //
         {
             uint8_t opcode = *(uint8_t*)pvAddress;
             if (opcode == 0x41)
@@ -443,13 +369,38 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
             // pop rax through r15.
             if (opcode >= 0x58 && opcode <= 0x5f)
                 return false;
-
-            // push rax through r15.
-            //if (opcode >= 0x50 && opcode <= 0x57)
-            //    return false;
         }
+
+        // TODO: VS also jmp after   "addq ??, rsp"
     }
-#endif
+    else
+    {
+        // RBP based methods that starts with "push rbp" is unwindable until after "pop rbp"
+        if (*start != 0x55)
+        {
+            uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
+            return (prevOpcode == 0x5d);
+        }
+
+        //{
+        //    uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
+
+        //    // pop rax through r15.
+        //    if (prevOpcode >= 0x58 && prevOpcode <= 0x5f)
+        //        return false;
+        //}
+
+        //{
+        //    uint8_t opcode = *(uint8_t*)pvAddress;
+        //    if (opcode == 0x41)
+        //        opcode = ((uint8_t*)pvAddress)[1];
+
+        //    // pop rax through r15.
+        //    if (opcode >= 0x58 && opcode <= 0x5f)
+        //        return false;
+        //}
+    }
+//#endif
 
     return true;
 }
