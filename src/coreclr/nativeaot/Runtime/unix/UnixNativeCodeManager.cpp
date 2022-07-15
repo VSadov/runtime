@@ -371,11 +371,13 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
                 return false;
         }
 
-        // TODO: VS also jmp after   "addq ??, rsp"
+        // TODO: anything after   "addq ??, rsp"
+        //       anything after    pop
     }
     else
     {
         // RBP based methods that starts with "push rbp" is unwindable until after "pop rbp"
+        uint8_t* start = (uint8_t*)pvAddress - codeOffset;
         if (*start != 0x55)
         {
             uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
