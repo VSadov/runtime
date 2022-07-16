@@ -339,6 +339,16 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
 
+    PTR_UInt8 p = pNativeMethodInfo->pLSDA;
+    uint8_t unwindBlockFlags = *p++;
+
+    if ((unwindBlockFlags & UBF_FUNC_HAS_ASSOCIATED_DATA) != 0)
+        p += sizeof(int32_t);
+
+    // Check whether this is a funclet
+    if ((unwindBlockFlags & UBF_FUNC_KIND_MASK) != UBF_FUNC_KIND_ROOT)
+        return false;
+
     PTR_UInt8 gcInfo;
     uint32_t codeOffset = GetCodeOffset(&pMethodInfo, pvAddress, &gcInfo);
 
@@ -425,7 +435,7 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
 {
     UnixNativeMethodInfo* pNativeMethodInfo = (UnixNativeMethodInfo*)pMethodInfo;
 
-    PTR_UInt8 p = pNativeMethodInfo->pMainLSDA;
+    PTR_UInt8 p = pNativeMethodInfo->pLSDA;
 
     uint8_t unwindBlockFlags = *p++;
 
