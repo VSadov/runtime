@@ -355,7 +355,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     //   pop nonvolatile-integer-register[0..15].
     //
 
-    while (true) {
+    while (true)
+    {
         if ((NextByte[0] & 0xf8) == POP_OP)
         {
             NextByte += 1;
@@ -384,8 +385,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
     if (((NextByte[0] == RET_OP) ||
         (NextByte[0] == RET_OP_2)) ||
-        (((NextByte[0] == REP_PREFIX) && (NextByte[1] == RET_OP)))) {
-
+        (((NextByte[0] == REP_PREFIX) && (NextByte[1] == RET_OP))))
+    {
         //
         // A return is an unambiguous indication of an epilogue.
         //
@@ -394,8 +395,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     }
 
     if ((NextByte[0] == JMP_IMM8_OP) ||
-        (NextByte[0] == JMP_IMM32_OP)) {
-
+        (NextByte[0] == JMP_IMM32_OP))
+    {
         //
         // An unconditional branch to a target that is equal to the start of
         // or outside of this routine is logically a call to another function.
