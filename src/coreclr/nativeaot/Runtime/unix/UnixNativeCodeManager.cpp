@@ -339,7 +339,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
 
-    UnixNativeMethodInfo* pNativeMethodInfo = (UnixNativeMethodInfo*)pMethodInfo;
+    UnixNativeMethodInfo* pNativeMethodInfo = (UnixNativeMethodInfo*)&pMethodInfo;
     PTR_UInt8 p = pNativeMethodInfo->pLSDA;
     uint8_t unwindBlockFlags = *p++;
 
