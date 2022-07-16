@@ -352,24 +352,26 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
     if (decoder.GetStackBaseRegister() == NO_STACK_BASE_REGISTER)
     {
-        // any pop or instruction after pop
-        {
-            uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
+        return false;
 
-            // pop rax through r15.
-            if (prevOpcode >= 0x58 && prevOpcode <= 0x5f)
-                return false;
-        }
+        //// any pop or instruction after pop
+        //{
+        //    uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
 
-        {
-            uint8_t opcode = *(uint8_t*)pvAddress;
-            if (opcode == 0x41)
-                opcode = ((uint8_t*)pvAddress)[1];
+        //    // pop rax through r15.
+        //    if (prevOpcode >= 0x58 && prevOpcode <= 0x5f)
+        //        return false;
+        //}
 
-            // pop rax through r15.
-            if (opcode >= 0x58 && opcode <= 0x5f)
-                return false;
-        }
+        //{
+        //    uint8_t opcode = *(uint8_t*)pvAddress;
+        //    if (opcode == 0x41)
+        //        opcode = ((uint8_t*)pvAddress)[1];
+
+        //    // pop rax through r15.
+        //    if (opcode >= 0x58 && opcode <= 0x5f)
+        //        return false;
+        //}
 
         // TODO: anything after   "addq ??, rsp"
         //       anything after    pop
