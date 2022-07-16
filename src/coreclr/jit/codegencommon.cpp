@@ -6053,7 +6053,11 @@ void CodeGen::genFnProlog()
     // Establish the AMD64 frame pointer after the OS-reported prolog.
     if (doubleAlignOrFramePointerUsed())
     {
+#if defined(UNIX_AMD64_ABI)
+        const bool reportUnwindData = true;
+#else
         const bool reportUnwindData = compiler->compLocallocUsed || compiler->opts.compDbgEnC;
+#endif
         genEstablishFramePointer(compiler->codeGen->genSPtoFPdelta(), reportUnwindData);
     }
 #endif // TARGET_AMD64
