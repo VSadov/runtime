@@ -425,7 +425,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
         size_t endAddress;
         uintptr_t lsda;
 
-        bool result = FindProcInfo((uintptr_t)ControlPC, startAddress, endAddress, &lsda);
+        bool result = FindProcInfo((uintptr_t)ControlPC, &startAddress, &endAddress, &lsda);
         ASSERT(result);
 
         if (BranchTarget < startAddress || BranchTarget >= endAddress)
