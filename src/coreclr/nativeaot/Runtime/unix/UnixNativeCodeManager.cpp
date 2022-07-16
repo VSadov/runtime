@@ -52,6 +52,13 @@ UnixNativeCodeManager::~UnixNativeCodeManager()
 {
 }
 
+void UnixNativeCodeManager::GetMethodRange(PTR_VOID ControlPC, uintptr_t* startAddress, uintptr_t* endAddress)
+{
+    uintptr_t lsda;
+    bool result = FindProcInfo((uintptr_t)ControlPC, &startAddress, &endAddress, &lsda);
+    ASSERT(result);
+}
+
 bool UnixNativeCodeManager::FindMethodInfo(PTR_VOID        ControlPC,
                                            MethodInfo *    pMethodInfoOut)
 {
@@ -63,10 +70,10 @@ bool UnixNativeCodeManager::FindMethodInfo(PTR_VOID        ControlPC,
     }
 
     UnixNativeMethodInfo * pMethodInfo = (UnixNativeMethodInfo *)pMethodInfoOut;
-    uintptr_t startAddress;
+    uintptr_t startAddress, endAddress;
     uintptr_t lsda;
 
-    if (!FindProcInfo((uintptr_t)ControlPC, &startAddress, &lsda))
+    if (!FindProcInfo((uintptr_t)ControlPC, &startAddress, &endAddress, &lsda))
     {
         return false;
     }
@@ -327,97 +334,136 @@ bool UnixNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
     return true;
 }
 
+#define SIZE64_PREFIX 0x48
+#define ADD_IMM8_OP 0x83
+#define ADD_IMM32_OP 0x81
+#define JMP_IMM8_OP 0xeb
+#define JMP_IMM32_OP 0xe9
+#define JMP_IND_OP 0xff
+#define LEA_OP 0x8d
+#define REPNE_PREFIX 0xf2
+#define REP_PREFIX 0xf3
+#define POP_OP 0x58
+#define RET_OP 0xc3
+#define RET_OP_2 0xc2
+
+#define IS_REX_PREFIX(x) (((x) & 0xf0) == 0x40)
+
 bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 {
 //#ifdef TARGET_AMD64
 
-    uint8_t opcode = *(uint8_t*)pvAddress;
-    // detect near and far RET, it is always in epilogue  (we could actuallly get ret addr in this case).
-    if (opcode == 0xC3 || opcode == 0xCB)
-        return false;
+    int instrTillRet = 1;
+    uint8_t* NextByte = (uint8_t*)pvAddress;
 
-    MethodInfo pMethodInfo;
-    FindMethodInfo(pvAddress, &pMethodInfo);
+    //
+    // Check for any number of:
+    //
+    //   pop nonvolatile-integer-register[0..15].
+    //
 
-    UnixNativeMethodInfo* pNativeMethodInfo = (UnixNativeMethodInfo*)&pMethodInfo;
-    PTR_UInt8 p = pNativeMethodInfo->pLSDA;
-    uint8_t unwindBlockFlags = *p++;
-
-    if ((unwindBlockFlags & UBF_FUNC_HAS_ASSOCIATED_DATA) != 0)
-        p += sizeof(int32_t);
-
-    // Check whether this is a funclet
-    // TODO: VS this should be unwindable for the SP suspension, but treated as RSP based
-    //       there is unsuspendable epilog
-    if ((unwindBlockFlags & UBF_FUNC_KIND_MASK) != UBF_FUNC_KIND_ROOT)
-        return false;
-
-    PTR_UInt8 gcInfo;
-    uint32_t codeOffset = GetCodeOffset(&pMethodInfo, pvAddress, &gcInfo);
-
-    GcInfoDecoder decoder(
-        GCInfoToken(gcInfo),
-        GcInfoDecoderFlags(GC_INFO_HAS_STACK_BASE_REGISTER),
-        0
-    );
-
-    // detect if the IP is in a location that VirtualUnwind will have problem with.
-
-    if (decoder.GetStackBaseRegister() == NO_STACK_BASE_REGISTER)
-    {
-        return false;
-
-        //// any pop or instruction after pop
-        //{
-        //    uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
-
-        //    // pop rax through r15.
-        //    if (prevOpcode >= 0x58 && prevOpcode <= 0x5f)
-        //        return false;
-        //}
-
-        //{
-        //    uint8_t opcode = *(uint8_t*)pvAddress;
-        //    if (opcode == 0x41)
-        //        opcode = ((uint8_t*)pvAddress)[1];
-
-        //    // pop rax through r15.
-        //    if (opcode >= 0x58 && opcode <= 0x5f)
-        //        return false;
-        //}
-
-        // TODO: anything after   "addq ??, rsp"
-        //       anything after    pop
-    }
-    else
-    {
-        // RBP based methods that starts with "push rbp" is unwindable until after "pop rbp"
-        uint8_t* start = (uint8_t*)pvAddress - codeOffset;
-        if (*start != 0x55)
+    while (true) {
+        if ((NextByte[0] & 0xf8) == POP_OP)
         {
-            uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
-            return (prevOpcode == 0x5d);
+            NextByte += 1;
+            instrTillRet++;
+        }
+        else if (IS_REX_PREFIX(NextByte[0]) && ((NextByte[1] & 0xf8) == POP_OP))
+        {
+            NextByte += 2;
+            instrTillRet++;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    //
+    // A REPNE prefix may optionally precede a control transfer
+    // instruction with no effect on unwinding.
+    //
+
+    if (NextByte[0] == REPNE_PREFIX)
+    {
+        NextByte += 1;
+    }
+
+    if (((NextByte[0] == RET_OP) ||
+        (NextByte[0] == RET_OP_2)) ||
+        (((NextByte[0] == REP_PREFIX) && (NextByte[1] == RET_OP)))) {
+
+        //
+        // A return is an unambiguous indication of an epilogue.
+        //
+
+        return false;
+    }
+
+    if ((NextByte[0] == JMP_IMM8_OP) ||
+        (NextByte[0] == JMP_IMM32_OP)) {
+
+        //
+        // An unconditional branch to a target that is equal to the start of
+        // or outside of this routine is logically a call to another function.
+        //
+
+        size_t BranchTarget = (size_t)NextByte;
+        if (NextByte[0] == JMP_IMM8_OP)
+        {
+            BranchTarget += 2 + NextByte[1];
+        }
+        else
+        {
+            int delta = NextByte[1] | (NextByte[2] << 8) |
+                (NextByte[3] << 16) | (NextByte[4] << 24);
+            BranchTarget += 5 + delta;
         }
 
-        //{
-        //    uint8_t prevOpcode = ((uint8_t*)pvAddress)[-1];
+        //
+        // Determine whether the branch target refers to code within this
+        // function. If not, then it is an epilogue indicator.
+        //
+        // A branch to the start of self implies a recursive call, so
+        // is treated as an epilogue.
+        //
 
-        //    // pop rax through r15.
-        //    if (prevOpcode >= 0x58 && prevOpcode <= 0x5f)
-        //        return false;
-        //}
+        size_t startAddress;
+        size_t endAddress;
 
-        //{
-        //    uint8_t opcode = *(uint8_t*)pvAddress;
-        //    if (opcode == 0x41)
-        //        opcode = ((uint8_t*)pvAddress)[1];
+        GetMethodRange(pvAddress, (uintptr_t*)&startAddress, (uintptr_t*)&startAddress);
 
-        //    // pop rax through r15.
-        //    if (opcode >= 0x58 && opcode <= 0x5f)
-        //        return false;
-        //}
+        if (BranchTarget < startAddress || BranchTarget >= endAddress)
+        {
+            return false;
+        }
     }
-//#endif
+    else if ((NextByte[0] == JMP_IND_OP) && (NextByte[1] == 0x25))
+    {
+        //
+        // An unconditional jump indirect.
+        //
+        // This is a jmp outside of the function, probably a tail call
+        // to an import function.
+        //
+
+        return false;
+    }
+    else if (((NextByte[0] & 0xf8) == SIZE64_PREFIX) &&
+        (NextByte[1] == 0xff) &&
+        (NextByte[2] & 0x38) == 0x20)
+    {
+        //
+        // This is an indirect jump opcode: 0x48 0xff /4.  The 64-bit
+        // flag (REX.W) is always redundant here, so its presence is
+        // overloaded to indicate a branch out of the function - a tail
+        // call.
+        //
+        // Such an opcode is an unambiguous epilogue indication.
+        //
+
+        return false;
+    }
 
     return true;
 }
