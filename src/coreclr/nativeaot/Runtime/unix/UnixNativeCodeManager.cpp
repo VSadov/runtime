@@ -339,6 +339,7 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
     MethodInfo pMethodInfo;
     FindMethodInfo(pvAddress, &pMethodInfo);
 
+    UnixNativeMethodInfo* pNativeMethodInfo = (UnixNativeMethodInfo*)pMethodInfo;
     PTR_UInt8 p = pNativeMethodInfo->pLSDA;
     uint8_t unwindBlockFlags = *p++;
 
@@ -346,6 +347,8 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
         p += sizeof(int32_t);
 
     // Check whether this is a funclet
+    // TODO: VS this should be unwindable for the SP suspension, but treated as RSP based
+    //       there is unsuspendable epilog
     if ((unwindBlockFlags & UBF_FUNC_KIND_MASK) != UBF_FUNC_KIND_ROOT)
         return false;
 
