@@ -27,8 +27,6 @@ public:
     bool FindMethodInfo(PTR_VOID        ControlPC,
                         MethodInfo *    pMethodInfoOut);
 
-    void GetMethodRange(PTR_VOID ControlPC, uintptr_t* startAddress, uintptr_t* endAddress);
-
     bool IsFunclet(MethodInfo * pMethodInfo);
 
     bool IsFilter(MethodInfo * pMethodInfo);

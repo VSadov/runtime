@@ -52,13 +52,6 @@ UnixNativeCodeManager::~UnixNativeCodeManager()
 {
 }
 
-void UnixNativeCodeManager::GetMethodRange(PTR_VOID ControlPC, uintptr_t* startAddress, uintptr_t* endAddress)
-{
-    uintptr_t lsda;
-    bool result = FindProcInfo((uintptr_t)ControlPC, &startAddress, &endAddress, &lsda);
-    ASSERT(result);
-}
-
 bool UnixNativeCodeManager::FindMethodInfo(PTR_VOID        ControlPC,
                                            MethodInfo *    pMethodInfoOut)
 {
@@ -430,8 +423,10 @@ bool UnixNativeCodeManager::IsUnwindable(PTR_VOID pvAddress)
 
         size_t startAddress;
         size_t endAddress;
+        uintptr_t lsda;
 
-        GetMethodRange(pvAddress, (uintptr_t*)&startAddress, (uintptr_t*)&startAddress);
+        bool result = FindProcInfo((uintptr_t)ControlPC, startAddress, endAddress, &lsda);
+        ASSERT(result);
 
         if (BranchTarget < startAddress || BranchTarget >= endAddress)
         {
