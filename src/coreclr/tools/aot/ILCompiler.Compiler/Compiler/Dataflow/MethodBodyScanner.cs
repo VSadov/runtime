@@ -298,7 +298,7 @@ namespace ILCompiler.Dataflow
 
             // We should never have created a DataFlowAnalyzedMethodNode for compiler generated methods
             // since their data flow analysis is handled as part of their parent method analysis.
-            Debug.Assert(!CompilerGeneratedState.IsNestedFunctionOrStateMachineMember(startingMethod));
+            // Debug.Assert(!CompilerGeneratedState.IsNestedFunctionOrStateMachineMember(startingMethod));
 
             // Note that the default value of a hoisted local will be MultiValueLattice.Top, not UnknownValue.Instance.
             // This ensures that there are no warnings for the "unassigned state" of a parameter.

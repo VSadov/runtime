@@ -24,7 +24,7 @@ namespace ILCompiler.DependencyAnalysis
         public DataflowAnalyzedMethodNode(MethodIL methodIL)
         {
             Debug.Assert(methodIL.OwningMethod.IsTypicalMethodDefinition);
-            Debug.Assert(!CompilerGeneratedState.IsNestedFunctionOrStateMachineMember(methodIL.OwningMethod));
+            // Debug.Assert(!CompilerGeneratedState.IsNestedFunctionOrStateMachineMember(methodIL.OwningMethod));
             _methodIL = methodIL;
         }
         
