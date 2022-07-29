@@ -322,7 +322,20 @@ namespace System.Threading
         /// </summary>
         internal const int OptimalMaxSpinWaitsPerSpinIteration = 64;
 
-        public static void SpinWait(int iterations) => RuntimeImports.RhSpinWait(iterations);
+        public static void SpinWait(int iterations)
+        {
+            // limit spining in coop mode to 10000
+            while (iterations > 10000)
+            {
+                RuntimeImports.RhSpinWait(10000);
+                iterations -= 10000;
+            }
+
+            if (iterations > 0)
+            {
+                RuntimeImports.RhSpinWait(iterations);
+            }
+        }
 
         [MethodImpl(MethodImplOptions.NoInlining)] // Slow path method. Make sure that the caller frame does not pay for PInvoke overhead.
         public static bool Yield() => RuntimeImports.RhYield();
