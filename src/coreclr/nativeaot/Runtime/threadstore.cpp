@@ -82,6 +82,9 @@ ThreadStore * ThreadStore::Create(RuntimeInstance * pRuntimeInstance)
     if (NULL == pNewThreadStore)
         return NULL;
 
+    if (!pNewThreadStore->m_SuspendProgressEvent.CreateManualEventNoThrow(true))
+        return NULL;
+
     if (!PalRegisterHijackCallback(Thread::HijackCallback))
         return NULL;
 
@@ -215,13 +218,18 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
     // Our lock-free algorithm depends on flushing write buffers of all processors running RH code.  The
     // reason for this is that we essentially implement Dekker's algorithm, which requires write ordering.
     PalFlushProcessWriteBuffers();
+    YieldProcessorNormalized();
 
-    bool keepWaiting;
-    YieldProcessorNormalizationInfo normalizationInfo;
-    int waitCycles = 1;
-    do
+    int prevRemaining = 0;
+    int remaining = 0;
+    bool observeOnly = false;
+
+    while(true)
     {
-        keepWaiting = false;
+        prevRemaining = remaining;
+        remaining = 0;
+        m_SuspendProgressEvent.Reset();
+
         FOREACH_THREAD(pTargetThread)
         {
             if (pTargetThread == pThisThread)
@@ -229,37 +237,39 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
 
             if (!pTargetThread->CacheTransitionFrameForSuspend())
             {
-                // We drive all threads to preemptive mode by hijacking them with return-address hijack.
-                keepWaiting = true;
-                pTargetThread->Hijack();
+                remaining++;
+                if (!observeOnly)
+                {
+                    pTargetThread->Hijack();
+                }
             }
         }
         END_FOREACH_THREAD
 
-        if (keepWaiting)
+        if (!remaining)
+            break;
+
+        if (remaining < prevRemaining ||
+            !observeOnly)
         {
-            if (PalSwitchToThread() == 0 && g_RhNumberOfProcessors > 1)
-            {
-                // No threads are scheduled on this processor.  Perhaps we're waiting for a thread
-                // that's scheduled on another processor.  If so, let's give it a little time
-                // to make forward progress.
-                // Note that we do not call Sleep, because the minimum granularity of Sleep is much
-                // too long (we probably don't need a 15ms wait here).  Instead, we'll just burn some
-                // cycles.
-    	        // @TODO: need tuning for spin
-                // @TODO: need tuning for this whole loop as well.
-                //        we are likley too aggressive with interruptions which may result in longer pauses.
-                YieldProcessorNormalizedForPreSkylakeCount(normalizationInfo, waitCycles);
-
-                // simplistic linear backoff for now
-                // we could be catching threads in restartable sequences such as LL/SC style interlocked on ARM64
-                // and forcing them to restart.
-                // if interrupt mechanism is fast, eagerness could be hurting our overall progress.
-                waitCycles += 10000;
-            }
+            observeOnly = true;
+            printf("++++++ SPIN \n");
+            YieldProcessorNormalized();
         }
+        else
+        {
+            observeOnly = WaitForSuspensionProgress();
+            if (observeOnly)
+            {
+                printf("TIMED OUT \n");
+            }
+            else
+            {
+                printf("===== PROGRESS \n");
+            }
 
-    } while (keepWaiting);
+        }
+    }
 
 #if defined(TARGET_ARM) || defined(TARGET_ARM64)
     // Flush the store buffers on all CPUs, to ensure that all changes made so far are seen
@@ -339,6 +349,25 @@ void ThreadStore::InitiateThreadAbort(Thread* targetThread, Object * threadAbort
     }
 
     ResumeAllThreads(/* waitForGCEvent = */ false);
+}
+
+bool ThreadStore::WaitForSuspensionProgress()
+{
+    uint32_t result = m_SuspendProgressEvent.Wait(1, false);
+
+    if (result == WAIT_OBJECT_0)
+        return true;
+
+    ASSERT(result == WAIT_TIMEOUT);
+
+    return false;
+}
+
+// static
+void ThreadStore::ThreadSuspended()
+{
+    ThreadStore* ts = GetThreadStore();
+    ts->m_SuspendProgressEvent.Set();
 }
 
 void ThreadStore::CancelThreadAbort(Thread* targetThread)

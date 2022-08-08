@@ -22,6 +22,7 @@ class ThreadStore
     SList<Thread>       m_ThreadList;
     PTR_RuntimeInstance m_pRuntimeInstance;
     ReaderWriterLock    m_Lock;
+    CLREventStatic      m_SuspendProgressEvent;
 
 private:
     ThreadStore();
@@ -61,6 +62,9 @@ public:
     void        Destroy();
     void        SuspendAllThreads(bool waitForGCEvent);
     void        ResumeAllThreads(bool waitForGCEvent);
+
+    bool        WaitForSuspensionProgress();
+    static void ThreadSuspended();
 
     static bool IsTrapThreadsRequested();
 };
