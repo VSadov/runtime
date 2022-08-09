@@ -82,7 +82,7 @@ ThreadStore * ThreadStore::Create(RuntimeInstance * pRuntimeInstance)
     if (NULL == pNewThreadStore)
         return NULL;
 
-    if (!pNewThreadStore->m_SuspendProgressEvent.CreateManualEventNoThrow(true))
+    if (!pNewThreadStore->m_SuspendProgressEvent.CreateAutoEventNoThrow(true))
         return NULL;
 
     if (!PalRegisterHijackCallback(Thread::HijackCallback))
@@ -199,6 +199,37 @@ void ThreadStore::UnlockThreadStore()
     m_Lock.ReleaseReadLock();
 }
 
+// exponential spinwait with a time limit
+// for waiting in sub-millisecond range
+void SpinWait(int iteration, int usecLimit)
+{
+    LARGE_INTEGER li;
+    PalQueryPerformanceCounter(&li);
+    int64_t startTicks = li.QuadPart;
+
+    PalQueryPerformanceFrequency(&li);
+    int64_t ticksPerSecond = li.QuadPart;
+    int64_t endTicks = startTicks + (usecLimit * ticksPerSecond) / 1000000;
+
+    int l = min(iteration, 30);
+    for (int i = 1; i < l; i++)
+    {
+        // make sure our spining is not starving other threads.
+        PalSleep(0);
+
+        PalQueryPerformanceCounter(&li);
+        if (li.QuadPart > endTicks)
+        {
+            break;
+        }
+
+        for (int j = 1; j < (1 << i); j++)
+        {
+            System_YieldProcessor();
+        }
+    }
+}
+
 void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
 {
     Thread * pThisThread = GetCurrentThreadIfAvailable();
@@ -220,15 +251,20 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
     PalFlushProcessWriteBuffers();
     YieldProcessorNormalized();
 
+    int missedHijackRetries = 0;
+    int timeouts = 0;
+
+    m_missedHijack = false;
     int prevRemaining = 0;
     int remaining = 0;
     bool observeOnly = false;
+
+    m_SuspendProgressEvent.Reset();
 
     while(true)
     {
         prevRemaining = remaining;
         remaining = 0;
-        m_SuspendProgressEvent.Reset();
 
         FOREACH_THREAD(pTargetThread)
         {
@@ -249,25 +285,33 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
         if (!remaining)
             break;
 
-        if (remaining < prevRemaining ||
-            !observeOnly)
+        // if we see progress or have just done a hijacking pass
+        // do not hijack in the next iteration
+        if (remaining < prevRemaining || !observeOnly)
         {
             observeOnly = true;
-            printf("++++++ SPIN \n");
-            YieldProcessorNormalized();
+            // indicate that we are spinning
+            System_YieldProcessor();
         }
         else
         {
-            observeOnly = WaitForSuspensionProgress();
-            if (observeOnly)
+            bool isTimedOut = !WaitForSuspensionProgress();
+            if (isTimedOut)
             {
-                printf("TIMED OUT \n");
+                printf("TIMED OUT: %i \n", timeouts++);
+                observeOnly = false;
             }
-            else
+            else if (m_missedHijack)
             {
-                printf("===== PROGRESS \n");
-            }
+                printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
+                // we could not apply some hijacks. this is rare.
+                // we need to reapply hijacks, but not too soon.
+                // give threads some time to move from current positions.
+                SpinWait(missedHijackRetries++, 100);
 
+                m_missedHijack = false;
+                observeOnly = false;
+            }
         }
     }
 
@@ -354,7 +398,6 @@ void ThreadStore::InitiateThreadAbort(Thread* targetThread, Object * threadAbort
 bool ThreadStore::WaitForSuspensionProgress()
 {
     uint32_t result = m_SuspendProgressEvent.Wait(1, false);
-
     if (result == WAIT_OBJECT_0)
         return true;
 
@@ -364,9 +407,14 @@ bool ThreadStore::WaitForSuspensionProgress()
 }
 
 // static
-void ThreadStore::ThreadSuspended()
+void ThreadStore::ThreadSuspendProgress(ThreadSuspendFeedback fb)
 {
     ThreadStore* ts = GetThreadStore();
+    if (fb == ThreadSuspendFeedback::MissingHijack)
+    {
+        ts->m_missedHijack = true;
+    }
+
     ts->m_SuspendProgressEvent.Set();
 }
 

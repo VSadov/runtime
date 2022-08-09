@@ -13,6 +13,12 @@ enum class TrapThreadsFlags
     TrapThreads = 2
 };
 
+enum class ThreadSuspendFeedback
+{
+    ThreadSuspended = 0,
+    MissingHijack = 1,
+};
+
 extern "C" void PopulateDebugHeaders();
 
 class ThreadStore
@@ -22,7 +28,9 @@ class ThreadStore
     SList<Thread>       m_ThreadList;
     PTR_RuntimeInstance m_pRuntimeInstance;
     ReaderWriterLock    m_Lock;
+
     CLREventStatic      m_SuspendProgressEvent;
+    bool                m_missedHijack;
 
 private:
     ThreadStore();
@@ -64,7 +72,7 @@ public:
     void        ResumeAllThreads(bool waitForGCEvent);
 
     bool        WaitForSuspensionProgress();
-    static void ThreadSuspended();
+    static void ThreadSuspendProgress(ThreadSuspendFeedback reason);
 
     static bool IsTrapThreadsRequested();
 };

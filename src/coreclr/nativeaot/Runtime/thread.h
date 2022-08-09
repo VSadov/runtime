@@ -203,19 +203,17 @@ public:
 
     void                Hijack();
     void                Unhijack();
+    bool                IsHijacked();
+
 #ifdef FEATURE_GC_STRESS
     static void         HijackForGcStress(PAL_LIMITED_CONTEXT * pSuspendCtx);
 #endif // FEATURE_GC_STRESS
-    bool                IsHijacked();
-    void *              GetHijackedReturnAddress();
-    void *              GetUnhijackedReturnAddress(void** ppvReturnAddressLocation);
-    bool                DangerousCrossThreadIsHijacked();
 
     bool                IsSuppressGcStressSet();
     void                SetSuppressGcStress();
     void                ClearSuppressGcStress();
-    bool                IsWithinStackBounds(PTR_VOID p);
 
+    bool                IsWithinStackBounds(PTR_VOID p);
     void                GetStackBounds(PTR_VOID * ppStackLow, PTR_VOID * ppStackHigh);
 
     PTR_UInt8           GetThreadLocalStorage(uint32_t uTlsIndex, uint32_t uTlsStartOffset);
@@ -236,7 +234,7 @@ public:
 #endif // DACCESS_COMPILE
 #ifdef FEATURE_GC_STRESS
     void                SetRandomSeed(uint32_t seed);
-    uint32_t              NextRand();
+    uint32_t            NextRand();
     bool                IsRandInited();
 #endif // FEATURE_GC_STRESS
     PTR_ExInfo          GetCurExInfo();
