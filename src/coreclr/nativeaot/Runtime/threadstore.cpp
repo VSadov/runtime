@@ -302,7 +302,7 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
         }
         else if (missedHijack)
         {
-            printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
+            // printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
             // we could not apply some hijacks. this is rare.
             // we need to reapply hijacks, but not too soon.
             // give threads some time to move from current positions.
