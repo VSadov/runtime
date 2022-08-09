@@ -138,10 +138,12 @@ public:
 #endif // FEATURE_GC_STRESS
 
 #ifdef FEATURE_SUSPEND_REDIRECTION
-        TSF_Redirected = 0x00000080,                // Set to indicate the thread is redirected and will inevitably
+        TSF_Redirected          = 0x00000080,       // Set to indicate the thread is redirected and will inevitably
                                                     // suspend once resumed.
                                                     // As an optimization, if we see this flag, we skip hijacking.
 #endif //FEATURE_SUSPEND_REDIRECTION
+
+        TSF_FailedHijack        = 0x00000100,
     };
 private:
 

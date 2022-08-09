@@ -81,7 +81,7 @@ void Thread::WaitForGC(PInvokeTransitionFrame* pTransitionFrame)
         ClearState(TSF_Redirected);
 #endif //FEATURE_SUSPEND_REDIRECTION
 
-        ThreadStore::ThreadSuspendProgress(ThreadSuspendFeedback::ThreadSuspended);
+        ThreadStore::ThreadSuspendProgress();
         RedhawkGCInterface::WaitForGCCompletion();
 
         // must be in cooperative mode when checking the trap flag
@@ -600,6 +600,8 @@ void Thread::Hijack()
     }
 #endif //FEATURE_SUSPEND_REDIRECTION
 
+    ClearState(Thread::ThreadStateFlags::TSF_FailedHijack);
+
     // PalHijack will call HijackCallback or make the target thread call it.
     // It may also do nothing if the target thread is in inconvenient state.
     PalHijack(m_hPalThread, this);
@@ -639,6 +641,7 @@ void Thread::HijackCallback(NATIVE_CONTEXT* pThreadContext, void* pThreadToHijac
     {
         // Running in cooperative mode, but not managed.
         // We cannot continue.
+        pThread->SetState(Thread::ThreadStateFlags::TSF_FailedHijack);
         return;
     }
 
@@ -675,7 +678,7 @@ void Thread::HijackCallback(NATIVE_CONTEXT* pThreadContext, void* pThreadToHijac
 
     if (!pThread->IsHijacked())
     {
-        ThreadStore::ThreadSuspendProgress(ThreadSuspendFeedback::MissingHijack);
+        pThread->SetState(Thread::ThreadStateFlags::TSF_FailedHijack);
     }
 }
 

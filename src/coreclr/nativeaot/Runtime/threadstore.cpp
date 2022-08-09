@@ -254,7 +254,7 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
     int missedHijackRetries = 0;
     int timeouts = 0;
 
-    m_missedHijack = false;
+    bool missedHijack = false;
     int prevRemaining = 0;
     int remaining = 0;
     bool observeOnly = false;
@@ -278,6 +278,13 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
                 {
                     pTargetThread->Hijack();
                 }
+                else
+                {
+                    if (pTargetThread->IsStateSet(Thread::ThreadStateFlags::TSF_FailedHijack))
+                    {
+                        missedHijack = true;
+                    }
+                }
             }
         }
         END_FOREACH_THREAD
@@ -293,23 +300,23 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
             // indicate that we are spinning
             System_YieldProcessor();
         }
+        else if (missedHijack)
+        {
+            printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
+            // we could not apply some hijacks. this is rare.
+            // we need to reapply hijacks, but not too soon.
+            // give threads some time to move from current positions.
+            SpinWait(missedHijackRetries++, 100);
+
+            missedHijack = false;
+            observeOnly = false;
+        }
         else
         {
             bool isTimedOut = !WaitForSuspensionProgress();
             if (isTimedOut)
             {
                 printf("TIMED OUT: %i \n", timeouts++);
-                observeOnly = false;
-            }
-            else if (m_missedHijack)
-            {
-                printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
-                // we could not apply some hijacks. this is rare.
-                // we need to reapply hijacks, but not too soon.
-                // give threads some time to move from current positions.
-                SpinWait(missedHijackRetries++, 100);
-
-                m_missedHijack = false;
                 observeOnly = false;
             }
         }
@@ -407,14 +414,9 @@ bool ThreadStore::WaitForSuspensionProgress()
 }
 
 // static
-void ThreadStore::ThreadSuspendProgress(ThreadSuspendFeedback fb)
+void ThreadStore::ThreadSuspendProgress()
 {
     ThreadStore* ts = GetThreadStore();
-    if (fb == ThreadSuspendFeedback::MissingHijack)
-    {
-        ts->m_missedHijack = true;
-    }
-
     ts->m_SuspendProgressEvent.Set();
 }
 
