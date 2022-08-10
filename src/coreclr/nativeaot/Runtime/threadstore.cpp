@@ -303,21 +303,24 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
             // indicate that we are spinning
             System_YieldProcessor();
         }
-        else if (missedHijack)
-        {
-            // printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
-            // we could not apply some hijacks. this is rare.
-            // we need to reapply hijacks, but not too soon.
-            // give threads some time to move from current positions.
-            SpinWait(missedHijackRetries++, 100);
+        //else if (missedHijack)
+        //{
+        //    // printf("===== MISSED HIJACK: %i \n", missedHijackRetries++);
+        //    // we could not apply some hijacks.
+        //    // we need to redo hijacking, but not too soon.
+        //    // give threads some time to move from current positions.
+        //    SpinWait(missedHijackRetries++, 100);
 
-            missedHijack = false;
-            observeOnly = false;
-        }
+        //    missedHijack = false;
+        //    observeOnly = false;
+        //}
         else
         {
-            bool isTimedOut = !WaitForSuspensionProgress();
-            if (isTimedOut)
+            // bool isTimedOut = !WaitForSuspensionProgress();
+            // if (isTimedOut)
+
+            SpinWait(missedHijackRetries++, 100);
+
             {
                 printf("TIMED OUT: %i \n", timeouts++);
                 observeOnly = false;
