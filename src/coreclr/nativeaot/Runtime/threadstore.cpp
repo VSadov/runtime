@@ -285,7 +285,7 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
                 {
                     if (pTargetThread->IsStateSet(Thread::ThreadStateFlags::TSF_FailedHijack))
                     {
-                       // missedHijack = true;
+                       missedHijack = true;
                     }
                 }
             }
