@@ -282,7 +282,7 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
     int64_t endTicks = li.QuadPart;
     int64_t usecTotal = (endTicks - startTicks) * 1000000 / ticksPerSecond;
 
-    printf("@: %i \n", (int)usecTotal);
+   // printf("@: %i \n", (int)usecTotal);
 }
 
 void ThreadStore::ResumeAllThreads(bool waitForGCEvent)
