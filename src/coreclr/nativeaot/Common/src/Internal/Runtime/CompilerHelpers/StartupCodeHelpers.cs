@@ -132,6 +132,7 @@ namespace Internal.Runtime.CompilerHelpers
             if (frozenObjectSection != IntPtr.Zero)
             {
                 Debug.Assert(length % IntPtr.Size == 0);
+              //  Debug.Assert((long)frozenObjectSection % (1 << 21) == 0);
                 InitializeModuleFrozenObjectSegment(frozenObjectSection, length);
             }
         }

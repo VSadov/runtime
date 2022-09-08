@@ -19,8 +19,12 @@ namespace ILCompiler.DependencyAnalysis
             builder.EmitZeros(AlignmentHelper.AlignUp(builder.CountBytes, factory.Target.PointerSize) - builder.CountBytes);
         }
 
+        public override ObjectNodeSection Section => ObjectNodeSection.FrozenSection;
+
         protected override void GetElementDataForNodes(ref ObjectDataBuilder builder, NodeFactory factory, bool relocsOnly)
         {
+            //builder.RequireInitialAlignment(1 << 21);
+
             foreach (EmbeddedObjectNode node in NodesList)
             {
                 AlignNextObject(ref builder, factory);
