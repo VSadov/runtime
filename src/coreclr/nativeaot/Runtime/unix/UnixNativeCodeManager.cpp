@@ -653,10 +653,25 @@ bool UnixNativeCodeManager::GetReturnAddressHijackInfo(MethodInfo *    pMethodIn
     GcInfoDecoderFlags flags = DECODE_RETURN_KIND;
 #if defined(TARGET_ARM) || defined(TARGET_ARM64)
     flags = (GcInfoDecoderFlags)(flags | DECODE_HAS_TAILCALLS);
+#elif defined(TARGET_AMD64) && defined(TARGET_OSX)
+    flags = (GcInfoDecoderFlags)(flags | DECODE_PROLOG_LENGTH);
 #endif // TARGET_ARM || TARGET_ARM64
 
     GcInfoDecoder decoder(GCInfoToken(p), flags);
     *pRetValueKind = GetGcRefKind(decoder.GetReturnKind());
+
+#if defined(TARGET_AMD64) && defined(TARGET_OSX)
+    // Compact unwinding on macOS cannot properly handle unwinding the function prolog
+    if ((PTR_VOID)pRegisterSet->IP == pNativeMethodInfo->pMethodStartAddress)
+    {
+        *ppvRetAddrLocation = (PTR_PTR_VOID)pRegisterSet->GetSP();
+        return true;
+    }
+    else if ((PTR_UInt8)pRegisterSet->IP < (PTR_UInt8)pNativeMethodInfo->pMethodStartAddress + decoder.GetPrologSize())
+    {
+        return false;
+    }
+#endif
 
     int epilogueInstructions = TrailingEpilogueInstructionsCount((PTR_VOID)pRegisterSet->IP);
     if (epilogueInstructions < 0)
