@@ -180,7 +180,7 @@ namespace System.Tests
             Assert.Equal(expected, actual);
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotNativeAot))]
         [PlatformSpecific(TestPlatforms.OSX)]
         public void OSVersion_ValidVersion_OSX()
         {
