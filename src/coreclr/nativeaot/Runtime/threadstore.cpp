@@ -294,7 +294,14 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
         }
         else
         {
+#if DEBUG
+            // wait up to 10 msec in debug,
+            // threads my take longer to respond and latency is irrelevant
+            SpinWait(retries++, 10000);
+#else
             SpinWait(retries++, 100);
+#endif
+
             observeOnly = false;
 
             // make sure our spining is not starving other threads, but not too often,
