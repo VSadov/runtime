@@ -54,7 +54,7 @@ namespace System
             }
         }
 
-        private static int GetProcessorCount() => Runtime.RuntimeImports.RhGetProcessCpuCount();
+        internal static int GetProcessorCount() => Runtime.RuntimeImports.RhGetProcessCpuCount();
 
         internal static void ShutdownCore()
         {

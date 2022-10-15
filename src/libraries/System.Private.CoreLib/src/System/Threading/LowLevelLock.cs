@@ -6,64 +6,217 @@ using System.Diagnostics;
 namespace System.Threading
 {
     /// <summary>
-    /// A lightweight non-recursive mutex. Waits on this lock are uninterruptible (from Thread.Interrupt(), which is supported
-    /// in some runtimes). That is the main reason this lock type would be used over interruptible locks, such as in a
-    /// low-level-infrastructure component that was historically not susceptible to a pending interrupt, and for compatibility
-    /// reasons, to ensure that it still would not be susceptible after porting that component to managed code.
+    /// A lightweight non-recursive mutex. Waits on this lock are uninterruptible.
     /// </summary>
     internal sealed class LowLevelLock : IDisposable
     {
-        private const int SpinCount = 8;
-        private const int SpinSleep0Threshold = 4;
+        // The following constants define characteristics of spinning logic in the Lock class
+        private const int SpinningNotInitialized = 0;
+        private const int SpinningDisabled = -1;
+        private const int MaxSpinningValue = 10000;
 
-        private const int LockedMask = 1;
-        private const int WaiterCountIncrement = 2;
+        // NOTE: Lock must not have a static (class) constructor, as Lock itself may be used to synchronize
+        // class construction.  If Lock has its own class constructor, this can lead to infinite recursion.
+        // All static data in Lock must be pre-initialized.
+        private static int s_maxSpinCount;
 
-        private static readonly Func<object, bool> s_spinWaitTryAcquireCallback = SpinWaitTryAcquireCallback;
+        //
+        // m_state layout:
+        //
+        // bit 0: True if the lock is held, false otherwise.
+        //
+        // bit 1: True if we've set the event to wake a waiting thread.  The waiter resets this to false when it
+        //        wakes up.  This avoids the overhead of setting the event multiple times.
+        //
+        // everything else: A count of the number of threads waiting on the event.
+        //
+        private const int Uncontended = 0;
+        private const int Locked = 1;
+        private const int WaiterWoken = 2;
+        private const int WaiterCountIncrement = 4;
 
-        // Layout:
-        //   - Bit 0: 1 if the lock is locked, 0 otherwise
-        //   - Remaining bits: Number of threads waiting to acquire a lock
         private int _state;
+        private AutoResetEvent? _lazyEvent;
 
 #if DEBUG
         private Thread? _ownerThread;
 #endif
 
-        // Indicates whether a thread has been signaled, but has not yet been released from the wait. See SignalWaiter. Reads
-        // and writes must occur while _monitor is locked.
-        private bool _isAnyWaitingThreadSignaled;
-
-        private LowLevelSpinWaiter _spinWaiter;
-        private LowLevelMonitor _monitor;
-
         public LowLevelLock()
         {
-            _spinWaiter = default(LowLevelSpinWaiter);
-            _monitor.Initialize();
+            if (s_maxSpinCount == SpinningNotInitialized)
+            {
+                // avoid Environment.ProcessorCount->ClassConstructorRunner->Lock->Environment.ProcessorCount cycle
+                // call GetProcessorCount() dirtectly
+                s_maxSpinCount = Environment.GetProcessorCount() > 1 ? MaxSpinningValue : SpinningDisabled;
+            }
+        }
+
+        private AutoResetEvent Event
+        {
+            get
+            {
+                if (_lazyEvent == null)
+                    Interlocked.CompareExchange(ref _lazyEvent, new AutoResetEvent(false), null);
+
+                return _lazyEvent;
+            }
+        }
+
+        public void Dispose()
+        {
+            _lazyEvent?.Dispose();
         }
 
         ~LowLevelLock() => Dispose();
 
-        public void Dispose()
+        public void Acquire()
         {
-            VerifyIsNotLockedByAnyThread();
+            // Make one quick attempt to acquire an uncontended lock
+            if (Interlocked.CompareExchange(ref _state, Locked, Uncontended) == Uncontended)
+            {
+#if DEBUG
+                _ownerThread = Thread.CurrentThread;
+#endif
+                return;
+            }
 
-            _monitor.Dispose();
-            GC.SuppressFinalize(this);
+            // Fall back to the slow path for contention
+            AcquireContended();
         }
 
-#if DEBUG
-        public bool IsLocked
+        public bool TryAcquire()
         {
-            get
+            // Make one quick attempt to acquire an uncontended lock
+            if (Interlocked.CompareExchange(ref _state, Locked, Uncontended) == Uncontended)
             {
-                bool isLocked = _ownerThread == Thread.CurrentThread;
-                Debug.Assert(!isLocked || (_state & LockedMask) != 0);
-                return isLocked;
+#if DEBUG
+                _ownerThread = Thread.CurrentThread;
+#endif
+                return true;
+            }
+
+            return false;
+        }
+
+        private void AcquireContended()
+        {
+            int spins = 1;
+
+            while (true)
+            {
+                // Try to grab the lock.  We may take the lock here even if there are existing waiters.  This creates the possibility
+                // of starvation of waiters, but it also prevents lock convoys from destroying perf.
+                int oldState = _state;
+                if ((oldState & Locked) == 0 && Interlocked.CompareExchange(ref _state, oldState | Locked, oldState) == oldState)
+                    goto GotTheLock;
+
+                // Back off by a factor of 2 for each attempt, up to MaxSpinCount
+                if (spins <= s_maxSpinCount)
+                {
+                    Thread.SpinWait(spins);
+                    spins *= 2;
+                }
+                else if (oldState != 0)
+                {
+                    // We reached our spin limit, and need to wait.  Increment the waiter count.
+                    // Note that we do not do any overflow checking on this increment.  In order to overflow,
+                    // we'd need to have about 1 billion waiting threads, which is inconceivable anytime in the
+                    // forseeable future.
+                    int newState = (oldState + WaiterCountIncrement) & ~WaiterWoken;
+                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                        break;
+                }
+            }
+
+            //
+            // Now we wait.
+            //
+
+            AutoResetEvent ev = Event;
+            while (true)
+            {
+                Debug.Assert(_state >= WaiterCountIncrement);
+
+                bool waitSucceeded = ev.WaitOne();
+                Debug.Assert(waitSucceeded);
+
+                while (true)
+                {
+                    int oldState = _state;
+                    Debug.Assert(oldState >= WaiterCountIncrement);
+
+                    // Clear the "waiter woken" bit.
+                    int newState = oldState & ~WaiterWoken;
+
+                    if ((oldState & Locked) == 0)
+                    {
+                        // The lock is available, try to get it.
+                        newState |= Locked;
+                        newState -= WaiterCountIncrement;
+
+                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                            goto GotTheLock;
+                    }
+                    else
+                    {
+                        // The lock is not available. We're going to wait again.
+                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                            break;
+                    }
+                }
+            }
+
+        GotTheLock:
+            Debug.Assert((_state | Locked) != 0);
+#if DEBUG
+            _ownerThread = Thread.CurrentThread;
+#endif
+        }
+
+        public void Release()
+        {
+#if DEBUG
+            _ownerThread = null;
+#endif
+
+            // Make one quick attempt to release an uncontended lock
+            if (Interlocked.CompareExchange(ref _state, Uncontended, Locked) == Locked)
+            {
+                return;
+            }
+
+            // We have waiters; take the slow path.
+            ReleaseContended();
+        }
+
+        private void ReleaseContended()
+        {
+            while (true)
+            {
+                int oldState = _state;
+
+                // clear the lock bit.
+                int newState = oldState & ~Locked;
+
+                if (oldState >= WaiterCountIncrement && (oldState & WaiterWoken) == 0)
+                {
+                    // there are waiters, and nobody has woken one.
+                    newState |= WaiterWoken;
+                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                    {
+                        Event.Set();
+                        return;
+                    }
+                }
+                else
+                {
+                    // no need to wake a waiter.
+                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                        return;
+                }
             }
         }
-#endif
 
         [Conditional("DEBUG")]
         public void VerifyIsLocked()
@@ -71,163 +224,7 @@ namespace System.Threading
 #if DEBUG
             Debug.Assert(_ownerThread == Thread.CurrentThread);
 #endif
-            Debug.Assert((_state & LockedMask) != 0);
-        }
-
-#pragma warning disable CA1822
-        [Conditional("DEBUG")]
-        public void VerifyIsNotLocked()
-        {
-#if DEBUG
-            Debug.Assert(_ownerThread != Thread.CurrentThread);
-#endif
-        }
-
-        [Conditional("DEBUG")]
-        private void VerifyIsNotLockedByAnyThread()
-        {
-#if DEBUG
-            Debug.Assert(_ownerThread == null);
-#endif
-        }
-#pragma warning restore CA1822
-
-        [Conditional("DEBUG")]
-        private void ResetOwnerThread()
-        {
-            VerifyIsLocked();
-#if DEBUG
-            _ownerThread = null;
-#endif
-        }
-
-        [Conditional("DEBUG")]
-        private void SetOwnerThreadToCurrent()
-        {
-            VerifyIsNotLockedByAnyThread();
-#if DEBUG
-            _ownerThread = Thread.CurrentThread;
-#endif
-        }
-
-        public bool TryAcquire()
-        {
-            VerifyIsNotLocked();
-
-            // A common case is that there are no waiters, so hope for that and try to acquire the lock
-            int state = Interlocked.CompareExchange(ref _state, LockedMask, 0);
-            if (state == 0 || TryAcquire_NoFastPath(state))
-            {
-                SetOwnerThreadToCurrent();
-                return true;
-            }
-            return false;
-        }
-
-        private bool TryAcquire_NoFastPath(int state)
-        {
-            // The lock may be available, but there may be waiters. This thread could acquire the lock in that case. Acquiring
-            // the lock means that if this thread is repeatedly acquiring and releasing the lock, it could permanently starve
-            // waiters. Waiting instead in the same situation would deterministically create a lock convoy. Here, we opt for
-            // acquiring the lock to prevent a deterministic lock convoy in that situation, and rely on the system's
-            // waiting/waking implementation to mitigate starvation, even in cases where there are enough logical processors to
-            // accommodate all threads.
-            return (state & LockedMask) == 0 && Interlocked.CompareExchange(ref _state, state + LockedMask, state) == state;
-        }
-
-        private static bool SpinWaitTryAcquireCallback(object state)
-        {
-            var thisRef = (LowLevelLock)state;
-            return thisRef.TryAcquire_NoFastPath(thisRef._state);
-        }
-
-        public void Acquire()
-        {
-            if (!TryAcquire())
-            {
-                WaitAndAcquire();
-            }
-        }
-
-        private void WaitAndAcquire()
-        {
-            VerifyIsNotLocked();
-
-            // Spin a bit to see if the lock becomes available, before forcing the thread into a wait state
-            if (_spinWaiter.SpinWaitForCondition(s_spinWaitTryAcquireCallback, this, SpinCount, SpinSleep0Threshold))
-            {
-                Debug.Assert((_state & LockedMask) != 0);
-                SetOwnerThreadToCurrent();
-                return;
-            }
-
-            _monitor.Acquire();
-
-            // Register this thread as a waiter by incrementing the waiter count. Incrementing the waiter count and waiting on
-            // the monitor need to appear atomic to SignalWaiter so that its signal won't be lost.
-            int state = Interlocked.Add(ref _state, WaiterCountIncrement);
-
-            // Wait on the monitor until signaled, repeatedly until the lock can be acquired by this thread
-            while (true)
-            {
-                // The lock may have been released before the waiter count was incremented above, so try to acquire the lock
-                // with the new state before waiting
-                if ((state & LockedMask) == 0 &&
-                    Interlocked.CompareExchange(ref _state, state + (LockedMask - WaiterCountIncrement), state) == state)
-                {
-                    break;
-                }
-
-                _monitor.Wait();
-
-                // Indicate to SignalWaiter that the signaled thread has woken up
-                _isAnyWaitingThreadSignaled = false;
-
-                state = _state;
-                Debug.Assert((uint)state >= WaiterCountIncrement);
-            }
-
-            _monitor.Release();
-
-            Debug.Assert((_state & LockedMask) != 0);
-            SetOwnerThreadToCurrent();
-        }
-
-        public void Release()
-        {
-            Debug.Assert((_state & LockedMask) != 0);
-            ResetOwnerThread();
-
-            if (Interlocked.Decrement(ref _state) != 0)
-            {
-                SignalWaiter();
-            }
-        }
-
-        private void SignalWaiter()
-        {
-            // Since the lock was already released by the caller, there are no guarantees on the state at this point. For
-            // instance, if there was only one thread waiting before the lock was released, then after the lock was released,
-            // another thread may have acquired and released the lock, and signaled the waiter, before the first thread arrives
-            // here. The monitor's lock is used to synchronize changes to the waiter count, so acquire the monitor and recheck
-            // the waiter count before signaling.
-            _monitor.Acquire();
-
-            // Keep track of whether a thread has been signaled but has not yet been released from the wait.
-            // _isAnyWaitingThreadSignaled is set to false when a signaled thread wakes up. Since threads can preempt waiting
-            // threads and acquire the lock (see TryAcquire), it allows for example, one thread to acquire and release the lock
-            // multiple times while there are multiple waiting threads. In such a case, we don't want that thread to signal a
-            // waiter every time it releases the lock, as that will cause unnecessary context switches with more and more
-            // signaled threads waking up, finding that the lock is still locked, and going right back into a wait state. So,
-            // signal only one waiting thread at a time.
-            if ((uint)_state >= WaiterCountIncrement && !_isAnyWaitingThreadSignaled)
-            {
-                _isAnyWaitingThreadSignaled = true;
-                _monitor.Signal_Release();
-                return;
-            }
-
-            _monitor.Release();
+            Debug.Assert((_state & Locked) != 0);
         }
     }
 }

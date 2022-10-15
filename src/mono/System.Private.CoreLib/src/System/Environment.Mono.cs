@@ -22,7 +22,7 @@ namespace System
         }
 
         [MethodImplAttribute(MethodImplOptions.InternalCall)]
-        private static extern int GetProcessorCount();
+        internal static extern int GetProcessorCount();
 
         public static extern int TickCount
         {
