@@ -580,7 +580,7 @@ namespace System.Threading
         internal void EnsureThreadRequested()
         {
             // Only one thread is requested at a time to avoid over-parallelization
-            if (Interlocked.CompareExchange(ref _separated.hasOutstandingThreadRequest, 1, 0) == 0)
+            if (_separated.hasOutstandingThreadRequest == 0 && Interlocked.CompareExchange(ref _separated.hasOutstandingThreadRequest, 1, 0) == 0)
             {
                 ThreadPool.RequestWorkerThread();
             }
