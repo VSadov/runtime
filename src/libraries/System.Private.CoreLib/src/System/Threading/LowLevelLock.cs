@@ -226,5 +226,14 @@ namespace System.Threading
 #endif
             Debug.Assert((_state & Locked) != 0);
         }
+
+        [Conditional("DEBUG")]
+        public void VerifyIsNotLocked()
+        {
+#if DEBUG
+            Debug.Assert(_ownerThread == null);
+#endif
+            Debug.Assert((_state & Locked) == 0);
+        }
     }
 }
