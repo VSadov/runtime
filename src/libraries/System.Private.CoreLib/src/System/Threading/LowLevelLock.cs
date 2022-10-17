@@ -224,7 +224,7 @@ namespace System.Threading
 #if DEBUG
             Debug.Assert(_ownerThread == Thread.CurrentThread);
 #endif
-            Debug.Assert((_state & Locked) != 0);
+            Debug.Assert(IsLocked);
         }
 
         [Conditional("DEBUG")]
@@ -233,7 +233,9 @@ namespace System.Threading
 #if DEBUG
             Debug.Assert(_ownerThread == null);
 #endif
-            Debug.Assert((_state & Locked) == 0);
+            Debug.Assert(!IsLocked);
         }
+
+        public bool IsLocked => (_state & Locked) != 0;
     }
 }
