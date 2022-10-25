@@ -1197,7 +1197,7 @@ namespace System.Threading
         internal readonly LocalQueue[] _localQueues;
         internal readonly LocalQueue[] _globalQueues;
 
-        internal bool loggingEnabled;
+        private bool _loggingEnabled;
 
         private readonly Internal.PaddingFor32 pad1;
         private int numOutstandingThreadRequests;
@@ -1205,9 +1205,30 @@ namespace System.Threading
 
         internal ThreadPoolWorkQueue()
         {
-            loggingEnabled = FrameworkEventSource.Log.IsEnabled(EventLevel.Verbose, FrameworkEventSource.Keywords.ThreadPool | FrameworkEventSource.Keywords.ThreadTransfer);
             _localQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
             _globalQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
+            RefreshLoggingEnabled();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void RefreshLoggingEnabled()
+        {
+            if (!FrameworkEventSource.Log.IsEnabled())
+            {
+                if (_loggingEnabled)
+                {
+                    _loggingEnabled = false;
+                }
+                return;
+            }
+
+            RefreshLoggingEnabledFull();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void RefreshLoggingEnabledFull()
+        {
+            _loggingEnabled = FrameworkEventSource.Log.IsEnabled(EventLevel.Verbose, FrameworkEventSource.Keywords.ThreadPool | FrameworkEventSource.Keywords.ThreadTransfer);
         }
 
         /// <summary>
@@ -1350,7 +1371,7 @@ namespace System.Threading
         {
             Debug.Assert((callback is IThreadPoolWorkItem) ^ (callback is Task));
 
-            if (loggingEnabled)
+            if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
             if (forceGlobal)
@@ -1523,211 +1544,200 @@ namespace System.Threading
             //      We will do our best, but ultimately it is the #1 that guarantees that someone will take care of
             //      work enqueued in the future.
 
-            ThreadPoolWorkQueue outerWorkQueue = ThreadPool.s_workQueue;
+            ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
 
             //
             // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
             // From this point on, we are responsible for requesting another thread if we stop working for any
             // reason and are unsure whether the queue is completely empty.
+            workQueue.MarkThreadRequestSatisfied();
+
             //
-            // CoreCLR: this whole scheme does not support thread aborts.
-            //          FWIW a thread could be aborted right after dequeuing an item and before executing.
-            //          We do not handle or expect that.
-            outerWorkQueue.MarkThreadRequestSatisfied();
+            // The clock is ticking!  We have ThreadPoolGlobals.TP_QUANTUM milliseconds to get some work done, and then
+            // we need to return to the VM.
+            //
+            int quantumStartTime = Environment.TickCount;
 
             // Has the desire for logging changed since the last time we entered?
-            var enabled = FrameworkEventSource.Log.IsEnabled(EventLevel.Verbose, FrameworkEventSource.Keywords.ThreadPool | FrameworkEventSource.Keywords.ThreadTransfer);
-            if (outerWorkQueue.loggingEnabled != enabled)
-            {
-                // writing shared state.
-                outerWorkQueue.loggingEnabled = enabled;
-            }
-
-            //
-            // Assume that we're going to need another thread if this one returns to the VM.  We'll set this to
-            // false later, but only if we're absolutely certain that the queue is empty.
-            //
-            // TODO: VS
-            // bool keepThreadSpinning = true;
+            workQueue.RefreshLoggingEnabled();
 
             // for retries in a case of heavy contention while stealing.
             SpinWait spinner = default;
 
-            // try
+            Thread currentThread = Thread.CurrentThread;
+            // Start on clean ExecutionContext and SynchronizationContext
+            currentThread._executionContext = null;
+            currentThread._synchronizationContext = null;
+
+            int tasksDispatched = 0;
+
+            //
+            // Loop until our quantum expires or there is no work.
+            //
+            do
             {
-                Thread currentThread = Thread.CurrentThread;
-                // Start on clean ExecutionContext and SynchronizationContext
-                currentThread._executionContext = null;
-                currentThread._synchronizationContext = null;
+                var localQueue = workQueue.GetOrAddLocalQueue();
+                object? workItem = localQueue.TryPop();
 
-                int tasksDispatched = 0;
-
-                //
-                // Use operate on workQueue local to try block so it can be enregistered
-                ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
-
-                //
-                // Loop until our quantum expires or there is no work.
-                //
-                while (true)
+                if (workItem == null)
                 {
-                    var localQueue = workQueue.GetOrAddLocalQueue();
-                    object? workItem = localQueue.TryPop();
-
+                    // we could not pop, try stealing
+                    bool missedSteal = false;
+                    workItem = workQueue.DequeueAny(ref missedSteal, localQueue);
                     if (workItem == null)
                     {
-                        // we could not pop, try stealing
-                        bool missedSteal = false;
-                        workItem = workQueue.DequeueAny(ref missedSteal, localQueue);
-                        if (workItem == null)
+                        // if there is no more work, leave
+                        if (!missedSteal)
                         {
-                            // if there is no more work, leave
-                            if (!missedSteal)
-                            {
-                                //keepThreadSpinning = false;
-                                // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
-                                return true;
-                            }
-
-                            // back off a little and try again (as long as quantum has not expired)
-                            spinner.SpinOnce();
-                            continue;
+                            // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
+                            return true;
                         }
 
-                        // adjust spin time, in case we will need to spin again
-                        spinner.Count = Math.Max(0, spinner.Count - 1);
+                        // back off a little and try again (as long as quantum has not expired)
+                        spinner.SpinOnce();
+                        continue;
                     }
 
-                    if (workQueue.loggingEnabled)
-                        System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolDequeueWorkObject(workItem);
-
-                    // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
-                    // Make sure there is a request, so that starvation is noticed if we do not come back for a while.
-                    // If this is our first workitem, be more aggressive.
-                    if (tasksDispatched++ == 0)
-                    {
-                        // Every new worker that finds work will ask for parallelizm increase, but only once.
-                        // This helps with front-edge ramping up from cold states.
-                        workQueue.RequestThread();
-                    }
-                    else
-                    {
-                        workQueue.EnsureThreadRequested();
-                    }
-
-                    //
-                    // Execute the workitem outside of any finally blocks, so that it can be aborted if needed.
-                    //
-                    if (ThreadPool.EnableWorkerTracking)
-                    {
-                        bool reportedStatus = false;
-                        try
-                        {
-                            ThreadPool.ReportThreadStatus(isWorking: true);
-                            reportedStatus = true;
-                            if (workItem is Task task)
-                            {
-                                task.ExecuteFromThreadPool(currentThread);
-                            }
-                            else
-                            {
-                                Debug.Assert(workItem is IThreadPoolWorkItem);
-                                Unsafe.As<IThreadPoolWorkItem>(workItem).Execute();
-                            }
-                        }
-                        finally
-                        {
-                            if (reportedStatus)
-                                ThreadPool.ReportThreadStatus(isWorking: false);
-                        }
-                    }
-                    else if (workItem is Task task)
-                    {
-                        // Check for Task first as it's currently faster to type check
-                        // for Task and then Unsafe.As for the interface, rather than
-                        // vice versa, in particular when the object implements a bunch
-                        // of interfaces.
-                        task.ExecuteFromThreadPool(currentThread);
-                    }
-                    else
-                    {
-                        Debug.Assert(workItem is IThreadPoolWorkItem);
-                        Unsafe.As<IThreadPoolWorkItem>(workItem).Execute();
-                    }
-
-                    currentThread.ResetThreadPoolThread();
-
-                    // Return to clean ExecutionContext and SynchronizationContext
-                    ExecutionContext.ResetThreadPoolThread(currentThread);
-
-                    //
-                    // Notify the VM that we executed this workitem.  This is also our opportunity to ask whether Hill Climbing wants
-                    // us to return the thread to the pool or not.
-                    //
-                    // TODO: VS complete item counter (does it count inlined or failed? seems like diagnoistics thing)
-                    if (!ThreadPool.NotifyWorkItemComplete(null, 0))
-                    {
-                        return false;
-                    }
-
-                    if ((tasksDispatched & 15) == 0)
-                    {
-                        // we have dispatched another 16 tasks. Make sure the core Id is not stale due to caching.
-                        // Running with stale core Id is very rare, but when happends may result in latency outliers
-                        // due to neglect of our "real" local queue.
-                        //
-                        // "16" was picked based on typical latency distributions in a task scheduling benchmark
-                        // as happening often enough to cap the effects of "neglect" while also being cheap
-                        // even when compared to nearly no-op tasks.
-
-                        // TODO: VS
-                        // Thread.FlushCurrentProcessorId();
-
-                        if ((tasksDispatched & DonatingRate) == 0)
-                        {
-                            workQueue.DonateOneItem(localQueue);
-                        }
-                    }
-
-                    //// Check if the dispatch quantum has expired
-                    //if ((uint)(currentTickCount - startTickCount) < DispatchQuantumMs)
-                    //{
-                    //    continue;
-                    //}
-
-                    //// The quantum expired, do any necessary periodic activities
-
-                    //if (ThreadPool.YieldFromDispatchLoop)
-                    //{
-                    //    return true;
-                    //}
-
-                    //// This method will continue to dispatch work items. Refresh the start tick count for the next dispatch
-                    //// quantum and do some periodic activities.
-                    //startTickCount = currentTickCount;
-
-                    // Periodically refresh whether logging is enabled
-                    // TODO: VS
-                    // workQueue.RefreshLoggingEnabled();
+                    // adjust spin time, in case we will need to spin again
+                    spinner.Count = Math.Max(0, spinner.Count - 1);
                 }
-            }
-            //finally
-            //{
-            //    //
-            //    // We are exiting, but not because we failed to find work, so we want to keep the same number of spinners.
-            //    // Make a request for a thread (up to #proc) to account for our leaving.
-            //    //
-            //    if (keepThreadSpinning)
-            //    {
-            //        DonationCheck();
-            //        s_workQueue.KeepThread();
-            //    }
 
-            //    // we are releasing unneeded thread back to VM or the thread has run for a full quantum.
-            //    // in either case it makes sense to flush the cached core Id.
-            //    // TODO: VS
-            //    // Thread.FlushCurrentProcessorId();
-            //}
+                if (workQueue._loggingEnabled)
+                    System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolDequeueWorkObject(workItem);
+
+                // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
+                // Make sure there is a request, so that starvation is noticed if we do not come back for a while.
+                // If this is our first workitem, be more aggressive.
+                if (tasksDispatched++ == 0)
+                {
+                    // Every new worker that finds work will ask for parallelizm increase, but only once.
+                    // This helps with front-edge ramping up from cold states.
+                    workQueue.RequestThread();
+                }
+                else
+                {
+                    workQueue.EnsureThreadRequested();
+                }
+
+                //
+                // Execute the workitem outside of any finally blocks, so that it can be aborted if needed.
+                //
+#if FEATURE_OBJCMARSHAL
+                if (AutoreleasePool.EnableAutoreleasePool)
+                {
+                    DispatchItemWithAutoreleasePool(workItem, currentThread);
+                }
+                else
+#endif
+#pragma warning disable CS0162 // Unreachable code detected. EnableWorkerTracking may be a constant in some runtimes.
+                if (ThreadPool.EnableWorkerTracking)
+                {
+                    DispatchWorkItemWithWorkerTracking(workItem, currentThread);
+                }
+                else
+                {
+                    DispatchWorkItem(workItem, currentThread);
+                }
+#pragma warning restore CS0162
+
+                // Release refs
+                workItem = null;
+
+                // Return to clean ExecutionContext and SynchronizationContext. This may call user code (AsyncLocal value
+                // change notifications).
+                ExecutionContext.ResetThreadPoolThread(currentThread);
+
+                // Reset thread state after all user code for the work item has completed
+                currentThread.ResetThreadPoolThread();
+
+                //
+                // Notify the VM that we executed this workitem.  This is also our opportunity to ask whether Hill Climbing wants
+                // us to return the thread to the pool or not.
+                //
+                // TODO: VS complete item counter (does it count inlined or failed? seems like diagnoistics thing)
+                if (!ThreadPool.NotifyWorkItemComplete(null, 0))
+                {
+                    return false;
+                }
+
+                if ((tasksDispatched & 15) == 0)
+                {
+                    // we have dispatched another 16 tasks. Make sure the core Id is not stale due to caching.
+                    // Running with stale core Id is very rare, but when happends may result in latency outliers
+                    // due to neglect of our "real" local queue.
+                    //
+                    // "16" was picked based on typical latency distributions in a task scheduling benchmark
+                    // as happening often enough to cap the effects of "neglect" while also being cheap
+                    // even when compared to nearly no-op tasks.
+
+                    // TODO: VS
+                    // Thread.FlushCurrentProcessorId();
+
+                    if ((tasksDispatched & DonatingRate) == 0)
+                    {
+                        workQueue.DonateOneItem(localQueue);
+                    }
+                }
+            } while (KeepDispatching(ref quantumStartTime));
+
+            // the quantum has expired, but we saw more work.
+            // ask for a thread
+            workQueue.KeepThread();
+            return true;
+        }
+
+        internal static bool KeepDispatching(ref int startTickCount)
+        {
+            // Note: this function may incorrectly return false due to TickCount overflow
+            // if work item execution took around a multiple of 2^32 milliseconds (~49.7 days),
+            // which is improbable.
+            int curTicks = Environment.TickCount;
+            if ((uint)(curTicks - startTickCount) < DispatchQuantumMs)
+            {
+                return true;
+            }
+
+            if (!ThreadPool.YieldFromDispatchLoop)
+            {
+                startTickCount = curTicks;
+                return true;
+            }
+
+            return false;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void DispatchWorkItemWithWorkerTracking(object workItem, Thread currentThread)
+        {
+            Debug.Assert(ThreadPool.EnableWorkerTracking);
+            Debug.Assert(currentThread == Thread.CurrentThread);
+
+            bool reportedStatus = false;
+            try
+            {
+                ThreadPool.ReportThreadStatus(isWorking: true);
+                reportedStatus = true;
+                DispatchWorkItem(workItem, currentThread);
+            }
+            finally
+            {
+                if (reportedStatus)
+                    ThreadPool.ReportThreadStatus(isWorking: false);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void DispatchWorkItem(object workItem, Thread currentThread)
+        {
+            if (workItem is Task task)
+            {
+                task.ExecuteFromThreadPool(currentThread);
+            }
+            else
+            {
+                Debug.Assert(workItem is IThreadPoolWorkItem);
+                Unsafe.As<IThreadPoolWorkItem>(workItem).Execute();
+            }
         }
 
         private void DonationCheck()
