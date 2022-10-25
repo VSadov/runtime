@@ -393,9 +393,6 @@ namespace System.Threading
                         // Also since there is a cost of "learning" a good delay value, we will record the last one that worked
                         // and use 1/2 as a starting point when we are again in a similar situation.
                         //
-                        // For more background about spinning see:
-                        // [The Performance of Spin Lock Alternatives for Shared-Memory Multiprocessors] (https://homes.cs.washington.edu/~tom/pubs/spinlock.pdf)
-                        //
                         lQueue._coreContext.LastGlobalDequeueDelay = delay;
                         Thread.SpinWait(lQueue.NextRnd() & delay);
 
@@ -1198,7 +1195,7 @@ namespace System.Threading
         }
 
         internal readonly LocalQueue[] _localQueues;
-        internal readonly GlobalQueue _globalQueue = new GlobalQueue();
+        internal readonly LocalQueue[] _globalQueues;
 
         internal bool loggingEnabled;
 
@@ -1210,6 +1207,7 @@ namespace System.Threading
         {
             loggingEnabled = FrameworkEventSource.Log.IsEnabled(EventLevel.Verbose, FrameworkEventSource.Keywords.ThreadPool | FrameworkEventSource.Keywords.ThreadTransfer);
             _localQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
+            _globalQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
         }
 
         /// <summary>
@@ -1255,6 +1253,28 @@ namespace System.Threading
             var newQueue = new LocalQueue();
             Interlocked.CompareExchange(ref _localQueues[index], newQueue, null!);
             return _localQueues[index];
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal LocalQueue GetOrAddGlobalQueue()
+        {
+            var index = GetLocalQueueIndex();
+            var result = _globalQueues[index];
+
+            if (result == null)
+            {
+                result = EnsureGlobalQueue(index);
+            }
+
+            return result;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private LocalQueue EnsureGlobalQueue(int index)
+        {
+            var newQueue = new LocalQueue();
+            Interlocked.CompareExchange(ref _globalQueues[index], newQueue, null!);
+            return _globalQueues[index];
         }
 
         internal int GetLocalQueueIndex()
@@ -1333,14 +1353,13 @@ namespace System.Threading
             if (loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            var localQueue = GetOrAddLocalQueue();
-            //if (forceGlobal)
-            //{
-            //    _globalQueue.Enqueue(callback, localQueue);
-            //}
-            //else
+            if (forceGlobal)
             {
-                localQueue.Enqueue(callback);
+                GetOrAddGlobalQueue().Enqueue(callback);
+            }
+            else
+            {
+                GetOrAddLocalQueue().Enqueue(callback);
             }
 
             // make sure there is at least one worker request
@@ -1402,10 +1421,28 @@ namespace System.Threading
             // check for local queues that are behind and help by stealing half their items.
             // we traverse local queues starting with those that differ in lower bits and going gradually up.
             // this way we want to minimize the chances that two threads concurrently go through the same sequence of queues.
-            object? callback = _globalQueue.Dequeue(localQueue);
+            object? callback = null;// _globalQueue.Dequeue(ref missedSteal);
 
             if (callback == null)
             {
+                queues = _globalQueues;
+                int startIndex = GetLocalQueueIndex();
+
+                // do a reliable sweep of all global queues.
+                for (int i = 0; i < queues.Length; i++)
+                {
+                    var localWsq = queues[startIndex ^ i];
+                    callback = localWsq?.Dequeue(ref missedSteal);
+                    if (callback != null)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (callback == null)
+            {
+                queues = _localQueues;
                 int startIndex = localQueue.NextRnd() & (queues.Length - 1);
 
                 // do a reliable sweep of all local queues.
@@ -1439,7 +1476,21 @@ namespace System.Threading
             }
         }
 
-        public long GlobalCount => _globalQueue.Count;
+        public long GlobalCount
+        {
+            get
+            {
+                long count = 0;
+                foreach (LocalQueue workStealingQueue in _globalQueues)
+                {
+                    if (workStealingQueue != null)
+                    {
+                        count += workStealingQueue.Count;
+                    }
+                }
+                return count;
+            }
+        }
 
         // Time in ms for which ThreadPoolWorkQueue.Dispatch keeps executing normal work items before either returning from
         // Dispatch (if YieldFromDispatchLoop is true), or performing periodic activities
@@ -1688,14 +1739,18 @@ namespace System.Threading
             }
         }
 
+#pragma warning disable CA1822 // Mark members as static
         private void DonateOneItem(LocalQueue localQueue)
+#pragma warning restore CA1822 // Mark members as static
         {
-            bool dummy = true;
-            var item = localQueue.Dequeue(ref dummy);
-            if (item != null)
-            {
-                _globalQueue.Enqueue(item, localQueue);
-            }
+            // TODO: VS
+
+            //bool dummy = true;
+            //var item = localQueue.Dequeue(ref dummy);
+            //if (item != null)
+            //{
+            //    _globalQueue.Enqueue(item);
+            //}
         }
     }
 
