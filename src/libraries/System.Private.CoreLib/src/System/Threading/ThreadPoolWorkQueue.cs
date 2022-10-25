@@ -22,28 +22,6 @@ using System.Threading.Tasks;
 
 namespace System.Threading
 {
-    internal static class ThreadPoolGlobals
-    {
-        public static readonly int outstandingRequestLimit = Environment.ProcessorCount;
-
-        public static volatile bool threadPoolInitialized;
-        public static bool enableWorkerTracking;
-
-        public static readonly ThreadPoolWorkQueue workQueue = new ThreadPoolWorkQueue();
-
-        /// <summary>Shim used to invoke <see cref="IAsyncStateMachineBox.MoveNext"/> of the supplied <see cref="IAsyncStateMachineBox"/>.</summary>
-        internal static readonly Action<object?> s_invokeAsyncStateMachineBox = state =>
-        {
-            if (!(state is IAsyncStateMachineBox box))
-            {
-                ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.state);
-                return;
-            }
-
-            box.MoveNext();
-        };
-    }
-
     [StructLayout(LayoutKind.Sequential)] // enforce layout so that padding reduces false sharing
     internal sealed class ThreadPoolWorkQueue
     {
@@ -968,7 +946,7 @@ namespace System.Threading
                                 var enqPos = _queueEnds.Enqueue;
                                 if (enqPos - position < RobThreshold ||
                                     // "this" is a sentinel for a failed robbing attempt
-                                    (item = TryRobCore(ThreadPoolGlobals.workQueue.GetOrAddLocalQueue()._enqSegment, position, enqPos)) == this)
+                                    (item = TryRobCore(ThreadPool.s_workQueue.GetOrAddLocalQueue()._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
@@ -1295,7 +1273,7 @@ namespace System.Threading
             // If we have not yet requested #procs threads, then request a new thread.
             //
             int count = numOutstandingThreadRequests;
-            while (count < ThreadPoolGlobals.outstandingRequestLimit)
+            while (count < Environment.ProcessorCount)
             {
                 int prev = Interlocked.CompareExchange(ref numOutstandingThreadRequests, count + 1, count);
                 if (prev == count)
@@ -1445,12 +1423,12 @@ namespace System.Threading
             return callback;
         }
 
-        public static long LocalCount
+        public long LocalCount
         {
             get
             {
                 long count = 0;
-                foreach (LocalQueue workStealingQueue in ThreadPoolGlobals.workQueue._localQueues)
+                foreach (LocalQueue workStealingQueue in _localQueues)
                 {
                     if (workStealingQueue != null)
                     {
@@ -1461,7 +1439,7 @@ namespace System.Threading
             }
         }
 
-        public static long GlobalCount => ThreadPoolGlobals.workQueue._globalQueue.Count;
+        public long GlobalCount => _globalQueue.Count;
 
         // Time in ms for which ThreadPoolWorkQueue.Dispatch keeps executing normal work items before either returning from
         // Dispatch (if YieldFromDispatchLoop is true), or performing periodic activities
@@ -1494,7 +1472,7 @@ namespace System.Threading
             //      We will do our best, but ultimately it is the #1 that guarantees that someone will take care of
             //      work enqueued in the future.
 
-            ThreadPoolWorkQueue outerWorkQueue = ThreadPoolGlobals.workQueue;
+            ThreadPoolWorkQueue outerWorkQueue = ThreadPool.s_workQueue;
 
             //
             // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
@@ -1535,7 +1513,7 @@ namespace System.Threading
 
                 //
                 // Use operate on workQueue local to try block so it can be enregistered
-                ThreadPoolWorkQueue workQueue = ThreadPoolGlobals.workQueue;
+                ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
 
                 //
                 // Loop until our quantum expires or there is no work.
@@ -1589,7 +1567,7 @@ namespace System.Threading
                     //
                     // Execute the workitem outside of any finally blocks, so that it can be aborted if needed.
                     //
-                    if (ThreadPoolGlobals.enableWorkerTracking)
+                    if (ThreadPool.EnableWorkerTracking)
                     {
                         bool reportedStatus = false;
                         try
@@ -1656,7 +1634,7 @@ namespace System.Threading
 
                         if ((tasksDispatched & DonatingRate) == 0)
                         {
-                            DonateOneItem(localQueue);
+                            workQueue.DonateOneItem(localQueue);
                         }
                     }
 
@@ -1691,7 +1669,7 @@ namespace System.Threading
             //    if (keepThreadSpinning)
             //    {
             //        DonationCheck();
-            //        ThreadPoolGlobals.workQueue.KeepThread();
+            //        s_workQueue.KeepThread();
             //    }
 
             //    // we are releasing unneeded thread back to VM or the thread has run for a full quantum.
@@ -1701,22 +1679,22 @@ namespace System.Threading
             //}
         }
 
-        private static void DonationCheck()
+        private void DonationCheck()
         {
-            var localQueue = ThreadPoolGlobals.workQueue.GetOrAddLocalQueue();
+            var localQueue = GetOrAddLocalQueue();
             if ((localQueue.NextRnd() & DonatingRate) == 0)
             {
                 DonateOneItem(localQueue);
             }
         }
 
-        private static void DonateOneItem(LocalQueue localQueue)
+        private void DonateOneItem(LocalQueue localQueue)
         {
             bool dummy = true;
             var item = localQueue.Dequeue(ref dummy);
             if (item != null)
             {
-                ThreadPoolGlobals.workQueue._globalQueue.Enqueue(item, localQueue);
+                _globalQueue.Enqueue(item, localQueue);
             }
         }
     }
@@ -1786,7 +1764,7 @@ namespace System.Threading
             //Debug.Assert(currentThread == Thread.CurrentThread);
 
             Thread currentThread = Thread.CurrentThread;
-            var localQueue = ThreadPoolGlobals.workQueue.GetOrAddLocalQueue();
+            var localQueue = ThreadPool.s_workQueue.GetOrAddLocalQueue();
 
             uint completedCount = 0;
             int startTimeMs = Environment.TickCount;
@@ -2349,7 +2327,7 @@ namespace System.Threading
         {
             get
             {
-                return ThreadPoolWorkQueue.LocalCount + ThreadPoolWorkQueue.GlobalCount + PendingUnmanagedWorkItemCount;
+                return s_workQueue.LocalCount + s_workQueue.GlobalCount + PendingUnmanagedWorkItemCount;
             }
         }
     }
