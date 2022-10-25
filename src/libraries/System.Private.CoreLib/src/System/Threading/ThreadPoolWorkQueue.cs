@@ -1422,22 +1422,24 @@ namespace System.Threading
 
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
-            LocalQueue[] queues = _localQueues;
+            //LocalQueue[] queues = _localQueues;
 
-            // Try robbing a random queue.
-            // It would be preferable over fetching a global item.
-            // We will try only once though. "Count" is relatively expensive (touches queue ends - nearly cetain cache misses).
-            int r = localQueue.NextRnd() & (queues.Length - 1);
-            var otherSegment = queues[r]?._deqSegment;
-            var localSegment = localQueue._enqSegment;
-            if (otherSegment != localSegment && otherSegment != null && otherSegment.Count > RobThreshold)
-            {
-                object? c = otherSegment.TryRobTo(localSegment);
-                if (c != null)
-                {
-                    return c;
-                }
-            }
+            //// Try robbing a random queue.
+            //// It would be preferable over fetching a global item.
+            //// We will try only once though. "Count" is relatively expensive (touches queue ends - nearly cetain cache misses).
+            //int r = localQueue.NextRnd() & (queues.Length - 1);
+            //var otherSegment = queues[r]?._deqSegment;
+            //var localSegment = localQueue._enqSegment;
+            //if (otherSegment != localSegment && otherSegment != null && otherSegment.Count > RobThreshold)
+            //{
+            //    object? c = otherSegment.TryRobTo(localSegment);
+            //    if (c != null)
+            //    {
+            //        return c;
+            //    }
+            //}
+
+            LocalQueue[] queues;
 
             // check for local queues that are behind and help by stealing half their items.
             // we traverse local queues starting with those that differ in lower bits and going gradually up.
