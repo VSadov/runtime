@@ -22,8 +22,8 @@ namespace System.Threading
 
             private static void GateThreadStart()
             {
-                bool disableStarvationDetection =
-                    AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.DisableStarvationDetection", false);
+                bool disableStarvationDetection = true;
+                    // AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.DisableStarvationDetection", false);
                 bool debuggerBreakOnWorkStarvation =
                     AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.DebugBreakOnWorkerStarvation", false);
 

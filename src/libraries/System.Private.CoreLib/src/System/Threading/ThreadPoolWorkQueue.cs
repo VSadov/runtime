@@ -1334,11 +1334,11 @@ namespace System.Threading
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
             var localQueue = GetOrAddLocalQueue();
-            if (forceGlobal)
-            {
-                _globalQueue.Enqueue(callback, localQueue);
-            }
-            else
+            //if (forceGlobal)
+            //{
+            //    _globalQueue.Enqueue(callback, localQueue);
+            //}
+            //else
             {
                 localQueue.Enqueue(callback);
             }
