@@ -1603,7 +1603,7 @@ namespace System.Threading
                     }
 
                     // adjust spin time, in case we will need to spin again
-                    spinner.Count = 0; // Math.Max(0, spinner.Count - 1);
+                    spinner.Count = Math.Max(0, spinner.Count - 1);
                 }
 
                 if (workQueue._loggingEnabled)
