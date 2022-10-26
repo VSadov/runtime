@@ -1701,11 +1701,11 @@ namespace System.Threading
                 return true;
             }
 
-            if (!ThreadPool.YieldFromDispatchLoop)
-            {
-                startTickCount = curTicks;
-                return true;
-            }
+            //if (!ThreadPool.YieldFromDispatchLoop)
+            //{
+            //    startTickCount = curTicks;
+            //    return true;
+            //}
 
             return false;
         }
