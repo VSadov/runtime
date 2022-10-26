@@ -1589,15 +1589,17 @@ namespace System.Threading
                     if (workItem == null)
                     {
                         // if there is no more work, leave
-                        if (!missedSteal)
+                        if (missedSteal)
                         {
                             // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
-                            return true;
+                            //return true;
+                            workQueue.EnsureThreadRequested();
                         }
 
                         // back off a little and try again (as long as quantum has not expired)
                         //spinner.SpinOnce();
-                        continue;
+                        //continue;
+                        return true;
                     }
 
                     // adjust spin time, in case we will need to spin again
