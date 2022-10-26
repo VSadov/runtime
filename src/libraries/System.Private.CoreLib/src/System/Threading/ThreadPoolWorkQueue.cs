@@ -1564,7 +1564,7 @@ namespace System.Threading
             workQueue.RefreshLoggingEnabled();
 
             // for retries in a case of heavy contention while stealing.
-            //SpinWait spinner = default;
+            SpinWait spinner = default;
 
             Thread currentThread = Thread.CurrentThread;
             // Start on clean ExecutionContext and SynchronizationContext
@@ -1589,21 +1589,19 @@ namespace System.Threading
                     if (workItem == null)
                     {
                         // if there is no more work, leave
-                        if (missedSteal)
+                        if (!missedSteal)
                         {
                             // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
-                            //return true;
-                            workQueue.EnsureThreadRequested();
+                            return true;
                         }
 
                         // back off a little and try again (as long as quantum has not expired)
-                        //spinner.SpinOnce();
-                        //continue;
-                        return true;
+                        spinner.SpinOnce();
+                        continue;
                     }
 
                     // adjust spin time, in case we will need to spin again
-                    //spinner.Count = Math.Max(0, spinner.Count - 1);
+                    spinner.Count = 0; // Math.Max(0, spinner.Count - 1);
                 }
 
                 if (workQueue._loggingEnabled)
