@@ -1609,16 +1609,16 @@ namespace System.Threading
                 if (workQueue._loggingEnabled)
                     System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolDequeueWorkObject(workItem);
 
-                // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
-                // Make sure there is a request, so that starvation is noticed if we do not come back for a while.
-                // If this is our first workitem, be more aggressive.
-                if (tasksDispatched++ == 0)
-                {
-                    // Every new worker that finds work will ask for parallelizm increase, but only once.
-                    // This helps with front-edge ramping up from cold states.
-                    workQueue.RequestThread();
-                }
-                else
+                //// We are about to execute external code, which can take a while, block or even wait on something from other tasks.
+                //// Make sure there is a request, so that starvation is noticed if we do not come back for a while.
+                //// If this is our first workitem, be more aggressive.
+                //if (tasksDispatched++ == 0)
+                //{
+                //    // Every new worker that finds work will ask for parallelizm increase, but only once.
+                //    // This helps with front-edge ramping up from cold states.
+                //    workQueue.RequestThread();
+                //}
+                //else
                 {
                     workQueue.EnsureThreadRequested();
                 }
