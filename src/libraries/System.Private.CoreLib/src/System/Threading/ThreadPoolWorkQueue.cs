@@ -1617,7 +1617,8 @@ namespace System.Threading
         internal static void UnsafeQueueUserWorkItemInternal(object callBack, bool preferLocal) =>
             s_workQueue.Enqueue(callBack, forceGlobal: !preferLocal);
         internal static void UnsafeQueueHighPriorityWorkItemInternal(IThreadPoolWorkItem callBack) =>
-            s_workQueue.EnqueueAtHighPriority(callBack);
+            //s_workQueue.EnqueueAtHighPriority(callBack);
+            s_workQueue.Enqueue(callBack, forceGlobal: false);
 
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(object workItem)
