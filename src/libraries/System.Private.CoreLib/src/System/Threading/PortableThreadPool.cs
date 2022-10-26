@@ -321,15 +321,15 @@ namespace System.Threading
             return threadLocalCompletionCountObject;
         }
 
-        private void NotifyWorkItemProgress(object threadLocalCompletionCountObject, int currentTimeMs)
+        private static void NotifyWorkItemProgress(object threadLocalCompletionCountObject, int currentTimeMs)
         {
-            ThreadInt64PersistentCounter.Increment(threadLocalCompletionCountObject);
-            _separated.lastDequeueTime = currentTimeMs;
+            //ThreadInt64PersistentCounter.Increment(threadLocalCompletionCountObject);
+            //_separated.lastDequeueTime = currentTimeMs;
 
-            if (ShouldAdjustMaxWorkersActive(currentTimeMs))
-            {
-                AdjustMaxWorkersActive();
-            }
+            //if (ShouldAdjustMaxWorkersActive(currentTimeMs))
+            //{
+            //    AdjustMaxWorkersActive();
+            //}
         }
 
         internal void NotifyWorkItemProgress() =>
