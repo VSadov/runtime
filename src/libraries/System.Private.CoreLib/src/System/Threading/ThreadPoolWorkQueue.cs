@@ -1418,7 +1418,7 @@ namespace System.Threading
         /// <summary>
         /// When a segment has more than this, we steal half of its slots.
         /// </summary>
-        internal const int RobThreshold = 32;
+        internal const int RobThreshold = 10000000;
 
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
