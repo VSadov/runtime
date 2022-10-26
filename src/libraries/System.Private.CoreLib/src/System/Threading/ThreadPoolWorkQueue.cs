@@ -1418,7 +1418,7 @@ namespace System.Threading
         /// <summary>
         /// When a segment has more than this, we steal half of its slots.
         /// </summary>
-        internal const int RobThreshold = 10000000;
+        internal const int RobThreshold = 32;
 
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
@@ -1564,7 +1564,7 @@ namespace System.Threading
             workQueue.RefreshLoggingEnabled();
 
             // for retries in a case of heavy contention while stealing.
-            SpinWait spinner = default;
+            //SpinWait spinner = default;
 
             Thread currentThread = Thread.CurrentThread;
             // Start on clean ExecutionContext and SynchronizationContext
@@ -1596,12 +1596,12 @@ namespace System.Threading
                         }
 
                         // back off a little and try again (as long as quantum has not expired)
-                        spinner.SpinOnce();
+                        //spinner.SpinOnce();
                         continue;
                     }
 
                     // adjust spin time, in case we will need to spin again
-                    spinner.Count = Math.Max(0, spinner.Count - 1);
+                    //spinner.Count = Math.Max(0, spinner.Count - 1);
                 }
 
                 if (workQueue._loggingEnabled)
