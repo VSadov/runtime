@@ -1550,7 +1550,9 @@ namespace System.Threading
 
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
 
+#if CORECLR
             Thread.FlushCurrentProcessorId();
+#endif
             //
             // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
             // From this point on, we are responsible for requesting another thread if we stop working for any
@@ -1672,9 +1674,9 @@ namespace System.Threading
                     // "16" was picked based on typical latency distributions in a task scheduling benchmark
                     // as happening often enough to cap the effects of "neglect" while also being cheap
                     // even when compared to nearly no-op tasks.
-
+#if CORECLR
                     Thread.FlushCurrentProcessorId();
-
+#endif
                     if ((tasksDispatched & DonatingRate) == 0)
                     {
                         workQueue.DonateOneItem(localQueue);
