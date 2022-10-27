@@ -1566,7 +1566,7 @@ namespace System.Threading
             workQueue.RefreshLoggingEnabled();
 
             // for retries in a case of heavy contention while stealing.
-            SpinWait spinner = default;
+            // SpinWait spinner = default;
 
             Thread currentThread = Thread.CurrentThread;
             // Start on clean ExecutionContext and SynchronizationContext
@@ -1593,17 +1593,15 @@ namespace System.Threading
                         // if there is no more work, leave
                         if (!missedSteal)
                         {
-                            // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
-                            return true;
+                            workQueue.EnsureThreadRequested();
                         }
 
-                        // back off a little and try again (as long as quantum has not expired)
-                        spinner.SpinOnce();
-                        continue;
+                        // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
+                        return true;
                     }
 
                     // adjust spin time, in case we will need to spin again
-                    spinner.Count = Math.Max(0, spinner.Count - 1);
+                    // spinner.Count = Math.Max(0, spinner.Count - 1);
                 }
 
                 if (workQueue._loggingEnabled)
@@ -1701,11 +1699,11 @@ namespace System.Threading
                 return true;
             }
 
-            //if (!ThreadPool.YieldFromDispatchLoop)
-            //{
-            //    startTickCount = curTicks;
-            //    return true;
-            //}
+            if (!ThreadPool.YieldFromDispatchLoop)
+            {
+                startTickCount = curTicks;
+                return true;
+            }
 
             return false;
         }

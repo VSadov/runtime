@@ -88,18 +88,18 @@ namespace System.Threading
                                 break;
                             }
 
-                            //// In highly bursty cases with short bursts of work, especially in the portable thread pool
-                            //// implementation, worker threads are being released and entering Dispatch very quickly, not finding
-                            //// much work in Dispatch, and soon afterwards going back to Dispatch, causing extra thrashing on
-                            //// data and some interlocked operations, and similarly when the thread pool runs out of work. Since
-                            //// there is a pending request for work, introduce a slight delay before serving the next request.
-                            //// The spin-wait is mainly for when the sleep is not effective due to there being no other threads
-                            //// to schedule.
-                            //Thread.UninterruptibleSleep0();
-                            //if (!Environment.IsSingleProcessor)
-                            //{
-                            //    Thread.SpinWait(1);
-                            //}
+                            // In highly bursty cases with short bursts of work, especially in the portable thread pool
+                            // implementation, worker threads are being released and entering Dispatch very quickly, not finding
+                            // much work in Dispatch, and soon afterwards going back to Dispatch, causing extra thrashing on
+                            // data and some interlocked operations, and similarly when the thread pool runs out of work. Since
+                            // there is a pending request for work, introduce a slight delay before serving the next request.
+                            // The spin-wait is mainly for when the sleep is not effective due to there being no other threads
+                            // to schedule.
+                            Thread.UninterruptibleSleep0();
+                            if (!Environment.IsSingleProcessor)
+                            {
+                                Thread.SpinWait(1);
+                            }
                         }
 
                         // Don't spin-wait on the semaphore next time if the thread was actively stopped from processing work,
