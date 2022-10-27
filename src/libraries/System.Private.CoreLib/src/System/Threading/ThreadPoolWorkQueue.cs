@@ -1467,12 +1467,6 @@ namespace System.Threading
         // Dispatch (if YieldFromDispatchLoop is true), or performing periodic activities
         public const uint DispatchQuantumMs = 30;
 
-        // a few self-replicating tasks can dominate LIFO queues while exhibiting near perfect throughput
-        // that is, however, not good for latency of global tasks or local tasks "stuck" under replicators.
-        // we will "donate" a bottom task to the global queue once per DonatingRate operations to limit
-        // such behavior.
-        // private const int DonatingRate = 1023;
-
         /// <summary>
         /// Dispatches work items to this thread.
         /// </summary>
@@ -1607,27 +1601,11 @@ namespace System.Threading
                 {
                     return false;
                 }
-
-                //if ((tasksDispatched & 15) == 0)
-                //{
-                //    // we have dispatched another 16 tasks. Make sure the core Id is not stale due to caching.
-                //    // Running with stale core Id is very rare, but when happends may result in latency outliers
-                //    // due to neglect of our "real" local queue.
-                //    //
-                //    // "16" was picked based on typical latency distributions in a task scheduling benchmark
-                //    // as happening often enough to cap the effects of "neglect" while also being cheap
-                //    // even when compared to nearly no-op tasks.
-                //    if ((tasksDispatched & DonatingRate) == 0)
-                //    {
-                //        workQueue.DonateOneItem(localQueue);
-                //    }
-                //}
             } while (KeepDispatching(ref quantumStartTime));
 
             // the quantum has expired, but we saw more work.
             // ask for a thread
             workQueue.KeepThread();
-            // workQueue.DonationCheck();
             return true;
         }
 
@@ -1684,25 +1662,6 @@ namespace System.Threading
                 Unsafe.As<IThreadPoolWorkItem>(workItem).Execute();
             }
         }
-
-        //private void DonationCheck()
-        //{
-        //    var localQueue = GetOrAddLocalQueue();
-        //    if ((localQueue.NextRnd() & DonatingRate) == 0)
-        //    {
-        //        DonateOneItem(localQueue);
-        //    }
-        //}
-
-        //private void DonateOneItem(LocalQueue localQueue)
-        //{
-        //    bool dummy = true;
-        //    var item = localQueue.Dequeue(ref dummy);
-        //    if (item != null)
-        //    {
-        //        GetOrAddGlobalQueue().Enqueue(item);
-        //    }
-        //}
     }
 
     // A strongly typed callback for ThreadPoolTypedWorkItemQueue<T, TCallback>.
