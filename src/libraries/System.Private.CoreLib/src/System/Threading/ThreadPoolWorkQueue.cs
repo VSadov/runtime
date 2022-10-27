@@ -1195,7 +1195,7 @@ namespace System.Threading
         }
 
         internal readonly LocalQueue[] _localQueues;
-        internal readonly LocalQueue[] _globalQueues;
+        internal readonly GlobalQueue[] _globalQueues;
 
         private bool _loggingEnabled;
 
@@ -1206,7 +1206,7 @@ namespace System.Threading
         internal ThreadPoolWorkQueue()
         {
             _localQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
-            _globalQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
+            _globalQueues = new GlobalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
             RefreshLoggingEnabled();
         }
 
@@ -1277,7 +1277,7 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal LocalQueue GetOrAddGlobalQueue()
+        internal GlobalQueue GetOrAddGlobalQueue()
         {
             var index = GetLocalQueueIndex();
             var result = _globalQueues[index];
@@ -1291,9 +1291,9 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private LocalQueue EnsureGlobalQueue(int index)
+        private GlobalQueue EnsureGlobalQueue(int index)
         {
-            var newQueue = new LocalQueue();
+            var newQueue = new GlobalQueue();
             Interlocked.CompareExchange(ref _globalQueues[index], newQueue, null!);
             return _globalQueues[index];
         }
@@ -1374,13 +1374,14 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
+            var lq = GetOrAddLocalQueue();
             if (forceGlobal)
             {
-                GetOrAddGlobalQueue().Enqueue(callback);
+                GetOrAddGlobalQueue().Enqueue(callback, lq);
             }
             else
             {
-                GetOrAddLocalQueue().Enqueue(callback);
+                lq.Enqueue(callback);
             }
 
             // make sure there is at least one worker request
@@ -1448,15 +1449,14 @@ namespace System.Threading
 
             if (callback == null)
             {
-                queues = _globalQueues;
+                GlobalQueue[] queues1 = _globalQueues;
                 int startIndex = GetLocalQueueIndex();
-                LocalQueue lq = GetOrAddGlobalQueue();
 
                 // do a reliable sweep of all global queues.
-                for (int i = 0; i < queues.Length; i++)
+                for (int i = 0; i < queues1.Length; i++)
                 {
-                    var localWsq = queues[startIndex ^ i];
-                    callback = localWsq?.Dequeue(ref missedSteal, lq);
+                    var localWsq = queues1[startIndex ^ i];
+                    callback = localWsq?.Dequeue(localQueue);
                     if (callback != null)
                     {
                         break;
@@ -1506,7 +1506,7 @@ namespace System.Threading
             get
             {
                 long count = 0;
-                foreach (LocalQueue workStealingQueue in _globalQueues)
+                foreach (GlobalQueue workStealingQueue in _globalQueues)
                 {
                     if (workStealingQueue != null)
                     {
