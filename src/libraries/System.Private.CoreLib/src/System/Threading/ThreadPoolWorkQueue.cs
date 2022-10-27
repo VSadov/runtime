@@ -572,15 +572,15 @@ namespace System.Threading
             /// Returns null if the queue is empty or if there is a contention
             /// (no point to dwell on one local queue and make problem worse when there are other queues).
             /// </summary>
-            internal object? Dequeue(ref bool missedSteal, LocalQueue lq)
+            internal object? Dequeue(ref bool missedSteal)
             {
                 var currentSegment = _deqSegment;
-                object? result = currentSegment.TryDequeue(ref missedSteal, lq);
+                object? result = currentSegment.TryDequeue(ref missedSteal);
 
                 // if there is a new segment, we must help with retiring the current.
                 if (result == null && currentSegment._nextSegment != null)
                 {
-                    result = TryDequeueSlow(currentSegment, ref missedSteal, lq);
+                    result = TryDequeueSlow(currentSegment, ref missedSteal);
                 }
 
                 return result;
@@ -589,7 +589,7 @@ namespace System.Threading
             /// <summary>
             /// Tries to dequeue an item, removing frozen segments as needed.
             /// </summary>
-            private object? TryDequeueSlow(LocalQueueSegment currentSegment, ref bool missedSteal, LocalQueue lq)
+            private object? TryDequeueSlow(LocalQueueSegment currentSegment, ref bool missedSteal)
             {
                 object? result;
                 for (; ; )
@@ -605,7 +605,7 @@ namespace System.Threading
                     do
                     {
                         localMissedSteal = false;
-                        result = currentSegment.TryDequeue(ref localMissedSteal, lq);
+                        result = currentSegment.TryDequeue(ref localMissedSteal);
                         if (result != null)
                         {
                             return result;
@@ -622,7 +622,7 @@ namespace System.Threading
                     currentSegment = _deqSegment;
 
                     // Try to dequeue.  If we're successful, we're done.
-                    result = currentSegment.TryDequeue(ref missedSteal, lq);
+                    result = currentSegment.TryDequeue(ref missedSteal);
                     if (result != null)
                     {
                         return result;
@@ -881,7 +881,7 @@ namespace System.Threading
                 /// That generally happens when another thread did or is doing modifications and we do not see all the changes.
                 /// We could spin here until we see a consistent state, but it makes more sense to look in other queues.
                 /// </summary>
-                internal object? TryDequeue(ref bool missedSteal, LocalQueue lq)
+                internal object? TryDequeue(ref bool missedSteal)
                 {
                     for (; ; )
                     {
@@ -914,7 +914,7 @@ namespace System.Threading
                                 var enqPos = _queueEnds.Enqueue;
                                 if (enqPos - position < RobThreshold ||
                                     // "this" is a sentinel for a failed robbing attempt
-                                    (item = TryRobCore(lq._enqSegment, position, enqPos)) == this)
+                                    (item = TryRobCore(ThreadPool.s_workQueue.GetOrAddLocalQueue()._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
@@ -1000,8 +1000,6 @@ namespace System.Threading
 
                 internal object? TryRobCore(LocalQueueSegment other, int deqPosition, int enqPosition)
                 {
-                    Debug.Assert(this != other);
-
                     // same stanza as in TryEnqueue
                     int otherEnqPosition = other._queueEnds.Enqueue;
                     ref Slot enqPrevSlot = ref other[otherEnqPosition - 1];
@@ -1422,7 +1420,7 @@ namespace System.Threading
                 for (int i = 0; i < queues.Length; i++)
                 {
                     var localWsq = queues[startIndex ^ i];
-                    callback = localWsq?.Dequeue(ref missedSteal, localQueue);
+                    callback = localWsq?.Dequeue(ref missedSteal);
                     if (callback != null)
                     {
                         break;
@@ -1629,6 +1627,7 @@ namespace System.Threading
             // the quantum has expired, but we saw more work.
             // ask for a thread
             workQueue.KeepThread();
+            workQueue.DonationCheck();
             return true;
         }
 
@@ -1695,18 +1694,14 @@ namespace System.Threading
             }
         }
 
-#pragma warning disable CA1822 // Mark members as static
         private void DonateOneItem(LocalQueue localQueue)
-#pragma warning restore CA1822 // Mark members as static
         {
-            // TODO: VS
-
-            //bool dummy = true;
-            //var item = localQueue.Dequeue(ref dummy);
-            //if (item != null)
-            //{
-            //    _globalQueue.Enqueue(item);
-            //}
+            bool dummy = true;
+            var item = localQueue.Dequeue(ref dummy);
+            if (item != null)
+            {
+                GetOrAddGlobalQueue().Enqueue(item);
+            }
         }
     }
 
@@ -2271,7 +2266,6 @@ namespace System.Threading
 
         internal static void UnsafeQueueHighPriorityWorkItemInternal(IThreadPoolWorkItem callBack) =>
             s_workQueue.Enqueue(callBack, true);
-    //        s_workQueue.EnqueueAtHighPriority(callBack);  // TODO: VS
 
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(Task workItem)
