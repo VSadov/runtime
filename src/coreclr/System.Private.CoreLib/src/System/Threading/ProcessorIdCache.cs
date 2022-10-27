@@ -22,7 +22,7 @@ namespace System.Threading
         // We will not adjust higher than this though.
         private const int MaxIdRefreshRate = 5000;
 
-        internal static int RefreshCurrentProcessorId()
+        private static int RefreshCurrentProcessorId()
         {
             int currentProcessorId = Thread.GetCurrentProcessorNumber();
 
