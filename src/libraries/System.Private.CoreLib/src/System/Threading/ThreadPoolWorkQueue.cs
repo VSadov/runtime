@@ -1569,11 +1569,12 @@ namespace System.Threading
                 {
                     // Every new worker that finds work will ask for parallelizm increase, but only once.
                     // This helps with front-edge ramping up from cold states.
-                    workQueue.RequestThread();
+                    // workQueue.RequestThread();
+                    workQueue.EnsureThreadRequested();
                 }
                 else
                 {
-                    workQueue.EnsureThreadRequested();
+                    // workQueue.EnsureThreadRequested();
                 }
 
                 //
