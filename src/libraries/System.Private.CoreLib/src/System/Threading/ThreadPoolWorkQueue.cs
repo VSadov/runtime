@@ -179,26 +179,26 @@ namespace System.Threading
             /// <summary>
             /// Adds an object to the top of the queue
             /// </summary>
-            internal void Enqueue(object item, LocalQueue lQueue)
+            internal void Enqueue(object item)
             {
                 // try enqueuing. Should normally succeed unless we need a new segment.
-                if (!_enqSegment.TryEnqueue(item, lQueue))
+                if (!_enqSegment.TryEnqueue(item))
                 {
                     // If we're unable to enque, this segment will never take enqueues again.
                     // we need to take a slow path that will try adding a new segment.
-                    EnqueueSlow(item, lQueue);
+                    EnqueueSlow(item);
                 }
             }
 
             /// <summary>
             /// Slow path for enqueue, adding a new segment if necessary.
             /// </summary>
-            private void EnqueueSlow(object item, LocalQueue lQueue)
+            private void EnqueueSlow(object item)
             {
                 for (; ; )
                 {
                     GlobalQueueSegment currentSegment = _enqSegment;
-                    if (currentSegment.TryEnqueue(item, lQueue))
+                    if (currentSegment.TryEnqueue(item))
                     {
                         return;
                     }
@@ -233,7 +233,7 @@ namespace System.Threading
             /// Removes an object at the bottom of the queue
             /// Returns null if the queue is empty.
             /// </summary>
-            internal object? Dequeue(LocalQueue lQueue)
+            internal object? Dequeue()
             {
                 var currentSegment = _deqSegment;
                 if (currentSegment.IsEmpty)
@@ -241,12 +241,12 @@ namespace System.Threading
                     return null;
                 }
 
-                object? result = currentSegment.TryDequeue(lQueue);
+                object? result = currentSegment.TryDequeue();
 
                 if (result == null && currentSegment._nextSegment != null)
                 {
                     // slow path that fixes up segments
-                    result = TryDequeueSlow(currentSegment, lQueue);
+                    result = TryDequeueSlow(currentSegment);
                 }
 
                 return result;
@@ -255,7 +255,7 @@ namespace System.Threading
             /// <summary>
             /// Slow path for Dequeue, removing frozen segments as needed.
             /// </summary>
-            private object? TryDequeueSlow(GlobalQueueSegment currentSegment, LocalQueue lQueue)
+            private object? TryDequeueSlow(GlobalQueueSegment currentSegment)
             {
                 object? result;
                 for (; ; )
@@ -265,7 +265,7 @@ namespace System.Threading
                     // another item could have been added.  Try to dequeue one more time
                     // to confirm that the segment is indeed empty.
                     Debug.Assert(currentSegment._nextSegment != null);
-                    result = currentSegment.TryDequeue(lQueue);
+                    result = currentSegment.TryDequeue();
                     if (result != null)
                     {
                         return result;
@@ -281,7 +281,7 @@ namespace System.Threading
                     currentSegment = _deqSegment;
 
                     // Try to take.  If we're successful, we're done.
-                    result = currentSegment.TryDequeue(lQueue);
+                    result = currentSegment.TryDequeue();
                     if (result != null)
                     {
                         return result;
@@ -318,8 +318,6 @@ namespace System.Threading
                 // for debugging
                 internal int Count => _queueEnds.Enqueue - _queueEnds.Dequeue;
 
-                private static int sMaxReadCollisionDelay = Thread.OptimalMaxSpinWaitsPerSpinIteration * Environment.ProcessorCount / 2;
-
                 internal bool IsEmpty
                 {
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -335,11 +333,10 @@ namespace System.Threading
                 }
 
                 /// <summary>Tries to dequeue an element from the queue.</summary>
-                internal object? TryDequeue(LocalQueue lQueue)
+                internal object? TryDequeue()
                 {
                     // Loop in case of contention...
                     SpinWait spinner = default;
-                    int delay = lQueue._coreContext.LastGlobalDequeueDelay >> 1;
 
                     for (; ; )
                     {
@@ -377,29 +374,11 @@ namespace System.Threading
 
                             // The enqueuer went ahead and took a slot, but it has not finished filling the value.
                             // We cannot return `null` since the segment is not empty, so we must retry.
-                            // We should be careful though to not starve the enqueuer that we are waiting for.
-                            // In a worst case it may have lower priority than us, so we have to sleep(1) at some point.
-                            // Let the SpinWait handle that.
-                            spinner.SpinOnce();
-                            continue;
                         }
 
-                        // We have a stale dequeue value. Another dequeuer was quicker than us.
-                        // We should retry with a new dequeue and do not need to wait for anyone.
-                        // However there could be many dequeuers trying the same and only one at a time makes progress.
-                        // Trying and failing has indirect costs as it keeps memory busy, heats up CPU, etc..
-                        // We will throttle the rate of polling on our side exponentially with every clash.
-                        //
-                        // Also since there is a cost of "learning" a good delay value, we will record the last one that worked
-                        // and use 1/2 as a starting point when we are again in a similar situation.
-                        //
-                        lQueue._coreContext.LastGlobalDequeueDelay = delay;
-                        Thread.SpinWait(lQueue.NextRnd() & delay);
-
-                        if (delay < sMaxReadCollisionDelay)
-                        {
-                            delay = (delay << 1) + 1;
-                        }
+                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
+                        // We should retry with a new dequeue.
+                        spinner.SpinOnce();
                     }
                 }
 
@@ -408,10 +387,10 @@ namespace System.Threading
                 /// in the queue and true will be returned; otherwise, the item won't be stored, the segment will be frozen
                 /// and false will be returned.
                 /// </summary>
-                public bool TryEnqueue(object item, LocalQueue lQueue)
+                public bool TryEnqueue(object item)
                 {
                     // Loop in case of contention...
-                    int delay = lQueue._coreContext.LastGlobalEnqueueDelay >> 1;
+                    SpinWait spinner = default;
                     for (; ; )
                     {
                         int position = _queueEnds.Enqueue;
@@ -440,15 +419,8 @@ namespace System.Threading
                             return false;
                         }
 
-                        // Lost a race to another enqueue. Need to retry, but throttle the rate of retries if keep failing.
-                        // See more detailed coments on the same pattern in TryDequeue.
-                        lQueue._coreContext.LastGlobalEnqueueDelay = delay;
-                        Thread.SpinWait(lQueue.NextRnd() & delay);
-
-                        if (delay < sMaxReadCollisionDelay)
-                        {
-                            delay = (delay << 1) + 1;
-                        }
+                        // Lost a race to another enqueue. Need to retry.
+                        spinner.SpinOnce();
                     }
                 }
 
@@ -494,8 +466,7 @@ namespace System.Threading
             internal struct CoreContext
             {
                 [FieldOffset(1 * Internal.PaddingHelpers.CACHE_LINE_SIZE + 0 * sizeof(uint))] internal uint rndVal;
-                [FieldOffset(1 * Internal.PaddingHelpers.CACHE_LINE_SIZE + 1 * sizeof(uint))] internal int LastGlobalEnqueueDelay;
-                [FieldOffset(1 * Internal.PaddingHelpers.CACHE_LINE_SIZE + 2 * sizeof(uint))] internal int LastGlobalDequeueDelay;
+                // used to be more fields here. maybe will have some again
             }
 
             internal CoreContext _coreContext = new CoreContext() { rndVal = 6247 };
@@ -1374,14 +1345,13 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            var lq = GetOrAddLocalQueue();
             if (forceGlobal)
             {
-                GetOrAddGlobalQueue().Enqueue(callback, lq);
+                GetOrAddGlobalQueue().Enqueue(callback);
             }
             else
             {
-                lq.Enqueue(callback);
+                GetOrAddLocalQueue().Enqueue(callback);
             }
 
             // make sure there is at least one worker request
@@ -1399,6 +1369,7 @@ namespace System.Threading
                 return true;
             }
 
+            // TODO: VS the following is probably an overkill
             for (int i = 0; i < _localQueues.Length; ++i)
             {
                 if (i == localQueueIndex)
@@ -1423,40 +1394,18 @@ namespace System.Threading
 
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
-            //LocalQueue[] queues = _localQueues;
-
-            //// Try robbing a random queue.
-            //// It would be preferable over fetching a global item.
-            //// We will try only once though. "Count" is relatively expensive (touches queue ends - nearly cetain cache misses).
-            //int r = localQueue.NextRnd() & (queues.Length - 1);
-            //var otherSegment = queues[r]?._deqSegment;
-            //var localSegment = localQueue._enqSegment;
-            //if (otherSegment != localSegment && otherSegment != null && otherSegment.Count > RobThreshold)
-            //{
-            //    object? c = otherSegment.TryRobTo(localSegment);
-            //    if (c != null)
-            //    {
-            //        return c;
-            //    }
-            //}
-
-            LocalQueue[] queues;
-
-            // check for local queues that are behind and help by stealing half their items.
-            // we traverse local queues starting with those that differ in lower bits and going gradually up.
-            // this way we want to minimize the chances that two threads concurrently go through the same sequence of queues.
-            object? callback = null;// _globalQueue.Dequeue(ref missedSteal);
+            object? callback = null;
 
             if (callback == null)
             {
-                GlobalQueue[] queues1 = _globalQueues;
+                GlobalQueue[] queues = _globalQueues;
                 int startIndex = GetLocalQueueIndex();
 
-                // do a reliable sweep of all global queues.
-                for (int i = 0; i < queues1.Length; i++)
+                // do a sweep of all global queues.
+                for (int i = 0; i < queues.Length; i++)
                 {
-                    var localWsq = queues1[startIndex ^ i];
-                    callback = localWsq?.Dequeue(localQueue);
+                    var localWsq = queues[startIndex ^ i];
+                    callback = localWsq?.Dequeue();
                     if (callback != null)
                     {
                         break;
@@ -1466,15 +1415,14 @@ namespace System.Threading
 
             if (callback == null)
             {
-                queues = _localQueues;
+                LocalQueue[] queues = _localQueues;
                 int startIndex = localQueue.NextRnd() & (queues.Length - 1);
-                LocalQueue lq = GetOrAddLocalQueue();
 
-                // do a reliable sweep of all local queues.
+                // do a sweep of all local queues.
                 for (int i = 0; i < queues.Length; i++)
                 {
                     var localWsq = queues[startIndex ^ i];
-                    callback = localWsq?.Dequeue(ref missedSteal, lq);
+                    callback = localWsq?.Dequeue(ref missedSteal, localQueue);
                     if (callback != null)
                     {
                         break;
