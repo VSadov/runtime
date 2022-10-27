@@ -646,7 +646,7 @@ namespace System.Threading
                 return _enqSegment.TryPop();
             }
 
-            internal bool CanPop => _enqSegment.Count != 0;
+            internal bool CanPop => _enqSegment.CanPop;
 
             /// <summary>
             /// Performs a search for the given item in the queue and removes the item if found.
@@ -817,6 +817,21 @@ namespace System.Threading
                 }
 
                 internal int Count => _queueEnds.Enqueue - _queueEnds.Dequeue;
+
+                internal bool CanPop
+                {
+                    get
+                    {
+                        int position = _queueEnds.Enqueue - 1;
+                        ref Slot slot = ref this[position];
+
+                        // Read the sequence number for the slot.
+                        int sequenceNumber = slot.SequenceNumber;
+
+                        // Check if the slot is considered Full in the current generation (other likely state - Empty).
+                        return (sequenceNumber == position + Full);
+                    }
+                }
 
                 internal object? TryPop()
                 {
@@ -1547,16 +1562,16 @@ namespace System.Threading
                 if (workQueue._loggingEnabled)
                     System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolDequeueWorkObject(workItem);
 
-                //// We are about to execute external code, which can take a while, block or even wait on something from other tasks.
-                //// Make sure there is a request, so that starvation is noticed if we do not come back for a while.
-                //// If this is our first workitem, be more aggressive.
+                // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
+                // Make sure there is a request, so that starvation is noticed if we do not come back for a while.
+                // If this is our first workitem, be more aggressive.
                 if (tasksDispatched++ == 0)
-                //{
-                //    // Every new worker that finds work will ask for parallelizm increase, but only once.
-                //    // This helps with front-edge ramping up from cold states.
-                //    workQueue.RequestThread();
-                //}
-                //else
+                {
+                    // Every new worker that finds work will ask for parallelizm increase, but only once.
+                    // This helps with front-edge ramping up from cold states.
+                    workQueue.RequestThread();
+                }
+                else
                 {
                     workQueue.EnsureThreadRequested();
                 }
@@ -1723,11 +1738,6 @@ namespace System.Threading
             // dependency on other queued work items.
             ScheduleForProcessing();
 
-            //ThreadPoolWorkQueueThreadLocals tl = ThreadPoolWorkQueueThreadLocals.threadLocals!;
-            //Debug.Assert(tl != null);
-            //Thread currentThread = tl.currentThread;
-            //Debug.Assert(currentThread == Thread.CurrentThread);
-
             Thread currentThread = Thread.CurrentThread;
             var localQueue = ThreadPool.s_workQueue.GetOrAddLocalQueue();
 
@@ -1745,7 +1755,6 @@ namespace System.Threading
                 //   yield to the thread pool after some time. The threshold used is half of the thread pool's dispatch quantum,
                 //   which the thread pool uses for doing periodic work.
                 if (++completedCount == uint.MaxValue ||
-                    // tl.workStealingQueue.CanSteal ||
                     localQueue.CanPop ||
                     (uint)(Environment.TickCount - startTimeMs) >= ThreadPoolWorkQueue.DispatchQuantumMs / 2 ||
                     !_workItems.TryDequeue(out workItem))
