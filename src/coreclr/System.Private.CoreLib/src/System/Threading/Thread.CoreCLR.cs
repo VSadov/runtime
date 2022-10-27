@@ -346,6 +346,11 @@ namespace System.Threading
             return ProcessorIdCache.GetCurrentProcessorId();
         }
 
+        internal static void FlushCurrentProcessorId()
+        {
+            ProcessorIdCache.RefreshCurrentProcessorId();
+        }
+
         // a speed check will determine refresh rate of the cache and will report if caching is not advisable.
         // we will record that in a readonly static so that it could become a JIT constant and bypass caching entirely.
         private static readonly bool s_isProcessorNumberReallyFast = ProcessorIdCache.ProcessorNumberSpeedCheck();

@@ -1550,6 +1550,7 @@ namespace System.Threading
 
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
 
+            Thread.FlushCurrentProcessorId();
             //
             // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
             // From this point on, we are responsible for requesting another thread if we stop working for any
@@ -1672,8 +1673,7 @@ namespace System.Threading
                     // as happening often enough to cap the effects of "neglect" while also being cheap
                     // even when compared to nearly no-op tasks.
 
-                    // TODO: VS
-                    // Thread.FlushCurrentProcessorId();
+                    Thread.FlushCurrentProcessorId();
 
                     if ((tasksDispatched & DonatingRate) == 0)
                     {
