@@ -1528,8 +1528,6 @@ namespace System.Threading
             currentThread._executionContext = null;
             currentThread._synchronizationContext = null;
 
-            int tasksDispatched = 0;
-
             //
             // Loop until our quantum expires or there is no work.
             //
@@ -1563,19 +1561,8 @@ namespace System.Threading
                     System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolDequeueWorkObject(workItem);
 
                 // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
-                // Make sure there is a request, so that starvation is noticed if we do not come back for a while.
-                // If this is our first workitem, be more aggressive.
-                if (tasksDispatched++ == 0)
-                {
-                    // Every new worker that finds work will ask for parallelizm increase, but only once.
-                    // This helps with front-edge ramping up from cold states.
-                    // workQueue.RequestThread();
-                    workQueue.EnsureThreadRequested();
-                }
-                else
-                {
-                    // workQueue.EnsureThreadRequested();
-                }
+                // Make sure there is a request for a thread.
+                workQueue.EnsureThreadRequested();
 
                 //
                 // Execute the workitem outside of any finally blocks, so that it can be aborted if needed.
