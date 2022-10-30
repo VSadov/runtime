@@ -1358,7 +1358,7 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            if (forceGlobal)
+            if (!Thread.CurrentThread.IsThreadPoolThread) // || forceGlobal)
             {
                 GetOrAddGlobalQueue().Enqueue(callback);
             }
@@ -1414,7 +1414,7 @@ namespace System.Threading
 
             if (callback == null)
             {
-                Thread.Yield();
+                // Thread.Yield();
 
                 // do a sweep of all global queues.
                 for (int i = 1; i < gQueues.Length; i++)
@@ -1431,7 +1431,7 @@ namespace System.Threading
             if (callback == null)
             {
                 LocalQueue[] queues = _localQueues;
-                startIndex = localQueue.NextRnd() & (queues.Length - 1);
+                //startIndex = localQueue.NextRnd() & (queues.Length - 1);
 
                 // do a sweep of all local queues.
                 for (int i = 0; i < queues.Length; i++)
