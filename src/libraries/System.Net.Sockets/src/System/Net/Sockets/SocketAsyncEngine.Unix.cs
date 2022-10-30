@@ -194,6 +194,8 @@ namespace System.Net.Sockets
                     {
                         ScheduleToProcessEvents();
                     }
+
+                    Thread.Yield();
                 }
             }
             catch (Exception e)
