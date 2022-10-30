@@ -1407,6 +1407,8 @@ namespace System.Threading
 
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
+            Thread.Yield();
+
             object? callback = null;
 
             if (callback == null)
