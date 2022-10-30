@@ -1407,19 +1407,19 @@ namespace System.Threading
 
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
-            Thread.Yield();
+            GlobalQueue[] gQueues = _globalQueues;
+            int startIndex = GetLocalQueueIndex();
 
-            object? callback = null;
+            object? callback = gQueues[startIndex]?.Dequeue();
 
             if (callback == null)
             {
-                GlobalQueue[] queues = _globalQueues;
-                int startIndex = GetLocalQueueIndex();
+                Thread.Yield();
 
                 // do a sweep of all global queues.
-                for (int i = 0; i < queues.Length; i++)
+                for (int i = 1; i < gQueues.Length; i++)
                 {
-                    var localWsq = queues[startIndex ^ i];
+                    var localWsq = gQueues[startIndex ^ i];
                     callback = localWsq?.Dequeue();
                     if (callback != null)
                     {
@@ -1431,7 +1431,7 @@ namespace System.Threading
             if (callback == null)
             {
                 LocalQueue[] queues = _localQueues;
-                int startIndex = localQueue.NextRnd() & (queues.Length - 1);
+                startIndex = localQueue.NextRnd() & (queues.Length - 1);
 
                 // do a sweep of all local queues.
                 for (int i = 0; i < queues.Length; i++)
