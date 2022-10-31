@@ -1414,8 +1414,6 @@ namespace System.Threading
 
             if (callback == null)
             {
-                // Thread.Yield();
-
                 // do a sweep of all global queues.
                 for (int i = 1; i < gQueues.Length; i++)
                 {
