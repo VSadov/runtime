@@ -378,7 +378,7 @@ namespace System.Threading
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
                         // We should retry with a new dequeue.
-                        spinner.SpinOnce();
+                        spinner.SpinOnce(-1);
                     }
                 }
 
@@ -1410,19 +1410,16 @@ namespace System.Threading
             GlobalQueue[] gQueues = _globalQueues;
             int startIndex = GetLocalQueueIndex();
 
-            object? callback = gQueues[startIndex]?.Dequeue();
+            object? callback = null;
 
-            if (callback == null)
+            // do a sweep of all global queues.
+            for (int i = 0; i < gQueues.Length; i++)
             {
-                // do a sweep of all global queues.
-                for (int i = 1; i < gQueues.Length; i++)
+                var localWsq = gQueues[startIndex ^ i];
+                callback = localWsq?.Dequeue();
+                if (callback != null)
                 {
-                    var localWsq = gQueues[startIndex ^ i];
-                    callback = localWsq?.Dequeue();
-                    if (callback != null)
-                    {
-                        break;
-                    }
+                    break;
                 }
             }
 
