@@ -2158,13 +2158,13 @@ namespace System.Net.Sockets
             if ((events & Interop.Sys.SocketEvents.Read) != 0)
             {
                 AsyncOperation? receiveOperation = _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this);
-                receiveOperation?.Process();
+                receiveOperation?.Schedule();
             }
 
             if ((events & Interop.Sys.SocketEvents.Write) != 0)
             {
                 AsyncOperation? sendOperation = _sendQueue.ProcessSyncEventOrGetAsyncEvent(this);
-                sendOperation?.Process();
+                sendOperation?.Schedule();
             }
         }
 
