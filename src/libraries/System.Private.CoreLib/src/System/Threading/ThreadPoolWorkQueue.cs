@@ -378,7 +378,7 @@ namespace System.Threading
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
                         // We should retry with a new dequeue.
-                        spinner.SpinOnce(-1);
+                        spinner.SpinOnce();
                     }
                 }
 
