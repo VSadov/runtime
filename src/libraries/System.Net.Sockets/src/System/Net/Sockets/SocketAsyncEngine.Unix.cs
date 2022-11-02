@@ -220,14 +220,9 @@ namespace System.Net.Sockets
             // threads (only for EventLoop() currently) before an event is attempted to be dequeued. In particular, if an
             // enqueuer queues an event and does not schedule a work item because it is already scheduled, and this thread is
             // the last thread processing events, it must see the event queued by the enqueuer.
-            Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
+            // Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
 
             ConcurrentQueue<SocketIOEvent> eventQueue = _eventQueue;
-            if (!eventQueue.TryDequeue(out SocketIOEvent ev))
-            {
-                return;
-            }
-
             int startTimeMs = Environment.TickCount;
 
             // An event was successfully dequeued, and there may be more events to process. Schedule a work item to parallelize
@@ -237,7 +232,7 @@ namespace System.Net.Sockets
             // socket events.
             // ScheduleToProcessEvents();
 
-            while (true)
+            while (eventQueue.TryDequeue(out SocketIOEvent ev))
             {
                 ev.Context.HandleEvents(ev.Events);
 
@@ -257,15 +252,16 @@ namespace System.Net.Sockets
                 {
                     break;
                 }
-
-                if (!eventQueue.TryDequeue(out ev))
-                {
-                    return;
-                }
             }
 
-            // The queue was not observed to be empty, schedule another work item before yielding the thread
-            ScheduleToProcessEvents();
+            Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
+            if (eventQueue.TryDequeue(out SocketIOEvent ev1))
+            {
+                ev1.Context.HandleEvents(ev1.Events);
+
+                // The queue was not observed to be empty, schedule another work item before yielding the thread
+                ScheduleToProcessEvents();
+            }
         }
 
         private void FreeNativeResources()
