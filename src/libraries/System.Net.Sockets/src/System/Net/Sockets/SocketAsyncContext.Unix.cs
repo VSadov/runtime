@@ -667,20 +667,23 @@ namespace System.Net.Sockets
 
                 _lockObject = lockObject;
 
-                Debug.Assert(!Monitor.IsEntered(_lockObject));
+                //                Debug.Assert(!Monitor.IsEntered(_lockObject));
 
-#if DEBUG
-                bool success = Monitor.TryEnter(_lockObject, 10000);
-                Debug.Assert(success, "Timed out waiting for queue lock");
-#else
-                Monitor.Enter(_lockObject);
-#endif
+                //#if DEBUG
+                //                bool success = Monitor.TryEnter(_lockObject, 10000);
+                //                Debug.Assert(success, "Timed out waiting for queue lock");
+                //#else
+                //                Monitor.Enter(_lockObject);
+                //#endif
+                bool taken = false;
+                Unsafe.Unbox<SpinLock>(_lockObject).Enter(ref taken);
             }
 
             public void Dispose()
             {
-                Debug.Assert(Monitor.IsEntered(_lockObject));
-                Monitor.Exit(_lockObject);
+                //Debug.Assert(Monitor.IsEntered(_lockObject));
+                //Monitor.Exit(_lockObject);
+                Unsafe.Unbox<SpinLock>(_lockObject).Exit(useMemoryBarrier: false);
             }
         }
 
@@ -746,7 +749,7 @@ namespace System.Net.Sockets
             public void Init()
             {
                 Debug.Assert(_queueLock == null);
-                _queueLock = new object();
+                _queueLock = new SpinLock(enableThreadOwnerTracking: false);
 
                 _state = QueueState.Ready;
                 _sequenceNumber = 0;
