@@ -150,6 +150,8 @@ namespace System.Net.Sockets
 #endif
             }
 
+            public bool IsComplete() => _state == (int)State.Complete;
+
             public OperationResult TryComplete(SocketAsyncContext context)
             {
                 TraceWithContext(context, "Enter");
@@ -956,6 +958,12 @@ namespace System.Net.Sockets
 
             internal void ProcessAsyncOperation(TOperation op)
             {
+                if (op.IsComplete())
+                {
+                    op.InvokeCallback(allowPooling: true);
+                    return;
+                }
+
                 OperationResult result = ProcessQueuedOperation(op);
 
                 Debug.Assert(op.Event == null, "Sync operation encountered in ProcessAsyncOperation");
@@ -977,7 +985,7 @@ namespace System.Net.Sockets
                     }
                     else
                     {
-                        ThreadPool.UnsafeQueueUserWorkItem(o => ((TOperation)o!).InvokeCallback(allowPooling: true), op);
+                        op.Schedule();
                     }
                 }
             }
