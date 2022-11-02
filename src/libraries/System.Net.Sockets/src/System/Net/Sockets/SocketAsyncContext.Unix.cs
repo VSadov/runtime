@@ -970,7 +970,15 @@ namespace System.Net.Sockets
                     // request for a previous operation could affect a subsequent one)
                     // and here we know the operation has completed.
                     op.CancellationRegistration.Dispose();
-                    op.InvokeCallback(allowPooling: true);
+
+                    if (Thread.CurrentThread.IsThreadPoolThread)
+                    {
+                        op.InvokeCallback(allowPooling: true);
+                    }
+                    else
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItem(o => ((TOperation)o!).InvokeCallback(allowPooling: true), op);
+                    }
                 }
             }
 
@@ -2158,13 +2166,13 @@ namespace System.Net.Sockets
             if ((events & Interop.Sys.SocketEvents.Read) != 0)
             {
                 AsyncOperation? receiveOperation = _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this);
-                receiveOperation?.Schedule();
+                receiveOperation?.Process();
             }
 
             if ((events & Interop.Sys.SocketEvents.Write) != 0)
             {
                 AsyncOperation? sendOperation = _sendQueue.ProcessSyncEventOrGetAsyncEvent(this);
-                sendOperation?.Schedule();
+                sendOperation?.Process();
             }
         }
 
