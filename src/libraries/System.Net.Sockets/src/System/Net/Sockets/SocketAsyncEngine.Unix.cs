@@ -248,7 +248,7 @@ namespace System.Net.Sockets
                 // using Stopwatch instead (like 1 ms, 5 ms, etc.), from quick tests they appeared to have a slightly greater
                 // impact on throughput compared to the threshold chosen below, though it is slight enough that it may not
                 // matter much. Higher thresholds didn't seem to have any noticeable effect.
-                if (Environment.TickCount - startTimeMs >= 15)
+                if (Environment.TickCount != startTimeMs)
                 {
                     break;
                 }
