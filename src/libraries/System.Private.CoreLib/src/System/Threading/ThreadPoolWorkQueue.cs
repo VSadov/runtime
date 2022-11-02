@@ -1187,10 +1187,12 @@ namespace System.Threading
         private int numOutstandingThreadRequests;
         private readonly Internal.PaddingFor32 pad2;
 
+        private const int LocToGlobRatio = 8;
+
         internal ThreadPoolWorkQueue()
         {
             _localQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
-            _globalQueues = new GlobalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
+            _globalQueues = new GlobalQueue[RoundUpToPowerOf2(Environment.ProcessorCount) / LocToGlobRatio];
             RefreshLoggingEnabled();
         }
 
@@ -1260,10 +1262,20 @@ namespace System.Threading
             return _localQueues[index];
         }
 
+        internal int GetLocalQueueIndex()
+        {
+            return GetLocalQueueIndex(Threading.Thread.GetCurrentProcessorId());
+        }
+
+        internal int GetLocalQueueIndex(int procId)
+        {
+            return procId & (_localQueues.Length - 1);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal GlobalQueue GetOrAddGlobalQueue(LocalQueue lq)
         {
-            var index = GetLocalQueueIndex(lq.NextRnd());
+            var index = GetGlobalQueueIndex(lq.NextRnd());
             var result = _globalQueues[index];
 
             if (result == null)
@@ -1282,14 +1294,14 @@ namespace System.Threading
             return _globalQueues[index];
         }
 
-        internal int GetLocalQueueIndex()
+        internal int GetGlobalQueueIndex()
         {
-            return GetLocalQueueIndex(Threading.Thread.GetCurrentProcessorId());
+            return GetGlobalQueueIndex(Threading.Thread.GetCurrentProcessorId() / LocToGlobRatio);
         }
 
-        internal int GetLocalQueueIndex(int procId)
+        internal int GetGlobalQueueIndex(int procId)
         {
-            return procId & (_localQueues.Length - 1);
+            return procId & (_globalQueues.Length - 1);
         }
 
         internal void RequestThread()
@@ -1384,19 +1396,19 @@ namespace System.Threading
             }
 
             // TODO: VS the following is probably an overkill
-            for (int i = 0; i < _localQueues.Length; ++i)
-            {
-                if (i == localQueueIndex)
-                {
-                    continue;
-                }
+            //for (int i = 0; i < _localQueues.Length; ++i)
+            //{
+            //    if (i == localQueueIndex)
+            //    {
+            //        continue;
+            //    }
 
-                localQueue = _localQueues[i];
-                if (localQueue != null && localQueue.TryRemove(callback))
-                {
-                    return true;
-                }
-            }
+            //    localQueue = _localQueues[i];
+            //    if (localQueue != null && localQueue.TryRemove(callback))
+            //    {
+            //        return true;
+            //    }
+            //}
 
             return false;
         }
@@ -1409,7 +1421,7 @@ namespace System.Threading
         public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
             GlobalQueue[] gQueues = _globalQueues;
-            int startIndex = GetLocalQueueIndex();
+            int startIndex = GetGlobalQueueIndex();
 
             object? callback = null;
 
@@ -1427,6 +1439,7 @@ namespace System.Threading
             if (callback == null)
             {
                 LocalQueue[] queues = _localQueues;
+                startIndex = GetLocalQueueIndex();
                 //startIndex = localQueue.NextRnd() & (queues.Length - 1);
 
                 // do a sweep of all local queues.
