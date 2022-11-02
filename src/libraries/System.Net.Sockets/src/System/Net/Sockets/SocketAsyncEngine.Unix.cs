@@ -235,7 +235,7 @@ namespace System.Net.Sockets
             // item and the epoll thread to schedule more work items as necessary. The parallelization may be necessary here if
             // the user callback as part of handling the event blocks for some reason that may have a dependency on other queued
             // socket events.
-            ScheduleToProcessEvents();
+            // ScheduleToProcessEvents();
 
             while (true)
             {

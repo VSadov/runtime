@@ -286,7 +286,7 @@ namespace System.Net.Sockets
                 Debug.Assert(Event == null);
 
                 // Async operation.  Process the IO on the threadpool.
-                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
             }
 
             public void Process() => ((IThreadPoolWorkItem)this).Execute();
@@ -2182,15 +2182,18 @@ namespace System.Net.Sockets
             // synchronously to avoid an extra thread pool work item. When we have two operations to process, processing both
             // synchronously may delay the second operation, so schedule one onto the thread pool and process the other
             // synchronously. There might be better ways of doing this.
-            if (sendOperation == null)
-            {
-                receiveOperation?.Process();
-            }
-            else
-            {
-                receiveOperation?.Schedule();
-                sendOperation.Process();
-            }
+            //if (sendOperation == null)
+            //{
+            //    receiveOperation?.Process();
+            //}
+            //else
+            //{
+            //    receiveOperation?.Schedule();
+            //    sendOperation.Process();
+            //}
+
+            receiveOperation?.Schedule();
+            sendOperation?.Schedule();
         }
 
         //
