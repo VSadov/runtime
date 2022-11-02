@@ -1187,7 +1187,7 @@ namespace System.Threading
         private int numOutstandingThreadRequests;
         private readonly Internal.PaddingFor32 pad2;
 
-        private const int LocToGlobRatio = 8;
+        private const int LocToGlobRatio = 2;
 
         internal ThreadPoolWorkQueue()
         {
