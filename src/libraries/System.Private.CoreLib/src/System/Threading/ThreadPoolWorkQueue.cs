@@ -1261,9 +1261,9 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal GlobalQueue GetOrAddGlobalQueue()
+        internal GlobalQueue GetOrAddGlobalQueue(LocalQueue lq)
         {
-            var index = GetLocalQueueIndex();
+            var index = GetLocalQueueIndex(lq.NextRnd());
             var result = _globalQueues[index];
 
             if (result == null)
@@ -1358,13 +1358,14 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
+            var locQ = GetOrAddLocalQueue();
             if (forceGlobal || !Thread.CurrentThread.IsThreadPoolThread)
             {
-                GetOrAddGlobalQueue().Enqueue(callback);
+                GetOrAddGlobalQueue(locQ).Enqueue(callback);
             }
             else
             {
-                GetOrAddLocalQueue().Enqueue(callback);
+                locQ.Enqueue(callback);
             }
 
             // make sure there is at least one worker request
