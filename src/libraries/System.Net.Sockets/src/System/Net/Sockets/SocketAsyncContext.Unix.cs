@@ -2187,6 +2187,22 @@ namespace System.Net.Sockets
             }
         }
 
+        // Called on epoll thread.
+        public unsafe void ProcessSyncScheduleAsyncEvents(Interop.Sys.SocketEvents events)
+        {
+            Debug.Assert((events & Interop.Sys.SocketEvents.Error) == 0);
+
+            AsyncOperation? sendOperation =
+                (events & Interop.Sys.SocketEvents.Write) != 0 ? _sendQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
+
+            sendOperation?.Schedule();
+
+            AsyncOperation? receiveOperation =
+                (events & Interop.Sys.SocketEvents.Read) != 0 ? _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
+
+            receiveOperation?.Schedule();
+        }
+
         // Called on ThreadPool thread.
         public unsafe void HandleEvents(Interop.Sys.SocketEvents events)
         {
@@ -2201,18 +2217,15 @@ namespace System.Net.Sockets
             // synchronously to avoid an extra thread pool work item. When we have two operations to process, processing both
             // synchronously may delay the second operation, so schedule one onto the thread pool and process the other
             // synchronously. There might be better ways of doing this.
-            //if (sendOperation == null)
-            //{
-            //    receiveOperation?.Process();
-            //}
-            //else
-            //{
-            //    receiveOperation?.Schedule();
-            //    sendOperation.Process();
-            //}
-
-            receiveOperation?.Schedule();
-            sendOperation?.Schedule();
+            if (sendOperation == null)
+            {
+                receiveOperation?.Process();
+            }
+            else
+            {
+                receiveOperation?.Schedule();
+                sendOperation.Process();
+            }
         }
 
         //

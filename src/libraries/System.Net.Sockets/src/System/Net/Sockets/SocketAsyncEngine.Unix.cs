@@ -315,8 +315,9 @@ namespace System.Net.Sockets
 
                             if (events != Interop.Sys.SocketEvents.None)
                             {
-                                _eventQueue.Enqueue(new SocketIOEvent(context, events));
-                                enqueuedEvent = true;
+                                context.ProcessSyncScheduleAsyncEvents(events);
+                                //_eventQueue.Enqueue(new SocketIOEvent(context, events));
+                                // enqueuedEvent = true;
                             }
                         }
                     }
