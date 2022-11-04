@@ -1299,7 +1299,7 @@ namespace System.Threading
 
         internal int GetGlobalQueueIndex()
         {
-            return GetGlobalQueueIndex(Threading.Thread.GetCurrentProcessorId() / LocToGlobRatio);
+            return GetLocalQueueIndex() / LocToGlobRatio;
         }
 
         internal int GetGlobalQueueIndex(int procId)
@@ -1397,7 +1397,7 @@ namespace System.Threading
                 return true;
             }
 
-            // TODO: VS the following is probably an overkill
+            // TODO: the following is probably an overkill
             //for (int i = 0; i < _localQueues.Length; ++i)
             //{
             //    if (i == localQueueIndex)
@@ -1420,18 +1420,17 @@ namespace System.Threading
         /// </summary>
         internal const int RobThreshold = 32;
 
-        public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
+        public object? DequeueAny(ref bool missedSteal)
         {
+            object? callback = null;
             GlobalQueue[] gQueues = _globalQueues;
             int startIndex = GetGlobalQueueIndex();
-
-            object? callback = null;
 
             // do a sweep of all global queues.
             for (int i = 0; i < gQueues.Length; i++)
             {
-                var localWsq = gQueues[startIndex ^ i];
-                callback = localWsq?.Dequeue();
+                var gQ = gQueues[startIndex ^ i];
+                callback = gQ?.Dequeue();
                 if (callback != null)
                 {
                     break;
@@ -1442,7 +1441,7 @@ namespace System.Threading
             {
                 LocalQueue[] queues = _localQueues;
                 startIndex = GetLocalQueueIndex();
-                //startIndex = localQueue.NextRnd() & (queues.Length - 1);
+//                startIndex = localQueue.NextRnd() & (queues.Length - 1);
 
                 // do a sweep of all local queues.
                 for (int i = 0; i < queues.Length; i++)
@@ -1553,7 +1552,7 @@ namespace System.Threading
                 {
                     // we could not pop, try stealing
                     bool missedSteal = false;
-                    workItem = workQueue.DequeueAny(ref missedSteal, localQueue);
+                    workItem = workQueue.DequeueAny(ref missedSteal);
                     if (workItem == null)
                     {
                         // if there is no more work, leave
