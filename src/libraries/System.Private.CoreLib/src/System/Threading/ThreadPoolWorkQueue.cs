@@ -1289,19 +1289,6 @@ namespace System.Threading
             return result;
         }
 
-        internal GlobalQueue GetOrAddRandomGlobalQueue()
-        {
-            var index = GetGlobalQueueIndex(GetOrAddLocalQueue().NextRnd());
-            var result = _globalQueues[index];
-
-            if (result == null)
-            {
-                result = EnsureGlobalQueue(index);
-            }
-
-            return result;
-        }
-
         [MethodImpl(MethodImplOptions.NoInlining)]
         private GlobalQueue EnsureGlobalQueue(int index)
         {
@@ -1386,14 +1373,11 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            if (forceGlobal)
+            // we could also enq to a random global Q, but I see no scenario where that is better.
+            // one enquing thread cannot cause too much contention on receiving side.
+            if (forceGlobal || !Thread.CurrentThread.IsThreadPoolThread)
             {
                 GetOrAddGlobalQueue().Enqueue(callback);
-            }
-            else if (!Thread.CurrentThread.IsThreadPoolThread)
-            {
-                GetOrAddGlobalQueue().Enqueue(callback);
-                // GetOrAddRandomGlobalQueue().Enqueue(callback);
             }
             else
             {
