@@ -150,8 +150,6 @@ namespace System.Net.Sockets
 #endif
             }
 
-            public bool IsComplete() => _state == (int)State.Complete;
-
             public OperationResult TryComplete(SocketAsyncContext context)
             {
                 TraceWithContext(context, "Enter");
@@ -667,23 +665,20 @@ namespace System.Net.Sockets
 
                 _lockObject = lockObject;
 
-                //                Debug.Assert(!Monitor.IsEntered(_lockObject));
+                Debug.Assert(!Monitor.IsEntered(_lockObject));
 
-                //#if DEBUG
-                //                bool success = Monitor.TryEnter(_lockObject, 10000);
-                //                Debug.Assert(success, "Timed out waiting for queue lock");
-                //#else
-                //                Monitor.Enter(_lockObject);
-                //#endif
-                bool taken = false;
-                Unsafe.Unbox<SpinLock>(_lockObject).Enter(ref taken);
+#if DEBUG
+                bool success = Monitor.TryEnter(_lockObject, 10000);
+                Debug.Assert(success, "Timed out waiting for queue lock");
+#else
+                Monitor.Enter(_lockObject);
+#endif
             }
 
             public void Dispose()
             {
-                //Debug.Assert(Monitor.IsEntered(_lockObject));
-                //Monitor.Exit(_lockObject);
-                Unsafe.Unbox<SpinLock>(_lockObject).Exit(useMemoryBarrier: false);
+                Debug.Assert(Monitor.IsEntered(_lockObject));
+                Monitor.Exit(_lockObject);
             }
         }
 
@@ -749,7 +744,7 @@ namespace System.Net.Sockets
             public void Init()
             {
                 Debug.Assert(_queueLock == null);
-                _queueLock = new SpinLock(enableThreadOwnerTracking: false);
+                _queueLock = new object();
 
                 _state = QueueState.Ready;
                 _sequenceNumber = 0;
@@ -961,12 +956,6 @@ namespace System.Net.Sockets
 
             internal void ProcessAsyncOperation(TOperation op)
             {
-                if (op.IsComplete())
-                {
-                    op.InvokeCallback(allowPooling: true);
-                    return;
-                }
-
                 OperationResult result = ProcessQueuedOperation(op);
 
                 Debug.Assert(op.Event == null, "Sync operation encountered in ProcessAsyncOperation");
@@ -981,15 +970,7 @@ namespace System.Net.Sockets
                     // request for a previous operation could affect a subsequent one)
                     // and here we know the operation has completed.
                     op.CancellationRegistration.Dispose();
-
-                    if (Thread.CurrentThread.IsThreadPoolThread)
-                    {
-                        op.InvokeCallback(allowPooling: true);
-                    }
-                    else
-                    {
-                        op.Schedule();
-                    }
+                    op.InvokeCallback(allowPooling: true);
                 }
             }
 
