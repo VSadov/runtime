@@ -1392,7 +1392,8 @@ namespace System.Threading
             }
             else if (!Thread.CurrentThread.IsThreadPoolThread)
             {
-                GetOrAddRandomGlobalQueue().Enqueue(callback);
+                GetOrAddGlobalQueue().Enqueue(callback);
+                // GetOrAddRandomGlobalQueue().Enqueue(callback);
             }
             else
             {
