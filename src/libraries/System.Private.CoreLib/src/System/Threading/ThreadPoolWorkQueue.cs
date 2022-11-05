@@ -1441,7 +1441,6 @@ namespace System.Threading
             {
                 LocalQueue[] queues = _localQueues;
                 startIndex = GetLocalQueueIndex();
-//                startIndex = localQueue.NextRnd() & (queues.Length - 1);
 
                 // do a sweep of all local queues.
                 for (int i = 0; i < queues.Length; i++)
