@@ -1289,6 +1289,19 @@ namespace System.Threading
             return result;
         }
 
+        internal GlobalQueue GetOrAddRandomGlobalQueue()
+        {
+            var index = GetGlobalQueueIndex(GetOrAddLocalQueue().NextRnd());
+            var result = _globalQueues[index];
+
+            if (result == null)
+            {
+                result = EnsureGlobalQueue(index);
+            }
+
+            return result;
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         private GlobalQueue EnsureGlobalQueue(int index)
         {
@@ -1373,9 +1386,13 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            if (forceGlobal || !Thread.CurrentThread.IsThreadPoolThread)
+            if (forceGlobal)
             {
                 GetOrAddGlobalQueue().Enqueue(callback);
+            }
+            else if (!Thread.CurrentThread.IsThreadPoolThread)
+            {
+                GetOrAddRandomGlobalQueue().Enqueue(callback);
             }
             else
             {
