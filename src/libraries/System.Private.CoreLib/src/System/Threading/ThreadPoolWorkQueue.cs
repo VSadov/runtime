@@ -1376,7 +1376,7 @@ namespace System.Threading
             // we could also enq to a random global Q, but I see no scenario where that is better.
             // one enquing thread cannot cause too much contention on receiving side.
             // also if posting a batch from one thread, there is more sequentuality.
-            if (forceGlobal || !Thread.CurrentThread.IsThreadPoolThread)
+            if (forceGlobal && !Thread.CurrentThread.IsThreadPoolThread)
             {
                 GetOrAddGlobalQueue().Enqueue(callback);
             }
