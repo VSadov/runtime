@@ -206,20 +206,17 @@ namespace System.Net.Sockets
             try
             {
                 SocketEventHandler handler = new SocketEventHandler(this);
-                while (true)
+                int numEvents = EventBufferCount;
+                Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, localBuffer, &numEvents, 0);
+                if (err != Interop.Error.SUCCESS)
                 {
-                    int numEvents = EventBufferCount;
-                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, localBuffer, &numEvents, 0);
-                    if (err != Interop.Error.SUCCESS)
-                    {
-                        throw new InternalException(err);
-                    }
+                    throw new InternalException(err);
+                }
 
-                    if (numEvents > 0)
-                    {
-                        ScheduleToProcessEvents();
-                        handler.HandleSocketEvents(localBuffer, numEvents);
-                    }
+                if (numEvents > 0)
+                {
+                    ScheduleToProcessEvents();
+                    handler.HandleSocketEvents(localBuffer, numEvents);
                 }
             }
             catch (Exception e)
