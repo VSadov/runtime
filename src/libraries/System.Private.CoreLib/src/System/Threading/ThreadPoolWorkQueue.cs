@@ -265,7 +265,7 @@ namespace System.Threading
                     // another item could have been added.  Try to dequeue one more time
                     // to confirm that the segment is indeed empty.
                     Debug.Assert(currentSegment._nextSegment != null);
-                    result = currentSegment.TryDequeue();
+                    result = currentSegment.TryDequeueThoroughly();
                     if (result != null)
                     {
                         return result;
@@ -333,6 +333,56 @@ namespace System.Threading
                 }
 
                 /// <summary>Tries to dequeue an element from the queue.</summary>
+                internal object? TryDequeueThoroughly()
+                {
+                    // Loop in case of contention...
+                    SpinWait spinner = default;
+
+                    for (; ; )
+                    {
+                        int position = _queueEnds.Dequeue;
+                        ref Slot slot = ref this[position];
+
+                        // Read the sequence number for the slot.
+                        // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
+                        int sequenceNumber = slot.SequenceNumber;
+
+                        // Check if the slot is considered Full in the current generation.
+                        if (sequenceNumber == position + Full)
+                        {
+                            // Attempt to acquire the slot for Dequeuing.
+                            if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
+                            {
+                                var item = slot.Item;
+                                slot.Item = null;
+
+                                // make the slot appear empty in the next generation
+                                Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
+                                return item;
+                            }
+                        }
+                        else if (sequenceNumber - position < Full)
+                        {
+                            // The sequence number was less than what we needed, which means we cannot return this item.
+                            // Check if we have reached Enqueue and return null indicating the segment is in empty state.
+                            // NB: reading stale _frozenForEnqueues is fine - we would just spin once more
+                            var currentEnqueue = Volatile.Read(ref _queueEnds.Enqueue);
+                            if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
+                            {
+                                return null;
+                            }
+
+                            // The enqueuer went ahead and took a slot, but it has not finished filling the value.
+                            // We cannot return `null` since the segment is not empty, so we must retry.
+                        }
+
+                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
+                        // We should retry with a new dequeue.
+                        spinner.SpinOnce();
+                    }
+                }
+
+                /// <summary>Tries to dequeue an element from the queue.</summary>
                 internal object? TryDequeue()
                 {
                     // Loop in case of contention...
@@ -363,19 +413,7 @@ namespace System.Threading
                         }
                         else if (sequenceNumber - position < Full)
                         {
-                            //return null;
-
-                            // The sequence number was less than what we needed, which means we cannot return this item.
-                            // Check if we have reached Enqueue and return null indicating the segment is in empty state.
-                            // NB: reading stale _frozenForEnqueues is fine - we would just spin once more
-                            var currentEnqueue = Volatile.Read(ref _queueEnds.Enqueue);
-                            if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
-                            {
-                                return null;
-                            }
-
-                            // The enqueuer went ahead and took a slot, but it has not finished filling the value.
-                            // We cannot return `null` since the segment is not empty, so we must retry.
+                            return null;
                         }
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
@@ -409,8 +447,8 @@ namespace System.Threading
                             if (Interlocked.CompareExchange(ref _queueEnds.Enqueue, position + 1, position) == position)
                             {
                                 slot.Item = item;
-                                Volatile.Write(ref slot.SequenceNumber, position + Full);
-                                //Interlocked.Exchange(ref slot.SequenceNumber, position + Full);
+                                //Volatile.Write(ref slot.SequenceNumber, position + Full);
+                                Interlocked.Exchange(ref slot.SequenceNumber, position + Full);
                                 return true;
                             }
                         }
