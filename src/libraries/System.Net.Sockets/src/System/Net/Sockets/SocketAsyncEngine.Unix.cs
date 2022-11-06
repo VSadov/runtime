@@ -181,7 +181,7 @@ namespace System.Net.Sockets
                 while (true)
                 {
                     int numEvents = EventBufferCount;
-                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, handler.Buffer, &numEvents, -1);
+                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, _buffer, &numEvents, -1);
                     if (err != Interop.Error.SUCCESS)
                     {
                         throw new InternalException(err);
@@ -190,15 +190,41 @@ namespace System.Net.Sockets
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
 
-                    if (handler.HandleSocketEvents(numEvents))
-                    {
-                        ScheduleToProcessEvents();
-                    }
+                    ScheduleToProcessEvents();
+                    handler.HandleSocketEvents(_buffer, numEvents);
                 }
             }
             catch (Exception e)
             {
                 Environment.FailFast("Exception thrown from SocketAsyncEngine event loop: " + e.ToString(), e);
+            }
+        }
+
+        private void HelpOnce()
+        {
+            var localBuffer = stackalloc Interop.Sys.SocketEvent[EventBufferCount];
+            try
+            {
+                SocketEventHandler handler = new SocketEventHandler(this);
+                while (true)
+                {
+                    int numEvents = EventBufferCount;
+                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, localBuffer, &numEvents, 0);
+                    if (err != Interop.Error.SUCCESS)
+                    {
+                        throw new InternalException(err);
+                    }
+
+                    if (numEvents > 0)
+                    {
+                        ScheduleToProcessEvents();
+                        handler.HandleSocketEvents(localBuffer, numEvents);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Environment.FailFast("Exception thrown from SocketAsyncEngine helper: " + e.ToString(), e);
             }
         }
 
@@ -221,51 +247,52 @@ namespace System.Net.Sockets
             // enqueuer queues an event and does not schedule a work item because it is already scheduled, and this thread is
             // the last thread processing events, it must see the event queued by the enqueuer.
             Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
+            HelpOnce();
 
-            ConcurrentQueue<SocketIOEvent> eventQueue = _eventQueue;
-            if (!eventQueue.TryDequeue(out SocketIOEvent ev))
-            {
-                return;
-            }
+            //ConcurrentQueue<SocketIOEvent> eventQueue = _eventQueue;
+            //if (!eventQueue.TryDequeue(out SocketIOEvent ev))
+            //{
+            //    return;
+            //}
 
-            int startTimeMs = Environment.TickCount;
+            //int startTimeMs = Environment.TickCount;
 
-            // An event was successfully dequeued, and there may be more events to process. Schedule a work item to parallelize
-            // processing of events, before processing more events. Following this, it is the responsibility of the new work
-            // item and the epoll thread to schedule more work items as necessary. The parallelization may be necessary here if
-            // the user callback as part of handling the event blocks for some reason that may have a dependency on other queued
-            // socket events.
-            ScheduleToProcessEvents();
+            //// An event was successfully dequeued, and there may be more events to process. Schedule a work item to parallelize
+            //// processing of events, before processing more events. Following this, it is the responsibility of the new work
+            //// item and the epoll thread to schedule more work items as necessary. The parallelization may be necessary here if
+            //// the user callback as part of handling the event blocks for some reason that may have a dependency on other queued
+            //// socket events.
+            //ScheduleToProcessEvents();
 
-            while (true)
-            {
-                ev.Context.HandleEvents(ev.Events);
+            //while (true)
+            //{
+            //    ev.Context.HandleEvents(ev.Events);
 
-                // If there is a constant stream of new events, and/or if user callbacks take long to process an event, this
-                // work item may run for a long time. If work items of this type are using up all of the thread pool threads,
-                // collectively they may starve other types of work items from running. Before dequeuing and processing another
-                // event, check the elapsed time since the start of the work item and yield the thread after some time has
-                // elapsed to allow the thread pool to run other work items.
-                //
-                // The threshold chosen below was based on trying various thresholds and in trying to keep the latency of
-                // running another work item low when these work items are using up all of the thread pool worker threads. In
-                // such cases, the latency would be something like threshold / proc count. Smaller thresholds were tried and
-                // using Stopwatch instead (like 1 ms, 5 ms, etc.), from quick tests they appeared to have a slightly greater
-                // impact on throughput compared to the threshold chosen below, though it is slight enough that it may not
-                // matter much. Higher thresholds didn't seem to have any noticeable effect.
-                if (Environment.TickCount - startTimeMs >= 15)
-                {
-                    break;
-                }
+            //    // If there is a constant stream of new events, and/or if user callbacks take long to process an event, this
+            //    // work item may run for a long time. If work items of this type are using up all of the thread pool threads,
+            //    // collectively they may starve other types of work items from running. Before dequeuing and processing another
+            //    // event, check the elapsed time since the start of the work item and yield the thread after some time has
+            //    // elapsed to allow the thread pool to run other work items.
+            //    //
+            //    // The threshold chosen below was based on trying various thresholds and in trying to keep the latency of
+            //    // running another work item low when these work items are using up all of the thread pool worker threads. In
+            //    // such cases, the latency would be something like threshold / proc count. Smaller thresholds were tried and
+            //    // using Stopwatch instead (like 1 ms, 5 ms, etc.), from quick tests they appeared to have a slightly greater
+            //    // impact on throughput compared to the threshold chosen below, though it is slight enough that it may not
+            //    // matter much. Higher thresholds didn't seem to have any noticeable effect.
+            //    if (Environment.TickCount - startTimeMs >= 15)
+            //    {
+            //        break;
+            //    }
 
-                if (!eventQueue.TryDequeue(out ev))
-                {
-                    return;
-                }
-            }
+            //    if (!eventQueue.TryDequeue(out ev))
+            //    {
+            //        return;
+            //    }
+            //}
 
-            // The queue was not observed to be empty, schedule another work item before yielding the thread
-            ScheduleToProcessEvents();
+            //// The queue was not observed to be empty, schedule another work item before yielding the thread
+            //ScheduleToProcessEvents();
         }
 
         private void FreeNativeResources()
@@ -287,23 +314,19 @@ namespace System.Net.Sockets
         // SocketEventHandler holds an on-stack cache of SocketAsyncEngine members needed by the handler method.
         private readonly struct SocketEventHandler
         {
-            public Interop.Sys.SocketEvent* Buffer { get; }
-
             private readonly ConcurrentDictionary<IntPtr, SocketAsyncContextWrapper> _handleToContextMap;
             private readonly ConcurrentQueue<SocketIOEvent> _eventQueue;
 
             public SocketEventHandler(SocketAsyncEngine engine)
             {
-                Buffer = engine._buffer;
                 _handleToContextMap = engine._handleToContextMap;
                 _eventQueue = engine._eventQueue;
             }
 
             [MethodImpl(MethodImplOptions.NoInlining)]
-            public bool HandleSocketEvents(int numEvents)
+            public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
             {
-                bool enqueuedEvent = false;
-                foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(Buffer, numEvents))
+                foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(buffer, numEvents))
                 {
                     if (_handleToContextMap.TryGetValue(socketEvent.Data, out SocketAsyncContextWrapper contextWrapper))
                     {
@@ -319,17 +342,15 @@ namespace System.Net.Sockets
 
                             if (events != Interop.Sys.SocketEvents.None)
                             {
-                                //context.ProcessSyncScheduleAsyncEvents(events);
-                                _eventQueue.Enqueue(new SocketIOEvent(context, events));
-                                enqueuedEvent = true;
+                                context.ProcessSyncScheduleAsyncEvents(events);
+                                //_eventQueue.Enqueue(new SocketIOEvent(context, events));
+                                //enqueuedEvent = true;
                             }
                         }
                     }
                 }
-
-                    return enqueuedEvent;
-                }
             }
+        }
 
         // struct wrapper is used in order to improve the performance of the epoll thread hot path by up to 3% of some TechEmpower benchmarks
         // the goal is to have a dedicated generic instantiation and using:
