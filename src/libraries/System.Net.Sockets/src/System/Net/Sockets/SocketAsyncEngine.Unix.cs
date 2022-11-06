@@ -220,9 +220,14 @@ namespace System.Net.Sockets
             // threads (only for EventLoop() currently) before an event is attempted to be dequeued. In particular, if an
             // enqueuer queues an event and does not schedule a work item because it is already scheduled, and this thread is
             // the last thread processing events, it must see the event queued by the enqueuer.
-            // Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
+            Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
 
             ConcurrentQueue<SocketIOEvent> eventQueue = _eventQueue;
+            if (!eventQueue.TryDequeue(out SocketIOEvent ev))
+            {
+                return;
+            }
+
             int startTimeMs = Environment.TickCount;
 
             // An event was successfully dequeued, and there may be more events to process. Schedule a work item to parallelize
@@ -230,9 +235,9 @@ namespace System.Net.Sockets
             // item and the epoll thread to schedule more work items as necessary. The parallelization may be necessary here if
             // the user callback as part of handling the event blocks for some reason that may have a dependency on other queued
             // socket events.
-            // ScheduleToProcessEvents();
+            ScheduleToProcessEvents();
 
-            while (eventQueue.TryDequeue(out SocketIOEvent ev))
+            while (true)
             {
                 ev.Context.HandleEvents(ev.Events);
 
@@ -248,20 +253,19 @@ namespace System.Net.Sockets
                 // using Stopwatch instead (like 1 ms, 5 ms, etc.), from quick tests they appeared to have a slightly greater
                 // impact on throughput compared to the threshold chosen below, though it is slight enough that it may not
                 // matter much. Higher thresholds didn't seem to have any noticeable effect.
-                if (Environment.TickCount != startTimeMs)
+                if (Environment.TickCount - startTimeMs >= 15)
                 {
                     break;
                 }
+
+                if (!eventQueue.TryDequeue(out ev))
+                {
+                    return;
+                }
             }
 
-            Interlocked.Exchange(ref _eventQueueProcessingRequested, 0);
-            if (eventQueue.TryDequeue(out SocketIOEvent ev1))
-            {
-                ev1.Context.HandleEvents(ev1.Events);
-
-                // The queue was not observed to be empty, schedule another work item before yielding the thread
-                ScheduleToProcessEvents();
-            }
+            // The queue was not observed to be empty, schedule another work item before yielding the thread
+            ScheduleToProcessEvents();
         }
 
         private void FreeNativeResources()
@@ -311,21 +315,21 @@ namespace System.Net.Sockets
                         }
                         else
                         {
-                            Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
+                            Interop.Sys.SocketEvents events = socketEvent.Events; // context.HandleSyncEventsSpeculatively(socketEvent.Events);
 
                             if (events != Interop.Sys.SocketEvents.None)
                             {
-                                context.ProcessSyncScheduleAsyncEvents(events);
-                                //_eventQueue.Enqueue(new SocketIOEvent(context, events));
-                                // enqueuedEvent = true;
+                                //context.ProcessSyncScheduleAsyncEvents(events);
+                                _eventQueue.Enqueue(new SocketIOEvent(context, events));
+                                enqueuedEvent = true;
                             }
                         }
                     }
                 }
 
-                return enqueuedEvent;
+                    return enqueuedEvent;
+                }
             }
-        }
 
         // struct wrapper is used in order to improve the performance of the epoll thread hot path by up to 3% of some TechEmpower benchmarks
         // the goal is to have a dedicated generic instantiation and using:
