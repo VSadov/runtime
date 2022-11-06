@@ -215,8 +215,9 @@ namespace System.Net.Sockets
 
                 if (numEvents > 0)
                 {
-                    ScheduleToProcessEvents();
+                    ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
                     handler.HandleSocketEvents(localBuffer, numEvents);
+                    ScheduleToProcessEvents();
                 }
             }
             catch (Exception e)
