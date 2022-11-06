@@ -181,7 +181,7 @@ namespace System.Net.Sockets
                 while (true)
                 {
                     int numEvents = EventBufferCount;
-                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, handler.Buffer, &numEvents);
+                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, handler.Buffer, &numEvents, -1);
                     if (err != Interop.Error.SUCCESS)
                     {
                         throw new InternalException(err);

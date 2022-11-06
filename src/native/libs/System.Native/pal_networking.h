@@ -407,7 +407,7 @@ PALEXPORT int32_t SystemNative_FreeSocketEventBuffer(SocketEvent* buffer);
 PALEXPORT int32_t SystemNative_TryChangeSocketEventRegistration(
     intptr_t port, intptr_t socket, int32_t currentEvents, int32_t newEvents, uintptr_t data);
 
-PALEXPORT int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count);
+PALEXPORT int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count, int32_t timeout);
 
 PALEXPORT int32_t SystemNative_PlatformSupportsDualModeIPv4PacketInfo(void);
 

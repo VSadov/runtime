@@ -2712,7 +2712,7 @@ static void ConvertEventEPollToSocketAsync(SocketEvent* sae, struct epoll_event*
     sae->Events = GetSocketEvents(events);
 }
 
-static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count)
+static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count, int32_t timeout)
 {
     assert(buffer != NULL);
     assert(count != NULL);
@@ -2720,7 +2720,7 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
 
     struct epoll_event* events = (struct epoll_event*)buffer;
     int numEvents;
-    while ((numEvents = epoll_wait(port, events, *count, -1)) < 0 && errno == EINTR);
+    while ((numEvents = epoll_wait(port, events, *count, timeout)) < 0 && errno == EINTR);
     if (numEvents == -1)
     {
         *count = 0;
@@ -2731,7 +2731,7 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
     // 0 events even if there are no file descriptors registered with the epoll fd. In
     // that case, the wait will block until a file descriptor is added and an event occurs
     // on the added file descriptor.
-    assert(numEvents != 0);
+    assert(numEvents != 0 || timeout != -1);
     assert(numEvents <= *count);
 
     if (sizeof(struct epoll_event) < sizeof(SocketEvent))
@@ -3011,7 +3011,7 @@ SystemNative_TryChangeSocketEventRegistration(intptr_t port, intptr_t socket, in
         portFd, socketFd, (SocketEvents)currentEvents, (SocketEvents)newEvents, data);
 }
 
-int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count)
+int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count, int32_t timeout)
 {
     if (buffer == NULL || count == NULL || *count < 0)
     {
@@ -3020,7 +3020,7 @@ int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int
 
     int fd = ToFileDescriptor(port);
 
-    return WaitForSocketEventsInner(fd, buffer, count);
+    return WaitForSocketEventsInner(fd, buffer, count, timeout);
 }
 
 int32_t SystemNative_PlatformSupportsDualModeIPv4PacketInfo(void)

@@ -46,6 +46,6 @@ internal static partial class Interop
         internal static partial Error TryChangeSocketEventRegistration(IntPtr port, IntPtr socket, SocketEvents currentEvents, SocketEvents newEvents, IntPtr data);
 
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_WaitForSocketEvents")]
-        internal static unsafe partial Error WaitForSocketEvents(IntPtr port, SocketEvent* buffer, int* count);
+        internal static unsafe partial Error WaitForSocketEvents(IntPtr port, SocketEvent* buffer, int* count, int timeout);
     }
 }
