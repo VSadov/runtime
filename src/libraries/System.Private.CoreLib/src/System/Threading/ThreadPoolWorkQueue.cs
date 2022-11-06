@@ -363,19 +363,19 @@ namespace System.Threading
                         }
                         else if (sequenceNumber - position < Full)
                         {
-                            return null;
+                            //return null;
 
-                            //// The sequence number was less than what we needed, which means we cannot return this item.
-                            //// Check if we have reached Enqueue and return null indicating the segment is in empty state.
-                            //// NB: reading stale _frozenForEnqueues is fine - we would just spin once more
-                            //var currentEnqueue = Volatile.Read(ref _queueEnds.Enqueue);
-                            //if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
-                            //{
-                            //    return null;
-                            //}
+                            // The sequence number was less than what we needed, which means we cannot return this item.
+                            // Check if we have reached Enqueue and return null indicating the segment is in empty state.
+                            // NB: reading stale _frozenForEnqueues is fine - we would just spin once more
+                            var currentEnqueue = Volatile.Read(ref _queueEnds.Enqueue);
+                            if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
+                            {
+                                return null;
+                            }
 
-                            //// The enqueuer went ahead and took a slot, but it has not finished filling the value.
-                            //// We cannot return `null` since the segment is not empty, so we must retry.
+                            // The enqueuer went ahead and took a slot, but it has not finished filling the value.
+                            // We cannot return `null` since the segment is not empty, so we must retry.
                         }
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
@@ -409,8 +409,8 @@ namespace System.Threading
                             if (Interlocked.CompareExchange(ref _queueEnds.Enqueue, position + 1, position) == position)
                             {
                                 slot.Item = item;
-                                //Volatile.Write(ref slot.SequenceNumber, position + Full);
-                                Interlocked.Exchange(ref slot.SequenceNumber, position + Full);
+                                Volatile.Write(ref slot.SequenceNumber, position + Full);
+                                //Interlocked.Exchange(ref slot.SequenceNumber, position + Full);
                                 return true;
                             }
                         }
@@ -1190,7 +1190,7 @@ namespace System.Threading
         private int numOutstandingThreadRequests;
         private readonly Internal.PaddingFor32 pad2;
 
-        private const int LocToGlobRatio = 1;
+        private const int LocToGlobRatio = 2;
 
         internal ThreadPoolWorkQueue()
         {
@@ -1299,7 +1299,7 @@ namespace System.Threading
 
         internal int GetGlobalQueueIndex()
         {
-            return GetLocalQueueIndex() / LocToGlobRatio;
+            return GetGlobalQueueIndex(Threading.Thread.GetCurrentProcessorId());
         }
 
         internal int GetGlobalQueueIndex(int procId)
