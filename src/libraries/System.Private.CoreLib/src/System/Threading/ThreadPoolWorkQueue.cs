@@ -1374,7 +1374,7 @@ namespace System.Threading
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
             var lQ = GetOrAddLocalQueue();
-            if (forceGlobal && !Thread.CurrentThread.IsThreadPoolThread)
+            if (forceGlobal || !Thread.CurrentThread.IsThreadPoolThread)
             {
                 GetOrAddRandomGlobalQueue(lQ).Enqueue(callback);
             }
