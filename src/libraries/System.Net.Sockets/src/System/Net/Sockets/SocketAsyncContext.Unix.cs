@@ -286,7 +286,7 @@ namespace System.Net.Sockets
                 Debug.Assert(Event == null);
 
                 // Async operation.  Process the IO on the threadpool.
-                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
+                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
             }
 
             public void Process() => ((IThreadPoolWorkItem)this).Execute();
