@@ -1276,9 +1276,9 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal GlobalQueue GetOrAddGlobalQueue()
+        internal GlobalQueue GetOrAddRandomGlobalQueue(LocalQueue lQ)
         {
-            var index = GetGlobalQueueIndex();
+            var index = GetGlobalQueueIndex(lQ.NextRnd());
             var result = _globalQueues[index];
 
             if (result == null)
@@ -1373,16 +1373,14 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            // we could also enq to a random global Q, but I see no scenario where that is better.
-            // one enquing thread cannot cause too much contention on receiving side.
-            // also if posting a batch from one thread, there is more sequentuality.
+            var lQ = GetOrAddLocalQueue();
             if (forceGlobal && !Thread.CurrentThread.IsThreadPoolThread)
             {
-                GetOrAddGlobalQueue().Enqueue(callback);
+                GetOrAddRandomGlobalQueue(lQ).Enqueue(callback);
             }
             else
             {
-                GetOrAddLocalQueue().Enqueue(callback);
+                lQ.Enqueue(callback);
             }
 
             // make sure there is at least one worker request
