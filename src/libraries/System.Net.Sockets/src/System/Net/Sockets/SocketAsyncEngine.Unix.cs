@@ -181,7 +181,7 @@ namespace System.Net.Sockets
                     handler.HandleSocketEvents(_buffer, numEvents);
 
                     // we are looking at stabilizing at fetching buffers that are 1/4 - 1/2 full.
-                    if (numEvents > EventBufferCount / 2)
+                    // if (numEvents > EventBufferCount / 2)
                     {
                         AskForHelp();
                     }
@@ -211,11 +211,12 @@ namespace System.Net.Sockets
                     handler.HandleSocketEvents(localBuffer, numEvents);
 
                     // we are looking at stabilizing at fetching buffers that are 1/4 - 1/2 full.
-                    if (numEvents > EventBufferCount / 4)
+                    // if (numEvents > EventBufferCount / 4)
                     {
                         AskForHelp();
                     }
-                    if (numEvents > EventBufferCount / 2)
+
+                    // if (numEvents > EventBufferCount / 2)
                     {
                         AskForHelp();
                     }
