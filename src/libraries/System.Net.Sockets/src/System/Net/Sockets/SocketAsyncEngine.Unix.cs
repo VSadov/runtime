@@ -190,8 +190,8 @@ namespace System.Net.Sockets
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
 
-                    ScheduleToProcessEvents();
                     handler.HandleSocketEvents(_buffer, numEvents);
+                    ScheduleToProcessEvents();
                 }
             }
             catch (Exception e)
@@ -335,7 +335,7 @@ namespace System.Net.Sockets
                         }
                         else
                         {
-                            Interop.Sys.SocketEvents events = socketEvent.Events; // context.HandleSyncEventsSpeculatively(socketEvent.Events);
+                            Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
 
                             if (events != Interop.Sys.SocketEvents.None)
                             {
