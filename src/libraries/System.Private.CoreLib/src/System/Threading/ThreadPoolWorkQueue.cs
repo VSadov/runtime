@@ -1424,7 +1424,7 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            if (forceGlobal || Thread.CurrentThread.IsThreadPoolThread)
+            if (forceGlobal || !Thread.CurrentThread.IsThreadPoolThread)
             {
                 GetOrAddGlobalQueue().Enqueue(callback);
             }
