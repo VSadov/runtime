@@ -15,7 +15,7 @@ namespace System.Net.Sockets
 #if DEBUG
             32;
 #else
-            128;
+            1024;
 #endif
 
         // Socket continuations are dispatched to the ThreadPool from the event thread.
@@ -185,6 +185,8 @@ namespace System.Net.Sockets
                     {
                         AskForHelp();
                     }
+
+                    Thread.Yield();
                 }
             }
             catch (Exception e)
