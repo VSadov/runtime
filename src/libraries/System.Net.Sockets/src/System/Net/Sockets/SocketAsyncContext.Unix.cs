@@ -289,6 +289,14 @@ namespace System.Net.Sockets
                 ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
             }
 
+            public void ScheduleLocal()
+            {
+                Debug.Assert(Event == null);
+
+                // Async operation.  Process the IO on the threadpool.
+                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
+            }
+
             public void Process() => ((IThreadPoolWorkItem)this).Execute();
 
             void IThreadPoolWorkItem.Execute()
@@ -2173,15 +2181,15 @@ namespace System.Net.Sockets
         {
             Debug.Assert((events & Interop.Sys.SocketEvents.Error) == 0);
 
-            AsyncOperation? sendOperation =
-                (events & Interop.Sys.SocketEvents.Write) != 0 ? _sendQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
-
-            sendOperation?.Schedule();
-
             AsyncOperation? receiveOperation =
                 (events & Interop.Sys.SocketEvents.Read) != 0 ? _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
 
-            receiveOperation?.Schedule();
+            receiveOperation?.ScheduleLocal();
+
+            AsyncOperation? sendOperation =
+                (events & Interop.Sys.SocketEvents.Write) != 0 ? _sendQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
+
+            sendOperation?.ScheduleLocal();
         }
 
         // Called on ThreadPool thread.
