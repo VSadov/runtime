@@ -1424,22 +1424,13 @@ namespace System.Threading
             if (_loggingEnabled)
                 System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-
-            if (forceGlobal && Thread.CurrentThread.IsThreadPoolThread)
+            if (forceGlobal || Thread.CurrentThread.IsThreadPoolThread)
             {
                 GetOrAddGlobalQueue().Enqueue(callback);
             }
             else
             {
-                var lQ = GetOrAddLocalQueue();
-                if (forceGlobal)
-                {
-                    GetOrAddRandomGlobalQueue(lQ).Enqueue(callback);
-                }
-                else
-                {
-                    lQ.Enqueue(callback);
-                }
+                GetOrAddLocalQueue().Enqueue(callback);
             }
 
             // make sure there is at least one worker request
@@ -1480,11 +1471,11 @@ namespace System.Threading
         /// </summary>
         internal const int RobThreshold = 32;
 
-        public object? DequeueAny(ref bool missedSteal)
+        public object? DequeueAny(ref bool missedSteal, LocalQueue localQueue)
         {
             object? callback = null;
             GlobalQueue[] gQueues = _globalQueues;
-            int startIndex = GetGlobalQueueIndex();
+            int startIndex = GetGlobalQueueIndex(localQueue.NextRnd());
 
             // do a sweep of all global queues.
             for (int i = 0; i < gQueues.Length; i++)
@@ -1611,7 +1602,7 @@ namespace System.Threading
                 {
                     // we could not pop, try stealing
                     bool missedSteal = false;
-                    workItem = workQueue.DequeueAny(ref missedSteal);
+                    workItem = workQueue.DequeueAny(ref missedSteal, localQueue);
                     if (workItem == null)
                     {
                         // if there is no more work, leave
