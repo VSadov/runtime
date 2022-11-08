@@ -2177,19 +2177,29 @@ namespace System.Net.Sockets
         }
 
         // Called on epoll thread.
-        public unsafe void ProcessSyncScheduleAsyncEvents(Interop.Sys.SocketEvents events)
+        public unsafe int ProcessSyncScheduleAsyncEvents(Interop.Sys.SocketEvents events)
         {
             Debug.Assert((events & Interop.Sys.SocketEvents.Error) == 0);
-
+            int scheduled = 0;
             AsyncOperation? receiveOperation =
                 (events & Interop.Sys.SocketEvents.Read) != 0 ? _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
 
-            receiveOperation?.Schedule();
+            if (receiveOperation != null)
+            {
+                scheduled++;
+                receiveOperation.Schedule();
+            }
 
             AsyncOperation? sendOperation =
                 (events & Interop.Sys.SocketEvents.Write) != 0 ? _sendQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
 
-            sendOperation?.Schedule();
+            if (sendOperation != null)
+            {
+                scheduled++;
+                sendOperation.Schedule();
+            }
+
+            return scheduled;
         }
 
         // Called on ThreadPool thread.

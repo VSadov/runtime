@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using static Interop.Sys;
 
 namespace System.Net.Sockets
 {
@@ -167,7 +168,6 @@ namespace System.Net.Sockets
         {
             try
             {
-                SocketEventHandler handler = new SocketEventHandler(this);
                 while (true)
                 {
                     int numEvents = EventBufferCount;
@@ -180,8 +180,7 @@ namespace System.Net.Sockets
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
 
-                    handler.HandleSocketEvents(_buffer, numEvents);
-                    AskForHelp();
+                    HandleSocketEvents(_buffer, numEvents);
                     _blockingPollerRelease.Wait();
                     _blockingPollerRelease.Reset();
                 }
@@ -197,7 +196,6 @@ namespace System.Net.Sockets
             var localBuffer = stackalloc Interop.Sys.SocketEvent[EventBufferCount];
             try
             {
-                SocketEventHandler handler = new SocketEventHandler(this);
                 int numEvents = EventBufferCount;
                 Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, localBuffer, &numEvents, 0);
                 if (err != Interop.Error.SUCCESS)
@@ -207,8 +205,7 @@ namespace System.Net.Sockets
 
                 if (numEvents > 0)
                 {
-                    handler.HandleSocketEvents(localBuffer, numEvents);
-                    AskForHelp();
+                    HandleSocketEvents(localBuffer, numEvents);
                 }
                 else
                 {
@@ -218,6 +215,45 @@ namespace System.Net.Sockets
             catch (Exception e)
             {
                 Environment.FailFast("Exception thrown from SocketAsyncEngine helper: " + e.ToString(), e);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
+        {
+            int scheduled = 0;
+            for (int i = 0; i < numEvents; i++)
+            {
+                var socketEvent = buffer[i];
+
+                if (_handleToContextMap.TryGetValue(socketEvent.Data, out SocketAsyncContextWrapper contextWrapper))
+                {
+                    SocketAsyncContext context = contextWrapper.Context;
+
+                    if (context.PreferInlineCompletions)
+                    {
+                        context.HandleEventsInline(socketEvent.Events);
+                    }
+                    else
+                    {
+                        Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
+
+                        if (events != Interop.Sys.SocketEvents.None)
+                        {
+                            scheduled += context.ProcessSyncScheduleAsyncEvents(events);
+                        }
+                    }
+                }
+
+                if (scheduled >= Environment.ProcessorCount)
+                {
+                    AskForHelp();
+                }
+            }
+
+            if (scheduled < Environment.ProcessorCount)
+            {
+                AskForHelp();
             }
         }
 
@@ -240,47 +276,6 @@ namespace System.Net.Sockets
             if (_port != (IntPtr)(-1))
             {
                 Interop.Sys.CloseSocketEventPort(_port);
-            }
-        }
-
-        // The JIT is allowed to arbitrarily extend the lifetime of locals, which may retain SocketAsyncContext references,
-        // indirectly preventing Socket instances to be finalized, despite being no longer referenced by user code.
-        // To avoid this, the event handling logic is delegated to a non-inlined processing method.
-        // See discussion: https://github.com/dotnet/runtime/issues/37064
-        // SocketEventHandler holds an on-stack cache of SocketAsyncEngine members needed by the handler method.
-        private readonly struct SocketEventHandler
-        {
-            private readonly ConcurrentDictionary<IntPtr, SocketAsyncContextWrapper> _handleToContextMap;
-
-            public SocketEventHandler(SocketAsyncEngine engine)
-            {
-                _handleToContextMap = engine._handleToContextMap;
-            }
-
-            [MethodImpl(MethodImplOptions.NoInlining)]
-            public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
-            {
-                foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(buffer, numEvents))
-                {
-                    if (_handleToContextMap.TryGetValue(socketEvent.Data, out SocketAsyncContextWrapper contextWrapper))
-                    {
-                        SocketAsyncContext context = contextWrapper.Context;
-
-                        if (context.PreferInlineCompletions)
-                        {
-                            context.HandleEventsInline(socketEvent.Events);
-                        }
-                        else
-                        {
-                            Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
-
-                            if (events != Interop.Sys.SocketEvents.None)
-                            {
-                                context.ProcessSyncScheduleAsyncEvents(events);
-                            }
-                        }
-                    }
-                }
             }
         }
 
