@@ -161,6 +161,8 @@ namespace System.Net.Sockets
             }
         }
 
+        private ManualResetEventSlim _blockingPollerRelease = new ManualResetEventSlim(false, 0);
+
         private void EventLoop()
         {
             try
@@ -179,14 +181,9 @@ namespace System.Net.Sockets
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
 
                     handler.HandleSocketEvents(_buffer, numEvents);
-
-                    // we are looking at stabilizing at fetching buffers that are 1/4 - 1/2 full.
-                    // if (numEvents > EventBufferCount / 2)
-                    {
-                        AskForHelp();
-                    }
-
-                    Thread.Yield();
+                    AskForHelp();
+                    _blockingPollerRelease.Wait();
+                    _blockingPollerRelease.Reset();
                 }
             }
             catch (Exception e)
@@ -211,17 +208,11 @@ namespace System.Net.Sockets
                 if (numEvents > 0)
                 {
                     handler.HandleSocketEvents(localBuffer, numEvents);
-
-                    // we are looking at stabilizing at fetching buffers that are 1/4 - 1/2 full.
-                    // if (numEvents > EventBufferCount / 4)
-                    {
-                        AskForHelp();
-                    }
-
-                    // if (numEvents > EventBufferCount / 2)
-                    //{
-                    //    AskForHelp();
-                    //}
+                    AskForHelp();
+                }
+                else
+                {
+                    _blockingPollerRelease.Set();
                 }
             }
             catch (Exception e)
@@ -230,7 +221,6 @@ namespace System.Net.Sockets
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void AskForHelp()
         {
             ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
