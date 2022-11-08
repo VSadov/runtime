@@ -261,7 +261,7 @@ namespace System.Net.Sockets
 
         private void AskForHelp()
         {
-            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
         }
 
         void IThreadPoolWorkItem.Execute()
