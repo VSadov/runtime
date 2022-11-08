@@ -2184,12 +2184,12 @@ namespace System.Net.Sockets
             AsyncOperation? receiveOperation =
                 (events & Interop.Sys.SocketEvents.Read) != 0 ? _receiveQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
 
-            receiveOperation?.ScheduleLocal();
+            receiveOperation?.Schedule();
 
             AsyncOperation? sendOperation =
                 (events & Interop.Sys.SocketEvents.Write) != 0 ? _sendQueue.ProcessSyncEventOrGetAsyncEvent(this) : null;
 
-            sendOperation?.ScheduleLocal();
+            sendOperation?.Schedule();
         }
 
         // Called on ThreadPool thread.

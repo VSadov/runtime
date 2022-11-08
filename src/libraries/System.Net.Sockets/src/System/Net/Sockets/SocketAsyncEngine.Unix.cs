@@ -219,9 +219,9 @@ namespace System.Net.Sockets
                     }
 
                     // if (numEvents > EventBufferCount / 2)
-                    {
-                        AskForHelp();
-                    }
+                    //{
+                    //    AskForHelp();
+                    //}
                 }
             }
             catch (Exception e)
