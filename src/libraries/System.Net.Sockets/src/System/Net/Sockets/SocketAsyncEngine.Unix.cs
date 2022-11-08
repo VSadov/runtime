@@ -161,7 +161,7 @@ namespace System.Net.Sockets
             }
         }
 
-        private ManualResetEventSlim _blockingPollerRelease = new ManualResetEventSlim(false, 0);
+        private ManualResetEventSlim _blockingPollerRelease = new ManualResetEventSlim(false);
 
         private void EventLoop()
         {
