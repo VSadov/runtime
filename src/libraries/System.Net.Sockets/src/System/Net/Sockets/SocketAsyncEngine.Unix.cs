@@ -221,6 +221,8 @@ namespace System.Net.Sockets
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
         {
+            AskForHelp();
+
             int scheduled = 0;
             for (int i = 0; i < numEvents; i++)
             {
@@ -245,16 +247,16 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (scheduled >= Environment.ProcessorCount)
-                {
-                    AskForHelp();
-                }
+                //if (scheduled >= Environment.ProcessorCount)
+                //{
+                //    AskForHelp();
+                //}
             }
 
-            if (scheduled < Environment.ProcessorCount)
-            {
-                AskForHelp();
-            }
+            //if (scheduled < Environment.ProcessorCount)
+            //{
+            //    AskForHelp();
+            //}
         }
 
         private void AskForHelp()
