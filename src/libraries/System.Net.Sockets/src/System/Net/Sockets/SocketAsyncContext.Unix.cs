@@ -2187,7 +2187,7 @@ namespace System.Net.Sockets
             if (receiveOperation != null)
             {
                 scheduled++;
-                receiveOperation.ScheduleLocal();
+                receiveOperation.Schedule();
             }
 
             AsyncOperation? sendOperation =
@@ -2196,7 +2196,7 @@ namespace System.Net.Sockets
             if (sendOperation != null)
             {
                 scheduled++;
-                sendOperation.ScheduleLocal();
+                sendOperation.Schedule();
             }
 
             return scheduled;

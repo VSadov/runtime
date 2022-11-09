@@ -224,6 +224,7 @@ namespace System.Net.Sockets
             AskForHelp();
 
             int scheduled = 0;
+            int schedAt = numEvents / 2;
             for (int i = 0; i < numEvents; i++)
             {
                 var socketEvent = buffer[i];
@@ -247,6 +248,11 @@ namespace System.Net.Sockets
                     }
                 }
 
+                if (i == schedAt)
+                {
+                    AskForHelp();
+                }
+
                 //if (scheduled >= Environment.ProcessorCount)
                 //{
                 //    AskForHelp();
@@ -261,7 +267,7 @@ namespace System.Net.Sockets
 
         private void AskForHelp()
         {
-            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
+            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
         }
 
         void IThreadPoolWorkItem.Execute()
