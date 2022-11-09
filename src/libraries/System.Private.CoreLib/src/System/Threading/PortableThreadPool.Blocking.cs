@@ -259,9 +259,9 @@ namespace System.Threading
         private static class BlockingConfig
         {
             public static readonly bool IsCooperativeBlockingEnabled =
-                AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.CooperativeBlocking", true);
+                AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.CooperativeBlocking", false);
             public static readonly bool IgnoreMemoryUsage =
-                AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.IgnoreMemoryUsage", false);
+                AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.IgnoreMemoryUsage", true);
 
             public static readonly short ThreadsToAddWithoutDelay;
             public static readonly short ThreadsPerDelayStep;
