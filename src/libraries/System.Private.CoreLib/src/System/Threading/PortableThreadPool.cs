@@ -341,7 +341,7 @@ namespace System.Threading
             Debug.Assert(this != null);
             NotifyWorkItemProgress();
 
-            return !WorkerThread.ShouldStopProcessingWorkNow(this);
+            return true; // !WorkerThread.ShouldStopProcessingWorkNow(this);
         }
 
         //
