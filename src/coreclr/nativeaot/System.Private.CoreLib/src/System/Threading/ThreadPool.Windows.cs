@@ -357,9 +357,9 @@ namespace System.Threading
         internal static void NotifyWorkItemProgress() => IncrementCompletedWorkItemCount();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static bool NotifyWorkItemComplete(object? threadLocalCompletionCountObject, int currentTimeMs)
+        internal static bool NotifyWorkItemComplete()
         {
-            ThreadInt64PersistentCounter.Increment(threadLocalCompletionCountObject);
+            ThreadInt64PersistentCounter.Increment(GetOrCreateThreadLocalCompletionCountObject());
             return true;
         }
 

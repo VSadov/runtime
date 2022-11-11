@@ -1661,8 +1661,7 @@ namespace System.Threading
                 // Notify the VM that we executed this workitem.  This is also our opportunity to ask whether Hill Climbing wants
                 // us to return the thread to the pool or not.
                 //
-                // TODO: VS complete item counter (does it count inlined or failed? seems like diagnoistics thing)
-                if (!ThreadPool.NotifyWorkItemComplete(null, 0))
+                if (!ThreadPool.NotifyWorkItemComplete())
                 {
                     return false;
                 }

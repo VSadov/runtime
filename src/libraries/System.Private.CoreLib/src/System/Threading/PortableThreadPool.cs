@@ -321,9 +321,9 @@ namespace System.Threading
             return threadLocalCompletionCountObject;
         }
 
-        private static void NotifyWorkItemProgress(object threadLocalCompletionCountObject, int currentTimeMs)
+        private static void NotifyWorkItemProgress(object threadLocalCompletionCountObject)
         {
-            //ThreadInt64PersistentCounter.Increment(threadLocalCompletionCountObject);
+            ThreadInt64PersistentCounter.Increment(threadLocalCompletionCountObject);
 
             //_separated.lastDequeueTime = currentTimeMs;
 
@@ -334,14 +334,13 @@ namespace System.Threading
         }
 
         internal void NotifyWorkItemProgress() =>
-            NotifyWorkItemProgress(GetOrCreateThreadLocalCompletionCountObject(), Environment.TickCount);
+            NotifyWorkItemProgress(GetOrCreateThreadLocalCompletionCountObject());
 
-        internal bool NotifyWorkItemComplete(object? threadLocalCompletionCountObject, int currentTimeMs)
+        internal bool NotifyWorkItemComplete()
         {
-            // Debug.Assert(threadLocalCompletionCountObject != null);
             Debug.Assert(this != null);
+            NotifyWorkItemProgress();
 
-            NotifyWorkItemProgress(threadLocalCompletionCountObject!, currentTimeMs);
             return !WorkerThread.ShouldStopProcessingWorkNow(this);
         }
 
