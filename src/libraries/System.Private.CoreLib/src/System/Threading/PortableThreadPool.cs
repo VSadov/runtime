@@ -26,7 +26,7 @@ namespace System.Threading
         #error Unknown platform
 #endif
 
-        private const int CpuUtilizationHigh = 95;
+        // private const int CpuUtilizationHigh = 95;
         private const int CpuUtilizationLow = 80;
 
         private static readonly short ForcedMinWorkerThreads =
@@ -71,9 +71,7 @@ namespace System.Threading
             public int gateThreadRunningState;
         }
 
-        private long _currentSampleStartTime;
         private readonly ThreadInt64PersistentCounter _completionCounter = new ThreadInt64PersistentCounter();
-        private int _threadAdjustmentIntervalMs;
 
         private short _numBlockedThreads;
         private short _numThreadsAddedDueToBlocking;
@@ -306,6 +304,7 @@ namespace System.Threading
         }
 
         public int ThreadCount => _separated.counts.VolatileRead().NumExistingThreads;
+
         public long CompletedWorkItemCount => _completionCounter.Count;
 
         public object GetOrCreateThreadLocalCompletionCountObject() =>
@@ -342,113 +341,6 @@ namespace System.Threading
             NotifyWorkItemProgress();
 
             return true; // !WorkerThread.ShouldStopProcessingWorkNow(this);
-        }
-
-        //
-        // This method must only be called if ShouldAdjustMaxWorkersActive has returned true, *and*
-        // _hillClimbingThreadAdjustmentLock is held.
-        //
-        private void AdjustMaxWorkersActive()
-        {
-            LowLevelLock threadAdjustmentLock = _threadAdjustmentLock;
-            if (!threadAdjustmentLock.TryAcquire())
-            {
-                // The lock is held by someone else, they will take care of this for us
-                return;
-            }
-
-            bool addWorker = false;
-            try
-            {
-                // Repeated checks from ShouldAdjustMaxWorkersActive() inside the lock
-                ThreadCounts counts = _separated.counts;
-                if (counts.NumProcessingWork > counts.NumThreadsGoal ||
-                    _pendingBlockingAdjustment != PendingBlockingAdjustment.None)
-                {
-                    return;
-                }
-
-                long endTime = Stopwatch.GetTimestamp();
-                double elapsedSeconds = Stopwatch.GetElapsedTime(_currentSampleStartTime, endTime).TotalSeconds;
-
-                if (elapsedSeconds * 1000 >= _threadAdjustmentIntervalMs / 2)
-                {
-                    int currentTicks = Environment.TickCount;
-                    int totalNumCompletions = (int)_completionCounter.Count;
-                    int numCompletions = totalNumCompletions - _separated.priorCompletionCount;
-
-                    short oldNumThreadsGoal = counts.NumThreadsGoal;
-                    int newNumThreadsGoal;
-                    (newNumThreadsGoal, _threadAdjustmentIntervalMs) =
-                        HillClimbing.ThreadPoolHillClimber.Update(oldNumThreadsGoal, elapsedSeconds, numCompletions);
-                    if (oldNumThreadsGoal != (short)newNumThreadsGoal)
-                    {
-                        _separated.counts.InterlockedSetNumThreadsGoal((short)newNumThreadsGoal);
-
-                        //
-                        // If we're increasing the goal, inject a thread.  If that thread finds work, it will inject
-                        // another thread, etc., until nobody finds work or we reach the new goal.
-                        //
-                        // If we're reducing the goal, whichever threads notice this first will sleep and timeout themselves.
-                        //
-                        if (newNumThreadsGoal > oldNumThreadsGoal)
-                        {
-                            addWorker = true;
-                        }
-                    }
-
-                    _separated.priorCompletionCount = totalNumCompletions;
-                    _separated.nextCompletedWorkRequestsTime = currentTicks + _threadAdjustmentIntervalMs;
-                    Volatile.Write(ref _separated.priorCompletedWorkRequestsTime, currentTicks);
-                    _currentSampleStartTime = endTime;
-                }
-            }
-            finally
-            {
-                threadAdjustmentLock.Release();
-            }
-
-            if (addWorker)
-            {
-                WorkerThread.MaybeAddWorkingWorker(this);
-            }
-        }
-
-        private bool ShouldAdjustMaxWorkersActive(int currentTimeMs)
-        {
-            if (HillClimbing.IsDisabled)
-            {
-                return false;
-            }
-
-            // We need to subtract by prior time because Environment.TickCount can wrap around, making a comparison of absolute
-            // times unreliable. Intervals are unsigned to avoid wrapping around on the subtract after enough time elapses, and
-            // this also prevents the initial elapsed interval from being negative due to the prior and next times being
-            // initialized to zero.
-            int priorTime = Volatile.Read(ref _separated.priorCompletedWorkRequestsTime);
-            uint requiredInterval = (uint)(_separated.nextCompletedWorkRequestsTime - priorTime);
-            uint elapsedInterval = (uint)(currentTimeMs - priorTime);
-            if (elapsedInterval < requiredInterval)
-            {
-                return false;
-            }
-
-            // Avoid trying to adjust the thread count goal if there are already more threads than the thread count goal.
-            // In that situation, hill climbing must have previously decided to decrease the thread count goal, so let's
-            // wait until the system responds to that change before calling into hill climbing again. This condition should
-            // be the opposite of the condition in WorkerThread.ShouldStopProcessingWorkNow that causes
-            // threads processing work to stop in response to a decreased thread count goal. The logic here is a bit
-            // different from the original CoreCLR code from which this implementation was ported because in this
-            // implementation there are no retired threads, so only the count of threads processing work is considered.
-            ThreadCounts counts = _separated.counts;
-            if (counts.NumProcessingWork > counts.NumThreadsGoal)
-            {
-                return false;
-            }
-
-            // Skip hill climbing when there is a pending blocking adjustment. Hill climbing may otherwise bypass the
-            // blocking adjustment heuristics and increase the thread count too quickly.
-            return _pendingBlockingAdjustment == PendingBlockingAdjustment.None;
         }
 
         internal void RequestWorker()

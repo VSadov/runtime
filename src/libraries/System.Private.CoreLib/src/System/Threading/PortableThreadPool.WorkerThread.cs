@@ -146,9 +146,6 @@ namespace System.Threading
                                 threadPoolInstance._separated.counts.InterlockedCompareExchange(newCounts, counts);
                             if (oldCounts == counts)
                             {
-                                HillClimbing.ThreadPoolHillClimber.ForceChange(
-                                    newNumThreadsGoal,
-                                    HillClimbing.StateOrTransition.ThreadTimedOut);
                                 if (NativeRuntimeEventSource.Log.IsEnabled())
                                 {
                                     NativeRuntimeEventSource.Log.ThreadPoolWorkerThreadStop((uint)newNumExistingThreads);

@@ -143,9 +143,6 @@ namespace System.Threading
                                         threadPoolInstance._separated.counts.InterlockedCompareExchange(newCounts, counts);
                                     if (countsBeforeUpdate == counts)
                                     {
-                                        HillClimbing.ThreadPoolHillClimber.ForceChange(
-                                            newNumThreadsGoal,
-                                            HillClimbing.StateOrTransition.Starvation);
                                         addWorker = true;
                                         break;
                                     }
