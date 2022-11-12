@@ -298,8 +298,7 @@ namespace System.Threading
 
         public void GetAvailableThreads(out int workerThreads, out int ioCompletionThreads)
         {
-            ThreadCounts counts = _separated.counts.VolatileRead();
-            workerThreads = Math.Max(0, _maxThreads - counts.NumProcessingWork);
+            workerThreads = Math.Max(0, _maxThreads - (int)SemaphoreCount);
             ioCompletionThreads = _legacy_maxIOCompletionThreads;
         }
 
@@ -350,6 +349,49 @@ namespace System.Threading
             Interlocked.Increment(ref _separated.numRequestedWorkers);
             WorkerThread.MaybeAddWorkingWorker(this);
             GateThread.EnsureRunning(this);
+        }
+
+        private const int SemaphoreSpinCountDefaultBaseline = 70;
+
+#if !TARGET_ARM64 && !TARGET_ARM && !TARGET_LOONGARCH64
+        private const int SemaphoreSpinCountDefault = SemaphoreSpinCountDefaultBaseline;
+#else
+        // On systems with ARM processors, more spin-waiting seems to be necessary to avoid perf regressions from incurring
+        // the full wait when work becomes available soon enough. This is more noticeable after reducing the number of
+        // thread requests made to the thread pool because otherwise the extra thread requests cause threads to do more
+        // busy-waiting instead and adding to contention in trying to look for work items, which is less preferable.
+        private const int SemaphoreSpinCountDefault = SemaphoreSpinCountDefaultBaseline * 4;
+#endif
+
+        /// <summary>
+        /// Semaphore for controlling how many threads are currently working.
+        /// </summary>
+        internal readonly LowLevelLifoSemaphore _semaphore =
+            new LowLevelLifoSemaphore(
+                0,
+                MaxPossibleThreadCount,
+                AppContextConfigHelper.GetInt32Config(
+                    "System.Threading.ThreadPool.UnfairSemaphoreSpinLimit",
+                    SemaphoreSpinCountDefault,
+                    false),
+                onWait: () =>
+                {
+                    if (NativeRuntimeEventSource.Log.IsEnabled())
+                    {
+                        NativeRuntimeEventSource.Log.ThreadPoolWorkerThreadWait(
+                            (uint)ThreadPoolInstance._separated.counts.VolatileRead().NumExistingThreads);
+                    }
+                });
+
+        /// <summary>
+        /// Number of threads processing work items.
+        /// </summary>
+        public uint SemaphoreCount
+        {
+            get
+            {
+                return _semaphore.Count;
+            }
         }
 
         private bool OnGen2GCCallback()

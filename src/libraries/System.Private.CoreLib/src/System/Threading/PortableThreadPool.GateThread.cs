@@ -126,9 +126,10 @@ namespace System.Threading
                                 // of the number of existing threads, is compared with the goal. There may be alternative
                                 // solutions, for now this is only to maintain consistency in behavior.
                                 ThreadCounts counts = threadPoolInstance._separated.counts;
+                                uint semCount = threadPoolInstance.SemaphoreCount;
                                 while (
-                                    counts.NumProcessingWork < threadPoolInstance._maxThreads &&
-                                    counts.NumProcessingWork >= counts.NumThreadsGoal)
+                                    semCount < threadPoolInstance._maxThreads &&
+                                    semCount >= counts.NumThreadsGoal)
                                 {
                                     if (debuggerBreakOnWorkStarvation)
                                     {
@@ -136,7 +137,7 @@ namespace System.Threading
                                     }
 
                                     ThreadCounts newCounts = counts;
-                                    short newNumThreadsGoal = (short)(counts.NumProcessingWork + 1);
+                                    short newNumThreadsGoal = (short)(semCount + 1);
                                     newCounts.NumThreadsGoal = newNumThreadsGoal;
 
                                     ThreadCounts countsBeforeUpdate =

@@ -14,7 +14,6 @@ namespace System.Threading
         private struct ThreadCounts : IEquatable<ThreadCounts>
         {
             // SOS's ThreadPool command depends on this layout
-            private const byte NumProcessingWorkShift = 0;
             private const byte NumExistingThreadsShift = 16;
             private const byte NumThreadsGoalShift = 32;
 
@@ -25,24 +24,6 @@ namespace System.Threading
             private short GetInt16Value(byte shift) => (short)(_data >> shift);
             private void SetInt16Value(short value, byte shift) =>
                 _data = (_data & ~((ulong)ushort.MaxValue << shift)) | ((ulong)(ushort)value << shift);
-
-            /// <summary>
-            /// Number of threads processing work items.
-            /// </summary>
-            public short NumProcessingWork
-            {
-                get
-                {
-                    short value = GetInt16Value(NumProcessingWorkShift);
-                    Debug.Assert(value >= 0);
-                    return value;
-                }
-                set
-                {
-                    Debug.Assert(value >= 0);
-                    SetInt16Value(Math.Max((short)0, value), NumProcessingWorkShift);
-                }
-            }
 
             /// <summary>
             /// Number of thread pool threads that currently exist.

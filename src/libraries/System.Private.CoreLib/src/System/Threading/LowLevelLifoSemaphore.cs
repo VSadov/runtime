@@ -37,6 +37,8 @@ namespace System.Threading
             Create(maximumSignalCount);
         }
 
+        public uint Count => _separated._counts.SignalCount;
+
         public bool Wait(int timeoutMs, bool spinWait)
         {
             Debug.Assert(timeoutMs >= -1);

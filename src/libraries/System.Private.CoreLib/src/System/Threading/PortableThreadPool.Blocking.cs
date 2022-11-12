@@ -223,9 +223,9 @@ namespace System.Threading
                 } while (false);
 
                 _numThreadsAddedDueToBlocking += (short)(newNumThreadsGoal - numThreadsGoal);
-                counts = _separated.counts.InterlockedSetNumThreadsGoal(newNumThreadsGoal);
+                _separated.counts.InterlockedSetNumThreadsGoal(newNumThreadsGoal);
 
-                if (counts.NumProcessingWork >= numThreadsGoal && _separated.numRequestedWorkers > 0)
+                if (SemaphoreCount >= numThreadsGoal && _separated.numRequestedWorkers > 0)
                 {
                     addWorker = true;
                 }
