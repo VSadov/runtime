@@ -23,7 +23,7 @@ namespace System.Threading
             private static void GateThreadStart()
             {
                 bool disableStarvationDetection =
-                    AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.DisableStarvationDetection", false);
+                    AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.DisableStarvationDetection", true);
                 bool debuggerBreakOnWorkStarvation =
                     AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.DebugBreakOnWorkerStarvation", false);
 
@@ -109,7 +109,6 @@ namespace System.Threading
 
                         if (!disableStarvationDetection &&
                             threadPoolInstance._pendingBlockingAdjustment == PendingBlockingAdjustment.None &&
-                            threadPoolInstance._separated.numRequestedWorkers > 0 &&
                             SufficientDelaySinceLastDequeue(threadPoolInstance))
                         {
                             bool addWorker = false;
@@ -163,7 +162,6 @@ namespace System.Threading
                         }
 
                         if (!needGateThreadForRuntime &&
-                            threadPoolInstance._separated.numRequestedWorkers <= 0 &&
                             threadPoolInstance._pendingBlockingAdjustment == PendingBlockingAdjustment.None &&
                             Interlocked.Decrement(ref threadPoolInstance._separated.gateThreadRunningState) <= GetRunningStateForNumRuns(0))
                         {

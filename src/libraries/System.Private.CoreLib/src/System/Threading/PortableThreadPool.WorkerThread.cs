@@ -40,36 +40,10 @@ namespace System.Threading
                     bool spinWait = true;
                     while (semaphore.Wait(ThreadPoolThreadTimeoutMs, spinWait))
                     {
-                        spinWait = true;
-                        while (TakeActiveRequest(threadPoolInstance))
-                        {
-                            if (!ThreadPoolWorkQueue.Dispatch())
-                            {
-                                // Don't spin-wait on the semaphore next time if the thread was actively stopped from processing work,
-                                // as it's unlikely that the worker thread count goal would be increased again so soon afterwards that
-                                // the semaphore would be released within the spin-wait window
-                                spinWait = false;
-                                break;
-                            }
-
-                            if (threadPoolInstance._separated.numRequestedWorkers <= 0)
-                            {
-                                break;
-                            }
-
-                            // In highly bursty cases with short bursts of work, especially in the portable thread pool
-                            // implementation, worker threads are being released and entering Dispatch very quickly, not finding
-                            // much work in Dispatch, and soon afterwards going back to Dispatch, causing extra thrashing on
-                            // data and some interlocked operations, and similarly when the thread pool runs out of work. Since
-                            // there is a pending request for work, introduce a slight delay before serving the next request.
-                            // The spin-wait is mainly for when the sleep is not effective due to there being no other threads
-                            // to schedule.
-                            Thread.UninterruptibleSleep0();
-                            if (!Environment.IsSingleProcessor)
-                            {
-                                Thread.SpinWait(1);
-                            }
-                        }
+                        // Don't spin-wait on the semaphore next time if the thread was asked to stop,
+                        // as it's unlikely that the worker thread count goal would be increased again so soon afterwards that
+                        // the semaphore would be released within the spin-wait window
+                        spinWait = ThreadPoolWorkQueue.Dispatch();
                     }
 
                     threadAdjustmentLock.Acquire();
@@ -120,20 +94,43 @@ namespace System.Threading
                 }
             }
 
+            internal static void EnsureWorkingWorker(PortableThreadPool threadPoolInstance)
+            {
+                if (threadPoolInstance._separated.counts.NumExistingThreads == 0)
+                {
+                    MaybeAddWorkingWorker(threadPoolInstance);
+                }
+                else
+                {
+                    if (threadPoolInstance.SemaphoreCount < 1)
+                    {
+                        threadPoolInstance._semaphore.Release(1);
+                    }
+                }
+            }
+
             internal static void MaybeAddWorkingWorker(PortableThreadPool threadPoolInstance)
             {
-                int numExistingThreads, newNumExistingThreads;
                 ThreadCounts counts = threadPoolInstance._separated.counts;
+
+                // increase concurrency level
+                if (threadPoolInstance.SemaphoreCount < counts.NumThreadsGoal)
+                {
+                    threadPoolInstance._semaphore.Release(1);
+                }
+
+                // TODO: VS maybe only if semaphore count > NumThreadsGoal  ?
+                // try adding a thread
+                int numExistingThreads, newNumExistingThreads;
                 while (true)
                 {
-                    int semCount = (short)threadPoolInstance.SemaphoreCount;
-                    if (semCount >= counts.NumThreadsGoal)
+                    numExistingThreads = counts.NumExistingThreads;
+                    if (numExistingThreads >= counts.NumThreadsGoal)
                     {
                         return;
                     }
 
-                    numExistingThreads = counts.NumExistingThreads;
-                    newNumExistingThreads = Math.Max(numExistingThreads, semCount + 1);
+                    newNumExistingThreads = numExistingThreads + 1;
 
                     ThreadCounts newCounts = counts;
                     newCounts.NumExistingThreads = (short)newNumExistingThreads;
@@ -149,13 +146,6 @@ namespace System.Threading
                 }
 
                 int toCreate = newNumExistingThreads - numExistingThreads;
-                int toRelease = 1;
-
-                if (toRelease > 0)
-                {
-                    threadPoolInstance._semaphore.Release(toRelease);
-                }
-
                 while (toCreate > 0)
                 {
                     if (TryCreateWorkerThread())
@@ -195,21 +185,6 @@ namespace System.Threading
                     return true;
                 }
 
-                return false;
-            }
-
-            private static bool TakeActiveRequest(PortableThreadPool threadPoolInstance)
-            {
-                int count = threadPoolInstance._separated.numRequestedWorkers;
-                while (count > 0)
-                {
-                    int prevCount = Interlocked.CompareExchange(ref threadPoolInstance._separated.numRequestedWorkers, count - 1, count);
-                    if (prevCount == count)
-                    {
-                        return true;
-                    }
-                    count = prevCount;
-                }
                 return false;
             }
 

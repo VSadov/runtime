@@ -72,6 +72,11 @@ namespace System.Threading
 
         public static long CompletedWorkItemCount => 0;
 
+        internal static void EnsureWorkerThread()
+        {
+            RequestWorkerThread();
+        }
+
         internal static void RequestWorkerThread()
         {
             if (_callbackQueued)

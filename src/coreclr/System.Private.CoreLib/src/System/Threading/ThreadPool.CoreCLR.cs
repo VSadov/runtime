@@ -429,6 +429,17 @@ namespace System.Threading
             return registeredWaitHandle;
         }
 
+        internal static void EnsureWorkerThread()
+        {
+            if (UsePortableThreadPool)
+            {
+                PortableThreadPool.ThreadPoolInstance.EnsureWorker();
+                return;
+            }
+
+            RequestWorkerThreadNative();
+        }
+
         internal static void RequestWorkerThread()
         {
             if (UsePortableThreadPool)

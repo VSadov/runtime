@@ -225,7 +225,7 @@ namespace System.Threading
                 _numThreadsAddedDueToBlocking += (short)(newNumThreadsGoal - numThreadsGoal);
                 _separated.counts.InterlockedSetNumThreadsGoal(newNumThreadsGoal);
 
-                if (SemaphoreCount >= numThreadsGoal && _separated.numRequestedWorkers > 0)
+                if (SemaphoreCount >= numThreadsGoal)
                 {
                     addWorker = true;
                 }
@@ -254,7 +254,7 @@ namespace System.Threading
         private static class BlockingConfig
         {
             public static readonly bool IsCooperativeBlockingEnabled =
-                AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.CooperativeBlocking", true);
+                AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.CooperativeBlocking", false);
             public static readonly bool IgnoreMemoryUsage =
                 AppContextConfigHelper.GetBooleanConfig("System.Threading.ThreadPool.Blocking.IgnoreMemoryUsage", false);
 

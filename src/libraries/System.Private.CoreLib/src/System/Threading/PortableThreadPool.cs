@@ -66,8 +66,6 @@ namespace System.Threading
             public int nextCompletedWorkRequestsTime;
 
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 4)]
-            public volatile int numRequestedWorkers;
-            [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 4 + sizeof(int))]
             public int gateThreadRunningState;
         }
 
@@ -189,10 +187,7 @@ namespace System.Threading
                 else if (_separated.counts.NumThreadsGoal < newMinThreads)
                 {
                     _separated.counts.InterlockedSetNumThreadsGoal(newMinThreads);
-                    if (_separated.numRequestedWorkers > 0)
-                    {
-                        addWorker = true;
-                    }
+                    addWorker = true;
                 }
 
                 if (NativeRuntimeEventSource.Log.IsEnabled())
@@ -342,11 +337,14 @@ namespace System.Threading
             return true; // !WorkerThread.ShouldStopProcessingWorkNow(this);
         }
 
+        internal void EnsureWorker()
+        {
+            WorkerThread.EnsureWorkingWorker(this);
+            GateThread.EnsureRunning(this);
+        }
+
         internal void RequestWorker()
         {
-            // The order of operations here is important. MaybeAddWorkingWorker() and EnsureRunning() use speculative checks to
-            // do their work and the memory barrier from the interlocked operation is necessary in this case for correctness.
-            Interlocked.Increment(ref _separated.numRequestedWorkers);
             WorkerThread.MaybeAddWorkingWorker(this);
             GateThread.EnsureRunning(this);
         }

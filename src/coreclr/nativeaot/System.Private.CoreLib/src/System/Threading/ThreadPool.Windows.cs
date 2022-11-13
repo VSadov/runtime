@@ -378,6 +378,11 @@ namespace System.Threading
             wrapper.Exit(resetThread: false);
         }
 
+        internal static void EnsureWorkerThread()
+        {
+            RequestWorkerThread();
+        }
+
         internal static unsafe void RequestWorkerThread()
         {
             if (s_work == IntPtr.Zero)

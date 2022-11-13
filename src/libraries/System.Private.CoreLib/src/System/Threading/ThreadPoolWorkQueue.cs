@@ -386,8 +386,9 @@ namespace System.Threading
                 internal object? TryDequeue()
                 {
                     // Loop in case of contention...
-                    SpinWait spinner = default;
+                    //SpinWait spinner = default;
 
+                    // TODO: VS try a few times on contention?
                     for (; ; )
                     {
                         int position = _queueEnds.Dequeue;
@@ -413,12 +414,16 @@ namespace System.Threading
                         }
                         else if (sequenceNumber - position < Full)
                         {
+                            // the item is not there yet
                             return null;
                         }
 
-                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
+                        // Or we have a stale dequeue value.
+                        // Another dequeuer was quicker than us and stole the item we were called for.
+                        return null;
+
                         // We should retry with a new dequeue.
-                        spinner.SpinOnce();
+                        // spinner.SpinOnce();
                     }
                 }
 
@@ -1225,7 +1230,7 @@ namespace System.Threading
         private bool _loggingEnabled;
 
         private readonly Internal.PaddingFor32 pad1;
-        private int numOutstandingThreadRequests;
+        private int threadRequested;
         private readonly Internal.PaddingFor32 pad2;
 
         private const int LocToGlobRatio = 2;
@@ -1360,61 +1365,26 @@ namespace System.Threading
 
         internal void RequestThread()
         {
-            //
-            // If we have not yet requested #procs threads, then request a new thread.
-            //
-            int count = numOutstandingThreadRequests;
-            while (count < Environment.ProcessorCount)
-            {
-                int prev = Interlocked.CompareExchange(ref numOutstandingThreadRequests, count + 1, count);
-                if (prev == count)
-                {
-                    ThreadPool.RequestWorkerThread();
-                    break;
-                }
+            // this works as EnsureThreadRequested too
+            threadRequested = 1;
 
-                count = prev;
-            }
+            // just request a thread. we do it only once per Dispatch, so it is ok.
+            ThreadPool.RequestWorkerThread();
         }
 
         internal void EnsureThreadRequested()
         {
-            if (numOutstandingThreadRequests == 0 &&
-                Interlocked.CompareExchange(ref numOutstandingThreadRequests, 1, 0) == 0)
+            if (threadRequested == 0 &&
+                Interlocked.CompareExchange(ref threadRequested, 1, 0) == 0)
             {
-                ThreadPool.RequestWorkerThread();
+                ThreadPool.EnsureWorkerThread();
             }
-        }
-
-        internal void KeepThread()
-        {
-            //
-            // The thread is leaving to VM, but we like the current concurrency level.
-            // Don't bother about numOutstandingThreadRequests. Just ask for a thread.
-            //
-            Interlocked.Increment(ref numOutstandingThreadRequests);
-            ThreadPool.RequestWorkerThread();
         }
 
         internal void MarkThreadRequestSatisfied()
         {
-            //
-            // One of our outstanding thread requests has been satisfied.
-            // Decrement the count so that future calls to RequestThread will succeed.
-            //
-            // CoreCLR: Note that there is a separate count in the VM which has already been decremented
-            // by the VM by the time we reach this point.
-            //
-            int count = numOutstandingThreadRequests;
-            while (count > 0)
-            {
-                int prev = Interlocked.CompareExchange(ref numOutstandingThreadRequests, count - 1, count);
-                if (prev == count)
-                {
-                    break;
-                }
-                count = prev;
-            }
+            // A thread requests has been satisfied.
+            Interlocked.CompareExchange(ref threadRequested, 0, 1);
         }
 
         public void Enqueue(object callback, bool forceGlobal)
@@ -1590,6 +1560,8 @@ namespace System.Threading
             currentThread._executionContext = null;
             currentThread._synchronizationContext = null;
 
+            int taskCount = 0;
+
             //
             // Loop until our quantum expires or there is no work.
             //
@@ -1624,7 +1596,14 @@ namespace System.Threading
 
                 // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
                 // Make sure there is a request for a thread.
-                workQueue.EnsureThreadRequested();
+                if (taskCount++ == 0)
+                {
+                    workQueue.RequestThread();
+                }
+                else
+                {
+                    workQueue.EnsureThreadRequested();
+                }
 
                 //
                 // Execute the workitem outside of any finally blocks, so that it can be aborted if needed.
@@ -1669,7 +1648,7 @@ namespace System.Threading
 
             // the quantum has expired, but we saw more work.
             // ask for a thread
-            workQueue.KeepThread();
+            workQueue.RequestThread();
             return true;
         }
 
