@@ -37,7 +37,16 @@ namespace System.Threading
             Create(maximumSignalCount);
         }
 
-        public uint Count => _separated._counts.SignalCount;
+        public int CurrentCount => (int)_separated._counts.SignalCount;
+
+        public int WaitingThreads
+        {
+            get
+            {
+                Counts c = _separated._counts;
+                return c.WaiterCount + c.SpinnerCount;
+            }
+        }
 
         public bool Wait(int timeoutMs, bool spinWait)
         {

@@ -384,11 +384,19 @@ namespace System.Threading
         /// <summary>
         /// Number of threads processing work items.
         /// </summary>
-        public uint SemaphoreCount
+        public int SemaphoreCount
         {
             get
             {
-                return _semaphore.Count;
+                return _semaphore.CurrentCount;
+            }
+        }
+
+        public int WaitingThreads
+        {
+            get
+            {
+                return _semaphore.WaitingThreads;
             }
         }
 

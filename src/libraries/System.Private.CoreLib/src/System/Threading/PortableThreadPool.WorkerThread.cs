@@ -96,16 +96,14 @@ namespace System.Threading
 
             internal static void EnsureWorkingWorker(PortableThreadPool threadPoolInstance)
             {
-                if (threadPoolInstance._separated.counts.NumExistingThreads == 0)
+                if (threadPoolInstance.WaitingThreads == 0)
                 {
-                    MaybeAddWorkingWorker(threadPoolInstance);
+                    TryAddingThread(threadPoolInstance);
                 }
-                else
+
+                if (threadPoolInstance.SemaphoreCount < 1)
                 {
-                    if (threadPoolInstance.SemaphoreCount < 1)
-                    {
-                        threadPoolInstance._semaphore.Release(1);
-                    }
+                    threadPoolInstance._semaphore.Release(1);
                 }
             }
 
@@ -121,6 +119,12 @@ namespace System.Threading
 
                 // TODO: VS maybe only if semaphore count > NumThreadsGoal  ?
                 // try adding a thread
+                TryAddingThread(threadPoolInstance);
+            }
+
+            private static void TryAddingThread(PortableThreadPool threadPoolInstance)
+            {
+                ThreadCounts counts = threadPoolInstance._separated.counts;
                 int numExistingThreads, newNumExistingThreads;
                 while (true)
                 {

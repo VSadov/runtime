@@ -125,7 +125,7 @@ namespace System.Threading
                                 // of the number of existing threads, is compared with the goal. There may be alternative
                                 // solutions, for now this is only to maintain consistency in behavior.
                                 ThreadCounts counts = threadPoolInstance._separated.counts;
-                                uint semCount = threadPoolInstance.SemaphoreCount;
+                                int semCount = threadPoolInstance.SemaphoreCount;
                                 while (
                                     semCount < threadPoolInstance._maxThreads &&
                                     semCount >= counts.NumThreadsGoal)

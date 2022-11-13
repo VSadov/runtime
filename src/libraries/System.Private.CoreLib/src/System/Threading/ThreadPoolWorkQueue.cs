@@ -386,9 +386,9 @@ namespace System.Threading
                 internal object? TryDequeue()
                 {
                     // Loop in case of contention...
-                    //SpinWait spinner = default;
+                    // SpinWait spinner = default;
 
-                    // TODO: VS try a few times on contention?
+                    // int retries = Environment.ProcessorCount;
                     for (; ; )
                     {
                         int position = _queueEnds.Dequeue;
@@ -420,10 +420,9 @@ namespace System.Threading
 
                         // Or we have a stale dequeue value.
                         // Another dequeuer was quicker than us and stole the item we were called for.
+                        // We should retry with a new dequeue a few times since we are here.
+                        // Thread.SpinWait(1);
                         return null;
-
-                        // We should retry with a new dequeue.
-                        // spinner.SpinOnce();
                     }
                 }
 
@@ -1602,7 +1601,7 @@ namespace System.Threading
                 }
                 else
                 {
-                    workQueue.EnsureThreadRequested();
+                    // workQueue.EnsureThreadRequested();
                 }
 
                 //
