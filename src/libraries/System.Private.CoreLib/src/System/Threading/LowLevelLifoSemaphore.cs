@@ -244,37 +244,33 @@ namespace System.Threading
             }
         }
 
+        [StructLayout(LayoutKind.Explicit)]
         private struct Counts : IEquatable<Counts>
         {
-            private const byte SignalCountShift = 0;
             private const byte WaiterCountShift = 32;
-            private const byte SpinnerCountShift = 48;
             private const byte CountOfWaitersSignaledToWakeShift = 56;
 
+            [FieldOffset(0)]
             private ulong _data;
 
+            [FieldOffset(0)]
+            internal uint SignalCount;
+
+            [FieldOffset(sizeof(uint))]
+            internal ushort WaiterCount;
+
+            [FieldOffset(sizeof(uint) + sizeof(ushort))]
+            internal byte SpinnerCount;
+
+            [FieldOffset(sizeof(uint) + sizeof(ushort) + sizeof(byte))]
+            internal byte CountOfWaitersSignaledToWake;
+
             private Counts(ulong data) => _data = data;
-
-            private uint GetUInt32Value(byte shift) => (uint)(_data >> shift);
-            private void SetUInt32Value(uint value, byte shift) =>
-                _data = (_data & ~((ulong)uint.MaxValue << shift)) | ((ulong)value << shift);
-            private ushort GetUInt16Value(byte shift) => (ushort)(_data >> shift);
-            private void SetUInt16Value(ushort value, byte shift) =>
-                _data = (_data & ~((ulong)ushort.MaxValue << shift)) | ((ulong)value << shift);
-            private byte GetByteValue(byte shift) => (byte)(_data >> shift);
-            private void SetByteValue(byte value, byte shift) =>
-                _data = (_data & ~((ulong)byte.MaxValue << shift)) | ((ulong)value << shift);
-
-            public uint SignalCount
-            {
-                get => GetUInt32Value(SignalCountShift);
-                set => SetUInt32Value(value, SignalCountShift);
-            }
 
             public void AddSignalCount(uint value)
             {
                 Debug.Assert(value <= uint.MaxValue - SignalCount);
-                _data += (ulong)value << SignalCountShift;
+                SignalCount += value;
             }
 
             public void IncrementSignalCount() => AddSignalCount(1);
@@ -282,25 +278,19 @@ namespace System.Threading
             public void DecrementSignalCount()
             {
                 Debug.Assert(SignalCount != 0);
-                _data -= (ulong)1 << SignalCountShift;
-            }
-
-            public ushort WaiterCount
-            {
-                get => GetUInt16Value(WaiterCountShift);
-                set => SetUInt16Value(value, WaiterCountShift);
+                SignalCount--;
             }
 
             public void IncrementWaiterCount()
             {
                 Debug.Assert(WaiterCount < ushort.MaxValue);
-                _data += (ulong)1 << WaiterCountShift;
+                WaiterCount++;
             }
 
             public void DecrementWaiterCount()
             {
                 Debug.Assert(WaiterCount != 0);
-                _data -= (ulong)1 << WaiterCountShift;
+                WaiterCount--;
             }
 
             public void InterlockedDecrementWaiterCount()
@@ -309,28 +299,16 @@ namespace System.Threading
                 Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
             }
 
-            public byte SpinnerCount
-            {
-                get => GetByteValue(SpinnerCountShift);
-                set => SetByteValue(value, SpinnerCountShift);
-            }
-
             public void IncrementSpinnerCount()
             {
                 Debug.Assert(SpinnerCount < byte.MaxValue);
-                _data += (ulong)1 << SpinnerCountShift;
+                SpinnerCount++;
             }
 
             public void DecrementSpinnerCount()
             {
                 Debug.Assert(SpinnerCount != 0);
-                _data -= (ulong)1 << SpinnerCountShift;
-            }
-
-            public byte CountOfWaitersSignaledToWake
-            {
-                get => GetByteValue(CountOfWaitersSignaledToWakeShift);
-                set => SetByteValue(value, CountOfWaitersSignaledToWakeShift);
+                SpinnerCount--;
             }
 
             public void AddUpToMaxCountOfWaitersSignaledToWake(uint value)
@@ -340,13 +318,14 @@ namespace System.Threading
                 {
                     value = availableCount;
                 }
+
                 _data += (ulong)value << CountOfWaitersSignaledToWakeShift;
             }
 
             public void DecrementCountOfWaitersSignaledToWake()
             {
                 Debug.Assert(CountOfWaitersSignaledToWake != 0);
-                _data -= (ulong)1 << CountOfWaitersSignaledToWakeShift;
+                CountOfWaitersSignaledToWake--;
             }
 
             public Counts InterlockedCompareExchange(Counts newCounts, Counts oldCounts) =>
