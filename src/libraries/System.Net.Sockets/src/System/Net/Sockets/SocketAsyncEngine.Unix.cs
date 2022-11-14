@@ -245,17 +245,9 @@ namespace System.Net.Sockets
                         }
                     }
                 }
-
-                if (scheduled == schedAt)
-                {
-                    AskForHelp();
-                }
             }
 
-            if (scheduled < schedAt)
-            {
-                AskForHelp();
-            }
+            AskForHelp();
         }
 
         private void AskForHelp()
