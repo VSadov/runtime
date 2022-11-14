@@ -386,7 +386,7 @@ namespace System.Threading
                 internal object? TryDequeue()
                 {
                     // Loop in case of contention...
-                    // SpinWait spinner = default;
+                    SpinWait spinner = default;
 
                     // int retries = Environment.ProcessorCount;
                     for (; ; )
@@ -418,11 +418,9 @@ namespace System.Threading
                             return null;
                         }
 
-                        // Or we have a stale dequeue value.
-                        // Another dequeuer was quicker than us and stole the item we were called for.
-                        // We should retry with a new dequeue a few times since we are here.
-                        // Thread.SpinWait(1);
-                        return null;
+                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
+                        // We should retry with a new dequeue. If we keep seeing contentions, other queues are likely empty.
+                        spinner.SpinOnce(-1);
                     }
                 }
 
@@ -1365,7 +1363,7 @@ namespace System.Threading
         internal void RequestThread()
         {
             // this works as EnsureThreadRequested too
-            threadRequested = 1;
+            Interlocked.Exchange(ref threadRequested, 1);
 
             // just request a thread. we do it only once per Dispatch, so it is ok.
             ThreadPool.RequestWorkerThread();
@@ -1383,7 +1381,7 @@ namespace System.Threading
         internal void MarkThreadRequestSatisfied()
         {
             // A thread requests has been satisfied.
-            Interlocked.CompareExchange(ref threadRequested, 0, 1);
+            Interlocked.Exchange(ref threadRequested, 0);
         }
 
         public void Enqueue(object callback, bool forceGlobal)
@@ -1536,7 +1534,7 @@ namespace System.Threading
 
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
 
-            bool requestSatisfied = false;
+            int snoopsLeft = workQueue.threadRequested == 0 ? 0 : 1;
 
             //
             // The clock is ticking!  We have ThreadPoolGlobals.TP_QUANTUM milliseconds to get some work done, and then
@@ -1576,14 +1574,17 @@ namespace System.Threading
                     {
                         // if there is no more work, leave
 
-                        if (!requestSatisfied)
+                        if (snoopsLeft-- >= 0)
                         {
-                            //
-                            // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
-                            // From this point on, we are responsible for requesting another thread if we stop working for any
-                            // reason and are unsure whether the queue is completely empty.
-                            workQueue.MarkThreadRequestSatisfied();
-                            requestSatisfied = true;
+                            if (snoopsLeft == 0)
+                            {
+                                // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
+                                // From this point on, we are responsible for requesting another thread if we stop working for any
+                                // reason and are unsure whether the queue is completely empty.
+                                workQueue.MarkThreadRequestSatisfied();
+                            }
+
+                            Thread.SpinWait(1);
                             goto tryAgain;
                         }
 
@@ -1610,7 +1611,7 @@ namespace System.Threading
                     workQueue.RequestThread();
 
                     // the other thread is now responsible
-                    requestSatisfied = true;
+                    snoopsLeft = 0;
                 }
                 else
                 {
