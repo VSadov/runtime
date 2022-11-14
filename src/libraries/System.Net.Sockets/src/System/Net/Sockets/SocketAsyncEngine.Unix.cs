@@ -222,7 +222,7 @@ namespace System.Net.Sockets
         public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
         {
             int scheduled = 0;
-            int schedAt = Math.Min(numEvents, Environment.ProcessorCount);
+            int schedAt = numEvents / 2;
             for (int i = 0; i < numEvents; i++)
             {
                 var socketEvent = buffer[i];
@@ -245,9 +245,12 @@ namespace System.Net.Sockets
                         }
                     }
                 }
-            }
 
-            AskForHelp();
+                if (scheduled == schedAt)
+                {
+                    AskForHelp();
+                }
+            }
         }
 
         private void AskForHelp()
