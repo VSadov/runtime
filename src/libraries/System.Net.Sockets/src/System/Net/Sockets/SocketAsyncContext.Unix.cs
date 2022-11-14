@@ -2177,7 +2177,7 @@ namespace System.Net.Sockets
         }
 
         // Called on epoll thread.
-        public unsafe int ProcessSyncScheduleAsyncEvents(Interop.Sys.SocketEvents events)
+        public unsafe int ProcessSyncScheduleAsyncEvents(Interop.Sys.SocketEvents events, bool schedLocal)
         {
             Debug.Assert((events & Interop.Sys.SocketEvents.Error) == 0);
             int scheduled = 0;
@@ -2187,7 +2187,14 @@ namespace System.Net.Sockets
             if (receiveOperation != null)
             {
                 scheduled++;
-                receiveOperation.Schedule();
+                if (schedLocal)
+                {
+                    receiveOperation.ScheduleLocal();
+                }
+                else
+                {
+                    receiveOperation.Schedule();
+                }
             }
 
             AsyncOperation? sendOperation =
@@ -2196,7 +2203,14 @@ namespace System.Net.Sockets
             if (sendOperation != null)
             {
                 scheduled++;
-                sendOperation.Schedule();
+                if (schedLocal)
+                {
+                    sendOperation.ScheduleLocal();
+                }
+                else
+                {
+                    sendOperation.Schedule();
+                }
             }
 
             return scheduled;

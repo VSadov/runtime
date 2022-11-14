@@ -221,10 +221,8 @@ namespace System.Net.Sockets
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
         {
-            AskForHelp();
-
             int scheduled = 0;
-            int schedAt = numEvents / 2;
+            int schedAt = Math.Min(numEvents - 1, Environment.ProcessorCount);
             for (int i = 0; i < numEvents; i++)
             {
                 var socketEvent = buffer[i];
@@ -243,7 +241,7 @@ namespace System.Net.Sockets
 
                         if (events != Interop.Sys.SocketEvents.None)
                         {
-                            scheduled += context.ProcessSyncScheduleAsyncEvents(events);
+                            scheduled += context.ProcessSyncScheduleAsyncEvents(events, schedLocal: false);
                         }
                     }
                 }
@@ -252,17 +250,7 @@ namespace System.Net.Sockets
                 {
                     AskForHelp();
                 }
-
-                //if (scheduled >= Environment.ProcessorCount)
-                //{
-                //    AskForHelp();
-                //}
             }
-
-            //if (scheduled < Environment.ProcessorCount)
-            //{
-            //    AskForHelp();
-            //}
         }
 
         private void AskForHelp()
