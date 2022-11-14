@@ -1536,11 +1536,7 @@ namespace System.Threading
 
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
 
-            //
-            // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
-            // From this point on, we are responsible for requesting another thread if we stop working for any
-            // reason and are unsure whether the queue is completely empty.
-            workQueue.MarkThreadRequestSatisfied();
+            bool requestSatisfied = false;
 
             //
             // The clock is ticking!  We have ThreadPoolGlobals.TP_QUANTUM milliseconds to get some work done, and then
@@ -1566,6 +1562,8 @@ namespace System.Threading
             //
             do
             {
+                tryAgain:
+
                 var localQueue = workQueue.GetOrAddLocalQueue();
                 object? workItem = localQueue.TryPop();
 
@@ -1577,6 +1575,18 @@ namespace System.Threading
                     if (workItem == null)
                     {
                         // if there is no more work, leave
+
+                        if (!requestSatisfied)
+                        {
+                            //
+                            // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
+                            // From this point on, we are responsible for requesting another thread if we stop working for any
+                            // reason and are unsure whether the queue is completely empty.
+                            workQueue.MarkThreadRequestSatisfied();
+                            requestSatisfied = true;
+                            goto tryAgain;
+                        }
+
                         if (missedSteal)
                         {
                             workQueue.EnsureThreadRequested();
@@ -1598,6 +1608,9 @@ namespace System.Threading
                 if (taskCount++ == 0)
                 {
                     workQueue.RequestThread();
+
+                    // the other thread is now responsible
+                    requestSatisfied = true;
                 }
                 else
                 {
