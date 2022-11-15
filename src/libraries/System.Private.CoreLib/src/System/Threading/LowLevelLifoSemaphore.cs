@@ -19,7 +19,7 @@ namespace System.Threading
         private readonly int _spinCount;
         private readonly Action _onWait;
 
-        private const int SpinSleep0Threshold = 10;
+        private const int SpinSleep0Threshold = 4;
 
         public LowLevelLifoSemaphore(int initialSignalCount, int maximumSignalCount, int spinCount, Action onWait)
         {
@@ -51,7 +51,6 @@ namespace System.Threading
         public bool Wait(int timeoutMs, bool spinWait)
         {
             Debug.Assert(timeoutMs >= -1);
-            spinWait = false;
 
             uint signalCount = _separated._counts.SignalCount;
             if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
@@ -94,30 +93,13 @@ namespace System.Threading
             }
 
             // Unregister as spinner, and acquire the semaphore or register as a waiter
-            // spinIndex = processorCount > 1 ? 0 : SpinSleep0Threshold;
-            while (true)
-            {
-                Counts counts = _separated._counts;
-                Counts newCounts = counts;
-                newCounts.DecrementSpinnerCount();
-                if (counts.SignalCount != 0)
-                {
-                    newCounts.DecrementSignalCount();
-                }
-                else
-                {
-                    newCounts.IncrementWaiterCount();
-                }
+            _separated._counts.InterlockedDecrementSpinnerCount();
+             signalCount = _separated._counts.SignalCount;
+            if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
+                return true;
 
-                Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                if (countsBeforeUpdate == counts)
-                {
-                    return counts.SignalCount != 0 || WaitForSignal(timeoutMs);
-                }
-
-                //LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, processorCount);
-                //spinIndex++;
-            }
+            _separated._counts.InterlockedIncrementWaiterCount();
+            return WaitForSignal(timeoutMs);
         }
 
         public void Release(int releaseCount)
@@ -268,6 +250,12 @@ namespace System.Threading
                 WaiterCount--;
             }
 
+            public void InterlockedIncrementWaiterCount()
+            {
+                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << WaiterCountShift));
+                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
+            }
+
             public void InterlockedDecrementWaiterCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)-1) << WaiterCountShift));
@@ -277,6 +265,12 @@ namespace System.Threading
             public void InterlockedIncrementSpinnerCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << SpinnerCountShift));
+                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
+            }
+
+            public void InterlockedDecrementSpinnerCount()
+            {
+                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)-1) << SpinnerCountShift));
                 Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
             }
 
