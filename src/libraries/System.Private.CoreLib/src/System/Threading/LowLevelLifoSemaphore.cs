@@ -51,7 +51,7 @@ namespace System.Threading
         public bool Wait(int timeoutMs, bool spinWait)
         {
             Debug.Assert(timeoutMs >= -1);
-
+            spinWait = false;
 
             uint signalCount = _separated._counts.SignalCount;
             if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
