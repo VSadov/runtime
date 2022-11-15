@@ -52,69 +52,31 @@ namespace System.Threading
         {
             Debug.Assert(timeoutMs >= -1);
 
+
+            uint signalCount = _separated._counts.SignalCount;
+            if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
+                return true;
+
+            _separated._counts.InterlockedIncrementSpinnerCount();
+
             int spinCount = spinWait ? _spinCount : 0;
 
             // Try to acquire the semaphore or
             // a) register as a spinner if spinCount > 0 and timeoutMs > 0
             // b) register as a waiter if there's already too many spinners or spinCount == 0 and timeoutMs > 0
             // c) bail out if timeoutMs == 0 and return false
-            Counts counts = _separated._counts;
-            while (true)
-            {
-                Debug.Assert(counts.SignalCount <= _maximumSignalCount);
-                Counts newCounts = counts;
-                if (counts.SignalCount != 0)
-                {
-                    newCounts.DecrementSignalCount();
-                }
-                else if (timeoutMs != 0)
-                {
-                    if (spinCount > 0 && newCounts.SpinnerCount < byte.MaxValue)
-                    {
-                        newCounts.IncrementSpinnerCount();
-                    }
-                    else
-                    {
-                        // Maximum number of spinners reached, register as a waiter instead
-                        newCounts.IncrementWaiterCount();
-                    }
-                }
-
-                Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                if (countsBeforeUpdate == counts)
-                {
-                    if (counts.SignalCount != 0)
-                    {
-                        return true;
-                    }
-                    if (newCounts.WaiterCount != counts.WaiterCount)
-                    {
-                        return WaitForSignal(timeoutMs);
-                    }
-                    if (timeoutMs == 0)
-                    {
-                        return false;
-                    }
-                    break;
-                }
-
-                counts = countsBeforeUpdate;
-            }
-
 #if CORECLR && TARGET_UNIX
             // The PAL's wait subsystem is slower, spin more to compensate for the more expensive wait
             spinCount *= 2;
 #endif
             int processorCount = Environment.ProcessorCount;
             int spinIndex = processorCount > 1 ? 0 : SpinSleep0Threshold;
+
             while (spinIndex < spinCount)
             {
-                LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, processorCount);
-                spinIndex++;
-
                 // Try to acquire the semaphore and unregister as a spinner
-                counts = _separated._counts;
-                while (counts.SignalCount > 0)
+                Counts counts = _separated._counts;
+                if (counts.SignalCount > 0)
                 {
                     Counts newCounts = counts;
                     newCounts.DecrementSignalCount();
@@ -125,15 +87,17 @@ namespace System.Threading
                     {
                         return true;
                     }
-
-                    counts = countsBeforeUpdate;
                 }
+
+                LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, processorCount);
+                spinIndex++;
             }
 
             // Unregister as spinner, and acquire the semaphore or register as a waiter
-            counts = _separated._counts;
+            // spinIndex = processorCount > 1 ? 0 : SpinSleep0Threshold;
             while (true)
             {
+                Counts counts = _separated._counts;
                 Counts newCounts = counts;
                 newCounts.DecrementSpinnerCount();
                 if (counts.SignalCount != 0)
@@ -151,7 +115,8 @@ namespace System.Threading
                     return counts.SignalCount != 0 || WaitForSignal(timeoutMs);
                 }
 
-                counts = countsBeforeUpdate;
+                //LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, processorCount);
+                //spinIndex++;
             }
         }
 
@@ -257,6 +222,7 @@ namespace System.Threading
         private struct Counts : IEquatable<Counts>
         {
             private const byte WaiterCountShift = 32;
+            private const byte SpinnerCountShift = 48;
             private const byte CountOfWaitersSignaledToWakeShift = 56;
 
             [FieldOffset(0)]
@@ -305,6 +271,12 @@ namespace System.Threading
             public void InterlockedDecrementWaiterCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)-1) << WaiterCountShift));
+                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
+            }
+
+            public void InterlockedIncrementSpinnerCount()
+            {
+                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << SpinnerCountShift));
                 Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
             }
 
