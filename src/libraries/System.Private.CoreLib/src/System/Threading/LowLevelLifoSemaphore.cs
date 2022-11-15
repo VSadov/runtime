@@ -121,10 +121,8 @@ namespace System.Threading
 
                 // Determine how many waiters to wake, taking into account how many spinners and waiters there are and how many waiters
                 // have previously been signaled to wake but have not yet woken
-                countOfWaitersToWake =
-                    (int)Math.Min(newCounts.SignalCount, (uint)counts.WaiterCount + counts.SpinnerCount) -
-                    counts.SpinnerCount -
-                    counts.CountOfWaitersSignaledToWake;
+                countOfWaitersToWake = (int)newCounts.SignalCount - counts.SpinnerCount - counts.CountOfWaitersSignaledToWake;
+
                 if (countOfWaitersToWake > 0)
                 {
                     // Ideally, limiting to a maximum of releaseCount would not be necessary and could be an assert instead, but since
@@ -147,6 +145,7 @@ namespace System.Threading
                     Debug.Assert(releaseCount <= _maximumSignalCount - counts.SignalCount);
                     if (countOfWaitersToWake > 0)
                         ReleaseCore(countOfWaitersToWake);
+
                     return;
                 }
 
