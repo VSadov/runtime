@@ -98,6 +98,9 @@ namespace System.Threading
             if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
                 return true;
 
+            if (timeoutMs == 0)
+                return false;
+
             _separated._counts.InterlockedIncrementWaiterCount();
             return WaitForSignal(timeoutMs);
         }
@@ -173,11 +176,7 @@ namespace System.Threading
                 {
                     Debug.Assert(counts.WaiterCount != 0);
                     Counts newCounts = counts;
-                    if (counts.SignalCount != 0)
-                    {
-                        newCounts.DecrementSignalCount();
-                        newCounts.DecrementWaiterCount();
-                    }
+                    newCounts.DecrementWaiterCount();
 
                     // This waiter has woken up and this needs to be reflected in the count of waiters signaled to wake
                     if (counts.CountOfWaitersSignaledToWake != 0)
@@ -188,15 +187,18 @@ namespace System.Threading
                     Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
                     if (countsBeforeUpdate == counts)
                     {
-                        if (counts.SignalCount != 0)
-                        {
-                            return true;
-                        }
                         break;
                     }
 
                     counts = countsBeforeUpdate;
                 }
+
+                if (Wait(timeoutMs: 0, spinWait: true))
+                {
+                    return true;
+                }
+
+                _separated._counts.InterlockedIncrementWaiterCount();
             }
         }
 
