@@ -1587,7 +1587,7 @@ namespace System.Threading
                                 workQueue.MarkThreadRequestSatisfied();
                             }
 
-                            Thread.SpinWait(1);
+                            Thread.Sleep(1);
                             goto tryAgain;
                         }
 
