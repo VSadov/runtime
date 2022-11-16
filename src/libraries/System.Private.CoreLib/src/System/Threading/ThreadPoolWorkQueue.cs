@@ -386,7 +386,7 @@ namespace System.Threading
                 internal object? TryDequeue()
                 {
                     // Loop in case of contention...
-                    SpinWait spinner = default;
+                    // SpinWait spinner = default;
 
                     // int retries = Environment.ProcessorCount;
                     for (; ; )
@@ -420,7 +420,10 @@ namespace System.Threading
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
                         // We should retry with a new dequeue. If we keep seeing contentions, other queues are likely empty.
-                        spinner.SpinOnce(-1);
+                        // spinner.SpinOnce(-1);
+
+                        // on the other hand failing here would be a feedback to reduce concurrency.
+                        return null;
                     }
                 }
 
