@@ -1577,7 +1577,7 @@ namespace System.Threading
                     {
                         // if there is no more work, leave
 
-                        if (snoopsLeft-- >= 0)
+                        if (snoopsLeft-- > 0)
                         {
                             if (snoopsLeft == 0)
                             {
