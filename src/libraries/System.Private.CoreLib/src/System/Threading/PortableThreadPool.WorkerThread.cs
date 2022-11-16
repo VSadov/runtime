@@ -117,9 +117,11 @@ namespace System.Threading
                     threadPoolInstance._semaphore.Release(1);
                 }
 
-                // TODO: VS maybe only if semaphore count > NumThreadsGoal  ?
                 // try adding a thread
-                TryAddingThread(threadPoolInstance);
+                if (threadPoolInstance.SemaphoreCount > threadPoolInstance.WaitingThreads)
+                {
+                    TryAddingThread(threadPoolInstance);
+                }
             }
 
             private static void TryAddingThread(PortableThreadPool threadPoolInstance)
