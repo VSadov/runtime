@@ -110,41 +110,42 @@ namespace System.Threading
             Debug.Assert(releaseCount > 0);
             Debug.Assert(releaseCount <= _maximumSignalCount);
 
-            int countOfWaitersToWake;
-            Counts counts = _separated._counts;
+            // Increase the signal count. The addition doesn't overflow because of the limit on the max signal count in constructor.
+            Counts counts = _separated._counts.InterlockedAddSignalCount(releaseCount);
+
             while (true)
             {
-                Counts newCounts = counts;
-
-                // Increase the signal count. The addition doesn't overflow because of the limit on the max signal count in constructor.
-                newCounts.AddSignalCount((uint)releaseCount);
-
                 // Determine how many waiters to wake, taking into account how many spinners and waiters there are and how many waiters
                 // have previously been signaled to wake but have not yet woken
-                countOfWaitersToWake = (int)newCounts.SignalCount - counts.SpinnerCount - counts.CountOfWaitersSignaledToWake;
+                int wouldWantToWake = (int)counts.SignalCount - counts.SpinnerCount - counts.CountOfWaitersSignaledToWake;
+                int canWake = counts.WaiterCount - counts.CountOfWaitersSignaledToWake;
+                int countOfWaitersToWake = Math.Min(wouldWantToWake, canWake);
 
-                if (countOfWaitersToWake > 0)
+                if (countOfWaitersToWake <= 0)
+                    return;
+
+                // Ideally, limiting to a maximum of releaseCount would not be necessary and could be an assert instead, but since
+                // WaitForSignal() does not have enough information to tell whether a woken thread was signaled, and due to the cap
+                // below, it's possible for countOfWaitersSignaledToWake to be less than the number of threads that have actually
+                // been signaled to wake.
+                if (countOfWaitersToWake > releaseCount)
                 {
-                    // Ideally, limiting to a maximum of releaseCount would not be necessary and could be an assert instead, but since
-                    // WaitForSignal() does not have enough information to tell whether a woken thread was signaled, and due to the cap
-                    // below, it's possible for countOfWaitersSignaledToWake to be less than the number of threads that have actually
-                    // been signaled to wake.
-                    if (countOfWaitersToWake > releaseCount)
-                    {
-                        countOfWaitersToWake = releaseCount;
-                    }
-
-                    // Cap countOfWaitersSignaledToWake to its max value. It's ok to ignore some woken threads in this count, it just
-                    // means some more threads will be woken next time. Typically, it won't reach the max anyway.
-                    newCounts.AddUpToMaxCountOfWaitersSignaledToWake((uint)countOfWaitersToWake);
+                    countOfWaitersToWake = releaseCount;
                 }
 
+                Counts newCounts = counts;
+
+                // Cap countOfWaitersSignaledToWake to its max value. It's ok to ignore some woken threads in this count, it just
+                // means some more threads will be woken next time. Typically, it won't reach the max anyway.
+                newCounts.AddUpToMaxCountOfWaitersSignaledToWake((uint)countOfWaitersToWake);
+
+                // must be interlocked, so that woken waiters will not exceed waiters.
                 Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+
                 if (countsBeforeUpdate == counts)
                 {
                     Debug.Assert(releaseCount <= _maximumSignalCount - counts.SignalCount);
-                    if (countOfWaitersToWake > 0)
-                        ReleaseCore(countOfWaitersToWake);
+                    ReleaseCore(countOfWaitersToWake);
 
                     return;
                 }
@@ -192,11 +193,16 @@ namespace System.Threading
                     counts = countsBeforeUpdate;
                 }
 
-                if (Wait(timeoutMs: 0, spinWait: true))
-                {
-                    return true;
-                }
+                //if (Wait(timeoutMs: 0, spinWait: true))
+                //{
+                //    return true;
+                //}
 
+                uint signalCount = _separated._counts.SignalCount;
+                if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
+                    return true;
+
+                // other threads are keeping up with the count, so this can become waiter again.
                 _separated._counts.InterlockedIncrementWaiterCount();
             }
         }
@@ -251,6 +257,13 @@ namespace System.Threading
                 WaiterCount--;
             }
 
+            public Counts InterlockedAddSignalCount(int toAdd)
+            {
+                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)toAdd)));
+                Debug.Assert(countsAfterUpdate.SignalCount != uint.MaxValue); // underflow check
+                return countsAfterUpdate;
+            }
+
             public void InterlockedIncrementWaiterCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << WaiterCountShift));
@@ -266,13 +279,13 @@ namespace System.Threading
             public void InterlockedIncrementSpinnerCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << SpinnerCountShift));
-                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
+                Debug.Assert(countsAfterUpdate.SpinnerCount != byte.MaxValue); // underflow check
             }
 
             public void InterlockedDecrementSpinnerCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)-1) << SpinnerCountShift));
-                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
+                Debug.Assert(countsAfterUpdate.SpinnerCount != byte.MaxValue); // underflow check
             }
 
             public void IncrementSpinnerCount()
