@@ -988,7 +988,7 @@ namespace System.Threading
                                 if (item == null)
                                 {
                                     // the item was removed, so we have nothing to return.
-                                    // this is not a lost race though, so must continue.
+                                    // this is not a lost race though, so must try again.
                                     continue;
                                 }
 
@@ -1381,10 +1381,10 @@ namespace System.Threading
             }
         }
 
-        internal void MarkThreadRequestSatisfied()
+        internal bool MarkThreadRequestSatisfied()
         {
             // A thread requests has been satisfied.
-            Interlocked.Exchange(ref threadRequested, 0);
+            return Interlocked.Exchange(ref threadRequested, 0) != 0;
         }
 
         public void Enqueue(object callback, bool forceGlobal)
@@ -1536,8 +1536,7 @@ namespace System.Threading
             //      work enqueued in the future.
 
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
-
-            int snoopsLeft = workQueue.threadRequested == 0 ? 0 : 1;
+            bool mustClearRequest = workQueue.threadRequested != 0;
 
             //
             // The clock is ticking!  We have ThreadPoolGlobals.TP_QUANTUM milliseconds to get some work done, and then
@@ -1547,9 +1546,6 @@ namespace System.Threading
 
             // Has the desire for logging changed since the last time we entered?
             workQueue.RefreshLoggingEnabled();
-
-            // for retries in a case of heavy contention while stealing.
-            // SpinWait spinner = default;
 
             Thread currentThread = Thread.CurrentThread;
             // Start on clean ExecutionContext and SynchronizationContext
@@ -1575,20 +1571,16 @@ namespace System.Threading
                     workItem = workQueue.DequeueAny(ref missedSteal, localQueue);
                     if (workItem == null)
                     {
-                        // if there is no more work, leave
-
-                        if (snoopsLeft-- > 0)
+                        // there was no work or we had a contention. we should leave.
+                        // check if we have a request to clear.
+                        if (mustClearRequest)
                         {
-                            if (snoopsLeft == 0)
+                            mustClearRequest = false;
+                            if (workQueue.MarkThreadRequestSatisfied())
                             {
-                                // Update our records to indicate that an outstanding request for a thread has now been fulfilled.
-                                // From this point on, we are responsible for requesting another thread if we stop working for any
-                                // reason and are unsure whether the queue is completely empty.
-                                workQueue.MarkThreadRequestSatisfied();
+                                // once we clear the request, we need to check once more to be sure
+                                goto tryAgain;
                             }
-
-                            Thread.Sleep(1);
-                            goto tryAgain;
                         }
 
                         if (missedSteal)
@@ -1596,29 +1588,25 @@ namespace System.Threading
                             workQueue.EnsureThreadRequested();
                         }
 
-                        // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
+                        // Tell the VM we're returning normally, not because we were asked us to return.
                         return true;
                     }
-
-                    // adjust spin time, in case we will need to spin again
-                    // spinner.Count = Math.Max(0, spinner.Count - 1);
                 }
 
                 if (workQueue._loggingEnabled)
                     System.Diagnostics.Tracing.FrameworkEventSource.Log.ThreadPoolDequeueWorkObject(workItem);
 
-                // We are about to execute external code, which can take a while, block or even wait on something from other tasks.
-                // Make sure there is a request for a thread.
                 if (taskCount++ == 0)
                 {
+                    // we did not clear the request before looking and more tasks may have been added since then.
+                    // just ask for another thread - to increase concurrency and to check again
                     workQueue.RequestThread();
-
-                    // the other thread is now responsible
-                    snoopsLeft = 0;
+                    // the other thread is now responsible for clearing request
+                    mustClearRequest = false;
                 }
                 else
                 {
-                    // workQueue.EnsureThreadRequested();
+                    // TODO: VS every so many items invite a thread - to keep concurrency up.
                 }
 
                 //

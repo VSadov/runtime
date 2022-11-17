@@ -19,8 +19,6 @@ namespace System.Threading
         private readonly int _spinCount;
         private readonly Action _onWait;
 
-        private const int SpinSleep0Threshold = 4;
-
         public LowLevelLifoSemaphore(int initialSignalCount, int maximumSignalCount, int spinCount, Action onWait)
         {
             Debug.Assert(initialSignalCount >= 0);
@@ -56,44 +54,40 @@ namespace System.Threading
             if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
                 return true;
 
-            _separated._counts.InterlockedIncrementSpinnerCount();
-
-            int spinCount = spinWait ? _spinCount : 0;
-
-            // Try to acquire the semaphore or
-            // a) register as a spinner if spinCount > 0 and timeoutMs > 0
-            // b) register as a waiter if there's already too many spinners or spinCount == 0 and timeoutMs > 0
-            // c) bail out if timeoutMs == 0 and return false
-#if CORECLR && TARGET_UNIX
-            // The PAL's wait subsystem is slower, spin more to compensate for the more expensive wait
-            spinCount *= 2;
-#endif
-            int processorCount = Environment.ProcessorCount;
-            int spinIndex = processorCount > 1 ? 0 : SpinSleep0Threshold;
-
-            while (spinIndex < spinCount)
+            if (spinWait && !Environment.IsSingleProcessor)
             {
-                // Try to acquire the semaphore and unregister as a spinner
-                Counts counts = _separated._counts;
-                if (counts.SignalCount > 0)
+                _separated._counts.InterlockedIncrementSpinnerCount();
+
+                // TODO: VS rationalize spin duration.
+
+                // spin for 50 usec.
+                Stopwatch sw = Stopwatch.StartNew();
+                long spinLimit = Stopwatch.Frequency / 20000;
+                do
                 {
-                    Counts newCounts = counts;
-                    newCounts.DecrementSignalCount();
-                    newCounts.DecrementSpinnerCount();
-
-                    Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                    if (countsBeforeUpdate == counts)
+                    // Try to acquire the semaphore and unregister as a spinner
+                    Counts counts = _separated._counts;
+                    if (counts.SignalCount > 0)
                     {
-                        return true;
-                    }
-                }
+                        Counts newCounts = counts;
+                        newCounts.DecrementSignalCount();
+                        newCounts.DecrementSpinnerCount();
 
-                LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, processorCount);
-                spinIndex++;
+                        Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+                        if (countsBeforeUpdate == counts)
+                        {
+                            return true;
+                        }
+                    }
+
+                    // delay a bit if have many spinners.
+                    Thread.SpinWait(counts.SpinnerCount);
+                } while (sw.ElapsedTicks < spinLimit);
+
+                // Unregister as spinner, and acquire the semaphore or register as a waiter
+                _separated._counts.InterlockedDecrementSpinnerCount();
             }
 
-            // Unregister as spinner, and acquire the semaphore or register as a waiter
-            _separated._counts.InterlockedDecrementSpinnerCount();
              signalCount = _separated._counts.SignalCount;
             if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
                 return true;
