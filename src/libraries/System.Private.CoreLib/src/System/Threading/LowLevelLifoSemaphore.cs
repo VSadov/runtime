@@ -59,7 +59,6 @@ namespace System.Threading
                 _separated._counts.InterlockedIncrementSpinnerCount();
 
                 // TODO: VS rationalize spin duration.
-
                 // spin for 50 usec.
                 Stopwatch sw = Stopwatch.StartNew();
                 long spinLimit = Stopwatch.Frequency / 20000;
@@ -78,6 +77,8 @@ namespace System.Threading
                         {
                             return true;
                         }
+
+                        counts = countsBeforeUpdate;
                     }
 
                     // delay a bit if have many spinners.
