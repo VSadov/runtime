@@ -22,6 +22,12 @@ namespace Internal
     {
     }
 
+    /// <summary>Padding structure used to minimize false sharing</summary>
+    [StructLayout(LayoutKind.Explicit, Size = PaddingHelpers.CACHE_LINE_SIZE - sizeof(long))]
+    internal struct PaddingFor64
+    {
+    }
+
     /// <summary>Padded reference to an object.</summary>
     [StructLayout(LayoutKind.Explicit, Size = PaddingHelpers.CACHE_LINE_SIZE)]
     internal struct PaddedReference

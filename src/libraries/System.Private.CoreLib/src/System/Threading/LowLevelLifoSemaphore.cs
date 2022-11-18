@@ -8,71 +8,60 @@ using System.Runtime.InteropServices;
 namespace System.Threading
 {
     /// <summary>
-    /// A LIFO semaphore.
-    /// Waits on this semaphore are uninterruptible.
+    /// A semaphore optimized for the thread pool.
     /// </summary>
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
     {
         private CacheLineSeparatedCounts _separated;
 
         private readonly int _maximumSignalCount;
-        private readonly int _spinCount;
         private readonly Action _onWait;
 
-        public LowLevelLifoSemaphore(int initialSignalCount, int maximumSignalCount, int spinCount, Action onWait)
+        public LowLevelLifoSemaphore(int initialSignalCount, int maximumSignalCount, Action onWait)
         {
             Debug.Assert(initialSignalCount >= 0);
             Debug.Assert(initialSignalCount <= maximumSignalCount);
             Debug.Assert(maximumSignalCount > 0);
-            Debug.Assert(spinCount >= 0);
 
             _separated = default;
-            _separated._counts.SignalCount = (uint)initialSignalCount;
+            _separated._sCounts.SignalCount = initialSignalCount;
             _maximumSignalCount = maximumSignalCount;
-            _spinCount = spinCount;
             _onWait = onWait;
 
             Create(maximumSignalCount);
         }
 
-        public int CurrentCount => (int)_separated._counts.SignalCount;
+        public int CurrentCount => (int)_separated._sCounts.SignalCount;
 
-        public int WaitingThreads
-        {
-            get
-            {
-                Counts c = _separated._counts;
-                return c.WaiterCount + c.SpinnerCount;
-            }
-        }
+        public int WaitingThreads =>_separated._sCounts.SpinnerCount + _separated._wCounts.WaiterCount;
 
         public bool Wait(int timeoutMs, bool spinWait)
         {
             Debug.Assert(timeoutMs >= -1);
 
-            uint signalCount = _separated._counts.SignalCount;
-            if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
+            int signalCount = _separated._sCounts.SignalCount;
+            if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._sCounts.SignalCount, signalCount - 1, signalCount) == signalCount)
                 return true;
 
             if (spinWait && !Environment.IsSingleProcessor)
             {
-                _separated._counts.InterlockedIncrementSpinnerCount();
+                Interlocked.Increment(ref _separated._sCounts.SpinnerCount);
 
-                // assuming process dispatch time to be in the order of 25-100 usec
-                // we will spin for 50+ usec before blocking the thread - in case a thread is needed soon
+                // assuming process dispatch time to be in the order of 10-100 usec
+                // we will spin for 20+ usec before blocking the thread - in case a thread is needed soon
                 Stopwatch sw = Stopwatch.StartNew();
-                long spinLimit = Stopwatch.Frequency / 20000;
+                long spinLimit = Stopwatch.Frequency / 50000;
                 do
                 {
                     // Try to acquire the semaphore and unregister as a spinner
-                    Counts counts = _separated._counts;
+                    SignalSpinnerCounts counts = _separated._sCounts;
                     if (counts.SignalCount > 0)
                     {
-                        Counts newCounts = counts;
-                        newCounts.DecrementSignalCount();
-                        newCounts.DecrementSpinnerCount();
+                        SignalSpinnerCounts newCounts = counts;
+                        newCounts.SignalCount--;
+                        newCounts.SpinnerCount--;
 
-                        Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+                        SignalSpinnerCounts countsBeforeUpdate = _separated._sCounts.InterlockedCompareExchange(newCounts, counts);
                         if (countsBeforeUpdate == counts)
                         {
                             return true;
@@ -86,17 +75,17 @@ namespace System.Threading
                 } while (sw.ElapsedTicks < spinLimit);
 
                 // Unregister as spinner, and acquire the semaphore or register as a waiter
-                _separated._counts.InterlockedDecrementSpinnerCount();
+                Interlocked.Decrement(ref _separated._sCounts.SpinnerCount);
             }
 
-             signalCount = _separated._counts.SignalCount;
-            if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
+            signalCount = _separated._sCounts.SignalCount;
+            if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._sCounts.SignalCount, signalCount - 1, signalCount) == signalCount)
                 return true;
 
             if (timeoutMs == 0)
                 return false;
 
-            _separated._counts.InterlockedIncrementWaiterCount();
+            Interlocked.Increment(ref _separated._wCounts.WaiterCount);
             return WaitForSignal(timeoutMs);
         }
 
@@ -106,46 +95,32 @@ namespace System.Threading
             Debug.Assert(releaseCount <= _maximumSignalCount);
 
             // Increase the signal count. The addition doesn't overflow because of the limit on the max signal count in constructor.
-            Counts counts = _separated._counts.InterlockedAddSignalCount(releaseCount);
+            SignalSpinnerCounts sCounts = _separated._sCounts.InterlockedAddSignalCount(releaseCount);
 
             while (true)
             {
                 // Determine how many waiters to wake, taking into account how many spinners and waiters there are and how many waiters
                 // have previously been signaled to wake but have not yet woken
-                int wouldWantToWake = (int)counts.SignalCount - counts.SpinnerCount - counts.CountOfWaitersSignaledToWake;
-                int canWake = counts.WaiterCount - counts.CountOfWaitersSignaledToWake;
+                WaiterCounts wCounts = _separated._wCounts;
+                int wouldWantToWake = (int)sCounts.SignalCount - sCounts.SpinnerCount - wCounts.CountOfWaitersSignaledToWake;
+                int canWake = wCounts.WaiterCount - wCounts.CountOfWaitersSignaledToWake;
                 int countOfWaitersToWake = Math.Min(wouldWantToWake, canWake);
 
                 if (countOfWaitersToWake <= 0)
                     return;
 
-                // Ideally, limiting to a maximum of releaseCount would not be necessary and could be an assert instead, but since
-                // WaitForSignal() does not have enough information to tell whether a woken thread was signaled, and due to the cap
-                // below, it's possible for countOfWaitersSignaledToWake to be less than the number of threads that have actually
-                // been signaled to wake.
-                if (countOfWaitersToWake > releaseCount)
-                {
-                    countOfWaitersToWake = releaseCount;
-                }
-
-                Counts newCounts = counts;
-
-                // Cap countOfWaitersSignaledToWake to its max value. It's ok to ignore some woken threads in this count, it just
-                // means some more threads will be woken next time. Typically, it won't reach the max anyway.
-                newCounts.AddUpToMaxCountOfWaitersSignaledToWake((uint)countOfWaitersToWake);
+                WaiterCounts newCounts = wCounts;
+                newCounts.CountOfWaitersSignaledToWake += countOfWaitersToWake;
 
                 // must be interlocked, so that woken waiters will not exceed waiters.
-                Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+                WaiterCounts countsBeforeUpdate = _separated._wCounts.InterlockedCompareExchange(newCounts, wCounts);
 
-                if (countsBeforeUpdate == counts)
+                if (countsBeforeUpdate == wCounts)
                 {
-                    Debug.Assert(releaseCount <= _maximumSignalCount - counts.SignalCount);
+                    Debug.Assert(releaseCount <= _maximumSignalCount - sCounts.SignalCount);
                     ReleaseCore(countOfWaitersToWake);
-
                     return;
                 }
-
-                counts = countsBeforeUpdate;
             }
         }
 
@@ -161,169 +136,99 @@ namespace System.Threading
                 {
                     // Unregister the waiter. The wait subsystem used above guarantees that a thread that wakes due to a timeout does
                     // not observe a signal to the object being waited upon.
-                    _separated._counts.InterlockedDecrementWaiterCount();
+                    Interlocked.Decrement(ref _separated._wCounts.WaiterCount);
                     return false;
                 }
 
                 // Unregister the waiter if this thread will not be waiting anymore, and try to acquire the semaphore
-                Counts counts = _separated._counts;
                 while (true)
                 {
-                    Debug.Assert(counts.WaiterCount != 0);
-                    Counts newCounts = counts;
-                    newCounts.DecrementWaiterCount();
+                    WaiterCounts wCounts = _separated._wCounts;
+                    Debug.Assert(wCounts.WaiterCount != 0);
+                    Debug.Assert(wCounts.CountOfWaitersSignaledToWake != 0);
 
-                    // This waiter has woken up and this needs to be reflected in the count of waiters signaled to wake
-                    if (counts.CountOfWaitersSignaledToWake != 0)
-                    {
-                        newCounts.DecrementCountOfWaitersSignaledToWake();
-                    }
+                    WaiterCounts newCounts = wCounts;
+                    newCounts.WaiterCount--;
+                    newCounts.CountOfWaitersSignaledToWake--;
 
-                    Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                    if (countsBeforeUpdate == counts)
+                    WaiterCounts countsBeforeUpdate = _separated._wCounts.InterlockedCompareExchange(newCounts, wCounts);
+                    if (countsBeforeUpdate == wCounts)
                     {
                         break;
                     }
-
-                    counts = countsBeforeUpdate;
                 }
 
-                uint signalCount = _separated._counts.SignalCount;
-                if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
+                int signalCount = _separated._sCounts.SignalCount;
+                if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._sCounts.SignalCount, signalCount - 1, signalCount) == signalCount)
                     return true;
 
-                // other threads are keeping up with the count, so this can become waiter again.
-                _separated._counts.InterlockedIncrementWaiterCount();
+                // other threads are keeping up with releases, so this can become a waiter again.
+                Interlocked.Increment(ref _separated._wCounts.WaiterCount);
             }
         }
 
         [StructLayout(LayoutKind.Explicit)]
-        private struct Counts : IEquatable<Counts>
+        private struct SignalSpinnerCounts : IEquatable<SignalSpinnerCounts>
         {
-            private const byte WaiterCountShift = 32;
-            private const byte SpinnerCountShift = 48;
-            private const byte CountOfWaitersSignaledToWakeShift = 56;
+            [FieldOffset(0)]
+            private long _data;
 
             [FieldOffset(0)]
-            private ulong _data;
+            internal int SignalCount;
+
+            [FieldOffset(sizeof(int))]
+            internal int SpinnerCount;
+
+            private SignalSpinnerCounts(long data) => _data = data;
+
+            public SignalSpinnerCounts InterlockedAddSignalCount(int toAdd)
+            {
+                return new SignalSpinnerCounts(Interlocked.Add(ref _data, toAdd));
+            }
+
+            public SignalSpinnerCounts InterlockedCompareExchange(SignalSpinnerCounts newCounts, SignalSpinnerCounts oldCounts) =>
+                new SignalSpinnerCounts(Interlocked.CompareExchange(ref _data, newCounts._data, oldCounts._data));
+
+            public static bool operator ==(SignalSpinnerCounts lhs, SignalSpinnerCounts rhs) => lhs.Equals(rhs);
+            public static bool operator !=(SignalSpinnerCounts lhs, SignalSpinnerCounts rhs) => !lhs.Equals(rhs);
+
+            public override bool Equals([NotNullWhen(true)] object? obj) => obj is SignalSpinnerCounts other && Equals(other);
+            public bool Equals(SignalSpinnerCounts other) => _data == other._data;
+            public override int GetHashCode() => _data.GetHashCode();
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct WaiterCounts : IEquatable<WaiterCounts>
+        {
+            [FieldOffset(0)]
+            private long _data;
 
             [FieldOffset(0)]
-            internal uint SignalCount;
+            internal int WaiterCount;
 
-            [FieldOffset(sizeof(uint))]
-            internal ushort WaiterCount;
+            [FieldOffset(sizeof(int))]
+            internal int CountOfWaitersSignaledToWake;
 
-            [FieldOffset(sizeof(uint) + sizeof(ushort))]
-            internal byte SpinnerCount;
+            private WaiterCounts(long data) => _data = data;
 
-            [FieldOffset(sizeof(uint) + sizeof(ushort) + sizeof(byte))]
-            internal byte CountOfWaitersSignaledToWake;
+            public WaiterCounts InterlockedCompareExchange(WaiterCounts newCounts, WaiterCounts oldCounts) =>
+                new WaiterCounts(Interlocked.CompareExchange(ref _data, newCounts._data, oldCounts._data));
 
-            private Counts(ulong data) => _data = data;
+            public static bool operator ==(WaiterCounts lhs, WaiterCounts rhs) => lhs.Equals(rhs);
+            public static bool operator !=(WaiterCounts lhs, WaiterCounts rhs) => !lhs.Equals(rhs);
 
-            public void AddSignalCount(uint value)
-            {
-                Debug.Assert(value <= uint.MaxValue - SignalCount);
-                SignalCount += value;
-            }
-
-            public void IncrementSignalCount() => AddSignalCount(1);
-
-            public void DecrementSignalCount()
-            {
-                Debug.Assert(SignalCount != 0);
-                SignalCount--;
-            }
-
-            public void IncrementWaiterCount()
-            {
-                Debug.Assert(WaiterCount < ushort.MaxValue);
-                WaiterCount++;
-            }
-
-            public void DecrementWaiterCount()
-            {
-                Debug.Assert(WaiterCount != 0);
-                WaiterCount--;
-            }
-
-            public Counts InterlockedAddSignalCount(int toAdd)
-            {
-                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)toAdd)));
-                Debug.Assert(countsAfterUpdate.SignalCount != uint.MaxValue); // underflow check
-                return countsAfterUpdate;
-            }
-
-            public void InterlockedIncrementWaiterCount()
-            {
-                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << WaiterCountShift));
-                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
-            }
-
-            public void InterlockedDecrementWaiterCount()
-            {
-                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)-1) << WaiterCountShift));
-                Debug.Assert(countsAfterUpdate.WaiterCount != ushort.MaxValue); // underflow check
-            }
-
-            public void InterlockedIncrementSpinnerCount()
-            {
-                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)1) << SpinnerCountShift));
-                Debug.Assert(countsAfterUpdate.SpinnerCount != byte.MaxValue); // underflow check
-            }
-
-            public void InterlockedDecrementSpinnerCount()
-            {
-                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, unchecked((ulong)-1) << SpinnerCountShift));
-                Debug.Assert(countsAfterUpdate.SpinnerCount != byte.MaxValue); // underflow check
-            }
-
-            public void IncrementSpinnerCount()
-            {
-                Debug.Assert(SpinnerCount < byte.MaxValue);
-                SpinnerCount++;
-            }
-
-            public void DecrementSpinnerCount()
-            {
-                Debug.Assert(SpinnerCount != 0);
-                SpinnerCount--;
-            }
-
-            public void AddUpToMaxCountOfWaitersSignaledToWake(uint value)
-            {
-                uint availableCount = (uint)(byte.MaxValue - CountOfWaitersSignaledToWake);
-                if (value > availableCount)
-                {
-                    value = availableCount;
-                }
-
-                _data += (ulong)value << CountOfWaitersSignaledToWakeShift;
-            }
-
-            public void DecrementCountOfWaitersSignaledToWake()
-            {
-                Debug.Assert(CountOfWaitersSignaledToWake != 0);
-                CountOfWaitersSignaledToWake--;
-            }
-
-            public Counts InterlockedCompareExchange(Counts newCounts, Counts oldCounts) =>
-                new Counts(Interlocked.CompareExchange(ref _data, newCounts._data, oldCounts._data));
-
-            public static bool operator ==(Counts lhs, Counts rhs) => lhs.Equals(rhs);
-            public static bool operator !=(Counts lhs, Counts rhs) => !lhs.Equals(rhs);
-
-            public override bool Equals([NotNullWhen(true)] object? obj) => obj is Counts other && Equals(other);
-            public bool Equals(Counts other) => _data == other._data;
-            public override int GetHashCode() => (int)_data + (int)(_data >> 32);
+            public override bool Equals([NotNullWhen(true)] object? obj) => obj is WaiterCounts other && Equals(other);
+            public bool Equals(WaiterCounts other) => _data == other._data;
+            public override int GetHashCode() => _data.GetHashCode();
         }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct CacheLineSeparatedCounts
         {
-            private readonly Internal.PaddingFor32 _pad1;
-            public Counts _counts;
-            private readonly Internal.PaddingFor32 _pad2;
+            private readonly Internal.PaddingFor64 _pad0;
+            public SignalSpinnerCounts _sCounts;
+            private readonly Internal.PaddingFor64 _pad1;
+            public WaiterCounts _wCounts;
         }
     }
 }
