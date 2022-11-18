@@ -94,7 +94,7 @@ namespace System.Threading
             Debug.Assert(releaseCount > 0);
             Debug.Assert(releaseCount <= _maximumSignalCount);
 
-            // Increase the signal count. The addition doesn't overflow because of the limit on the max signal count in constructor.
+            // Increase the signal count.
             SignalSpinnerCounts sCounts = _separated._sCounts.InterlockedAddSignalCount(releaseCount);
 
             while (true)
@@ -113,7 +113,7 @@ namespace System.Threading
                 newCounts.CountOfWaitersSignaledToWake += countOfWaitersToWake;
 
                 // use interlocked to avoid signaling more waiters than exists.
-                // oversubscription still can happen if waiters exit on timeout befoe we wake them, but that is rare.
+                // oversubscription still can happen if waiters exit on timeout before we wake them, but that is rare.
                 WaiterCounts countsBeforeUpdate = _separated._wCounts.InterlockedCompareExchange(newCounts, wCounts);
 
                 if (countsBeforeUpdate == wCounts)
