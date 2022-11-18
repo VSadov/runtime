@@ -34,7 +34,7 @@ namespace System.Threading
 
         public int CurrentCount => (int)_separated._counts.SignalCount;
 
-        public int WaitingThreads => _separated._counts.SpinnerCount + _separated._counts.WaiterCount;
+        public int WaitingThreads => _separated._counts.WaitersAndSpinnersCount;
 
         public bool Wait(int timeoutMs, bool spinWait)
         {
@@ -323,6 +323,16 @@ namespace System.Threading
                 Debug.Assert(CountOfWaitersSignaledToWake != 0);
                 CountOfWaitersSignaledToWake--;
             }
+
+            public int WaitersAndSpinnersCount
+            {
+                get
+                {
+                    Counts counts = new Counts(this._data);
+                    return counts.WaiterCount + counts.SpinnerCount;
+                }
+            }
+
 
             public Counts InterlockedCompareExchange(Counts newCounts, Counts oldCounts) =>
                 new Counts(Interlocked.CompareExchange(ref _data, newCounts._data, oldCounts._data));
