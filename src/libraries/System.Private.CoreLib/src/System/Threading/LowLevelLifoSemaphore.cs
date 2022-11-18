@@ -58,8 +58,8 @@ namespace System.Threading
             {
                 _separated._counts.InterlockedIncrementSpinnerCount();
 
-                // TODO: VS rationalize spin duration.
-                // spin for 50 usec.
+                // assuming process dispatch time to be in the order of 25-100 usec
+                // we will spin for 50+ usec before blocking the thread - in case a thread is needed soon
                 Stopwatch sw = Stopwatch.StartNew();
                 long spinLimit = Stopwatch.Frequency / 20000;
                 do
