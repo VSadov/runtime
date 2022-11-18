@@ -81,7 +81,7 @@ namespace System.Threading
                         counts = countsBeforeUpdate;
                     }
 
-                    // delay a bit if have many spinners.
+                    // chill out a bit between attempts if have many spinners.
                     Thread.SpinWait(counts.SpinnerCount);
                 } while (sw.ElapsedTicks < spinLimit);
 
@@ -187,11 +187,6 @@ namespace System.Threading
 
                     counts = countsBeforeUpdate;
                 }
-
-                //if (Wait(timeoutMs: 0, spinWait: true))
-                //{
-                //    return true;
-                //}
 
                 uint signalCount = _separated._counts.SignalCount;
                 if (signalCount != 0 && Interlocked.CompareExchange(ref _separated._counts.SignalCount, signalCount - 1, signalCount) == signalCount)
