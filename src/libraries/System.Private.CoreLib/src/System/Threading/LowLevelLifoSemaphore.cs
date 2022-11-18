@@ -121,6 +121,8 @@ namespace System.Threading
                     ReleaseCore(countOfWaitersToWake);
                     return;
                 }
+
+                sCounts = _separated._sCounts;
             }
         }
 
