@@ -31,7 +31,7 @@ namespace System.Threading
             Create(maximumSignalCount);
         }
 
-        public int CurrentCount => (int)_separated._sCounts.SignalCount;
+        public int CurrentCount => _separated._sCounts.SignalCount;
 
         public int WaitingThreads =>_separated._sCounts.SpinnerCount + _separated._wCounts.WaiterCount;
 
@@ -102,7 +102,7 @@ namespace System.Threading
                 // Determine how many waiters to wake, taking into account how many spinners and waiters there are and how many waiters
                 // have previously been signaled to wake but have not yet woken
                 WaiterCounts wCounts = _separated._wCounts;
-                int wouldWantToWake = (int)sCounts.SignalCount - sCounts.SpinnerCount - wCounts.CountOfWaitersSignaledToWake;
+                int wouldWantToWake = sCounts.SignalCount - sCounts.SpinnerCount - wCounts.CountOfWaitersSignaledToWake;
                 int canWake = wCounts.WaiterCount - wCounts.CountOfWaitersSignaledToWake;
                 int countOfWaitersToWake = Math.Min(wouldWantToWake, canWake);
 
@@ -112,7 +112,8 @@ namespace System.Threading
                 WaiterCounts newCounts = wCounts;
                 newCounts.CountOfWaitersSignaledToWake += countOfWaitersToWake;
 
-                // must be interlocked, so that woken waiters will not exceed waiters.
+                // use interlocked to avoid signaling more waiters than exists.
+                // oversubscription still can happen if waiters exit on timeout befoe we wake them, but that is rare.
                 WaiterCounts countsBeforeUpdate = _separated._wCounts.InterlockedCompareExchange(newCounts, wCounts);
 
                 if (countsBeforeUpdate == wCounts)
