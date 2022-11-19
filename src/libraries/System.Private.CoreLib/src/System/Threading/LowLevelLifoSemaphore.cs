@@ -17,6 +17,7 @@ namespace System.Threading
 
         private readonly int _maximumSignalCount;
         private readonly Action _onWait;
+        private int _usecSpin = 1;
 
         public LowLevelLifoSemaphore(int initialSignalCount, int maximumSignalCount, Action onWait)
         {
@@ -88,10 +89,8 @@ namespace System.Threading
                 Thread.SpinWait(countsBeforeUpdate.SpinnerCount);
             }
 
-            // assuming process dispatch time to be in the order of 10-100 usec
-            // we will spin for 20+ usec before blocking the thread - in case a thread is needed soon
             Stopwatch sw = Stopwatch.StartNew();
-            long spinLimit = Stopwatch.Frequency / 50000;
+            long spinLimit = Stopwatch.Frequency * _usecSpin / 1000000;
             do
             {
                 // Try to acquire the semaphore and unregister as a spinner
@@ -148,6 +147,7 @@ namespace System.Threading
 
             int countOfWaitersToWake;
             Counts counts = _separated._counts;
+
             while (true)
             {
                 Counts newCounts = counts;
@@ -184,6 +184,18 @@ namespace System.Threading
                     Debug.Assert(releaseCount <= _maximumSignalCount - counts.SignalCount);
                     if (countOfWaitersToWake > 0)
                         ReleaseCore(countOfWaitersToWake);
+
+                    // assuming process dispatch time to be in the order of 10-100 usec
+                    // we will keep spin time in 1-200 range.
+                    // and adjust as release finds appropriate number of spinners
+                    if (counts.SpinnerCount > releaseCount && _usecSpin > 1)
+                    {
+                        _usecSpin--;
+                    }
+                    else if (counts.SpinnerCount < releaseCount && _usecSpin < 200)
+                    {
+                        _usecSpin++;
+                    }
 
                     return;
                 }
