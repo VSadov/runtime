@@ -180,7 +180,6 @@ namespace System.Net.Sockets
 
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
-                    AskForHelp();
                     HandleSocketEvents(_buffer, numEvents);
                     _blockingPollerRelease.Wait();
                 }
