@@ -1238,7 +1238,7 @@ namespace System.Threading
         internal ThreadPoolWorkQueue()
         {
             _localQueues = new LocalQueue[RoundUpToPowerOf2(Environment.ProcessorCount)];
-            _globalQueues = new GlobalQueue[RoundUpToPowerOf2(Environment.ProcessorCount) / LocToGlobRatio];
+            _globalQueues = new GlobalQueue[RoundUpToPowerOf2(Math.Max(Environment.ProcessorCount / LocToGlobRatio, 1))];
             RefreshLoggingEnabled();
         }
 
