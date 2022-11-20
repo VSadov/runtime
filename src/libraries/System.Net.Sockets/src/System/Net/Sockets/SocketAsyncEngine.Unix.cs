@@ -162,7 +162,7 @@ namespace System.Net.Sockets
             }
         }
 
-        private ManualResetEventSlim _blockingPollerRelease = new ManualResetEventSlim(false);
+        private bool _hasPollerHelp;
 
         private void EventLoop()
         {
@@ -179,10 +179,7 @@ namespace System.Net.Sockets
 
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
-
                     HandleSocketEvents(_buffer, numEvents);
-                    _blockingPollerRelease.Wait();
-                    _blockingPollerRelease.Reset();
                 }
             }
             catch (Exception e)
@@ -194,6 +191,7 @@ namespace System.Net.Sockets
         private void HelpOnce()
         {
             var localBuffer = stackalloc Interop.Sys.SocketEvent[EventBufferCount];
+            _hasPollerHelp = false;
             try
             {
                 int numEvents = EventBufferCount;
@@ -206,10 +204,6 @@ namespace System.Net.Sockets
                 if (numEvents > 0)
                 {
                     HandleSocketEvents(localBuffer, numEvents);
-                }
-                else
-                {
-                    _blockingPollerRelease.Set();
                 }
             }
             catch (Exception e)
@@ -246,7 +240,7 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (i == schedAt)
+                if (i == schedAt && !_hasPollerHelp)
                 {
                     AskForHelp();
                 }
