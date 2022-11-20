@@ -162,7 +162,8 @@ namespace System.Net.Sockets
             }
         }
 
-        private bool _hasPollerHelp;
+        private int _helpersNum;
+        private ManualResetEventSlim _blockingPollerRelease = new ManualResetEventSlim(false);
 
         private void EventLoop()
         {
@@ -179,14 +180,9 @@ namespace System.Net.Sockets
 
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
-
-                    bool schedHelper = false;
-                    if (!_hasPollerHelp)
-                    {
-                        schedHelper = _hasPollerHelp = true;
-                    }
-
-                    HandleSocketEvents(_buffer, numEvents, scheduleAnother: schedHelper);
+                    AskForHelp();
+                    HandleSocketEvents(_buffer, numEvents);
+                    _blockingPollerRelease.Wait();
                 }
             }
             catch (Exception e)
@@ -197,6 +193,8 @@ namespace System.Net.Sockets
 
         private void HelpOnce()
         {
+            int helpersNum = Interlocked.Decrement(ref _helpersNum);
+
             var localBuffer = stackalloc Interop.Sys.SocketEvent[EventBufferCount];
             try
             {
@@ -209,11 +207,14 @@ namespace System.Net.Sockets
 
                 if (numEvents > 0)
                 {
-                    HandleSocketEvents(localBuffer, numEvents, scheduleAnother: true);
+                    HandleSocketEvents(localBuffer, numEvents);
                 }
                 else
                 {
-                    _hasPollerHelp = false;
+                    if (helpersNum <= 0)
+                    {
+                        _blockingPollerRelease.Set();
+                    }
                 }
             }
             catch (Exception e)
@@ -223,7 +224,7 @@ namespace System.Net.Sockets
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents, bool scheduleAnother)
+        public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
         {
             int scheduled = 0;
             int schedAt = numEvents / 2;
@@ -250,7 +251,7 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (i == schedAt && scheduleAnother)
+                if (scheduled == schedAt)
                 {
                     AskForHelp();
                 }
@@ -259,7 +260,12 @@ namespace System.Net.Sockets
 
         private void AskForHelp()
         {
-            ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+            int helpersNum = _helpersNum;
+            if (helpersNum < Environment.ProcessorCount &&
+                Interlocked.CompareExchange(ref _helpersNum, helpersNum + 1, helpersNum) == helpersNum)
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+            }
         }
 
         void IThreadPoolWorkItem.Execute()
