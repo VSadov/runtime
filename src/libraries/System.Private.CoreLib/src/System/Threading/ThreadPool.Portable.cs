@@ -75,6 +75,8 @@ namespace System.Threading
         /// </summary>
         internal static void RequestWorkerThread() => PortableThreadPool.ThreadPoolInstance.RequestWorker();
 
+        internal static void EnsuretWorkerThread() => PortableThreadPool.ThreadPoolInstance.EnsureWorker();
+
         /// <summary>
         /// Called from the gate thread periodically to perform runtime-specific gate activities
         /// </summary>
