@@ -179,7 +179,14 @@ namespace System.Net.Sockets
 
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
-                    HandleSocketEvents(_buffer, numEvents);
+
+                    bool schedHelper = false;
+                    if (!_hasPollerHelp)
+                    {
+                        schedHelper = _hasPollerHelp = true;
+                    }
+
+                    HandleSocketEvents(_buffer, numEvents, scheduleAnother: schedHelper);
                 }
             }
             catch (Exception e)
@@ -191,7 +198,6 @@ namespace System.Net.Sockets
         private void HelpOnce()
         {
             var localBuffer = stackalloc Interop.Sys.SocketEvent[EventBufferCount];
-            _hasPollerHelp = false;
             try
             {
                 int numEvents = EventBufferCount;
@@ -203,7 +209,11 @@ namespace System.Net.Sockets
 
                 if (numEvents > 0)
                 {
-                    HandleSocketEvents(localBuffer, numEvents);
+                    HandleSocketEvents(localBuffer, numEvents, scheduleAnother: true);
+                }
+                else
+                {
+                    _hasPollerHelp = false;
                 }
             }
             catch (Exception e)
@@ -213,7 +223,7 @@ namespace System.Net.Sockets
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents)
+        public void HandleSocketEvents(Interop.Sys.SocketEvent* buffer, int numEvents, bool scheduleAnother)
         {
             int scheduled = 0;
             int schedAt = numEvents / 2;
@@ -240,7 +250,7 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (i == schedAt && !_hasPollerHelp)
+                if (i == schedAt && scheduleAnother)
                 {
                     AskForHelp();
                 }
