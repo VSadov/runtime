@@ -250,7 +250,7 @@ namespace System.Net.Sockets
                     }
                 }
 
-                if (scheduled == schedAt)
+                if (i == schedAt)
                 {
                     AskForHelp();
                 }
