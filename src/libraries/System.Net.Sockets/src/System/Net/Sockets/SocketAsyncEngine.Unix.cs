@@ -255,12 +255,14 @@ namespace System.Net.Sockets
                     AskForHelp();
                 }
             }
+
+            AskForHelp();
         }
 
         private void AskForHelp()
         {
             int helpersNum = _helpersNum;
-            if (helpersNum < Environment.ProcessorCount &&
+            if (helpersNum < 2 &&
                 Interlocked.CompareExchange(ref _helpersNum, helpersNum + 1, helpersNum) == helpersNum)
             {
                 ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
