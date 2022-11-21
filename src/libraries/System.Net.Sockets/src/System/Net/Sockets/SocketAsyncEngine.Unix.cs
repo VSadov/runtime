@@ -181,6 +181,7 @@ namespace System.Net.Sockets
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
                     HandleSocketEvents(_buffer, numEvents);
+                    AskForHelp();
                     _blockingPollerRelease.Wait();
                 }
             }
@@ -255,14 +256,12 @@ namespace System.Net.Sockets
                     AskForHelp();
                 }
             }
-
-            AskForHelp();
         }
 
         private void AskForHelp()
         {
             int helpersNum = _helpersNum;
-            if (helpersNum < 2 &&
+            if (helpersNum < Environment.ProcessorCount &&
                 Interlocked.CompareExchange(ref _helpersNum, helpersNum + 1, helpersNum) == helpersNum)
             {
                 ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
