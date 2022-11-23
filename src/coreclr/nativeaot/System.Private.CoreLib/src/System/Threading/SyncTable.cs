@@ -256,6 +256,18 @@ namespace System.Threading
         }
 
         /// <summary>
+        /// Initializes the Lock assuming the caller holds s_lock.  Use for not yet
+        /// published entries only.
+        /// </summary>
+        public static void MoveThinLockToNewEntry(int syncIndex, int threadId, int recursionLevel)
+        {
+            Debug.Assert(s_lock.IsAcquired);
+            Debug.Assert((0 < syncIndex) && (syncIndex < s_unusedEntryIndex));
+
+            s_entries[syncIndex].Lock.InitializeLocked(threadId, recursionLevel);
+        }
+
+        /// <summary>
         /// Returns the Monitor synchronization object.  The return value is never null.
         /// </summary>
         public static Lock GetLockObject(int syncIndex)

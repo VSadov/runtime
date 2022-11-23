@@ -17,23 +17,30 @@ namespace System.Threading
     internal static class ObjectHeader
     {
         // The following two header bits are used by the GC engine:
+        //   BIT_SBLK_UNUSED        = 0x80000000
         //   BIT_SBLK_FINALIZER_RUN = 0x40000000
         //   BIT_SBLK_GC_RESERVE    = 0x20000000
         //
         // All other bits may be used to store runtime data: hash code, sync entry index, etc.
         // Here we use the same bit layout as in CLR: if bit 26 (BIT_SBLK_IS_HASHCODE) is set,
         // all the lower bits 0..25 store the hash code, otherwise they store either the sync
-        // entry index or all zero.
-        //
-        // If needed, the MASK_HASHCODE_INDEX bit mask may be made wider or narrower than the
-        // current 26 bits; the BIT_SBLK_IS_HASHCODE bit is not required to be adjacent to the
-        // mask.  The code only assumes that MASK_HASHCODE_INDEX occupies the lowest bits of the
-        // header (i.e. ends with bit 0) and that (MASK_HASHCODE_INDEX + 1) does not overflow
-        // the Int32 type (i.e. the mask may be no longer than 30 bits).
-
+        // entry index (indicated by BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) or thin lock data.
         private const int IS_HASHCODE_BIT_NUMBER = 26;
-        private const int BIT_SBLK_IS_HASHCODE = 1 << IS_HASHCODE_BIT_NUMBER;
+        private const int IS_HASH_OR_SYNCBLKINDEX_BIT_NUMBER = 27;
+        internal const int BIT_SBLK_IS_HASHCODE = 1 << IS_HASHCODE_BIT_NUMBER;
         internal const int MASK_HASHCODE_INDEX = BIT_SBLK_IS_HASHCODE - 1;
+        internal const int BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX = 1 << IS_HASH_OR_SYNCBLKINDEX_BIT_NUMBER;
+
+
+        // if BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX is clear, the rest of the header dword is laid out as follows:
+        // - lower ten bits (bits 0 thru 9) is thread id used for the thin locks
+        //   value is zero if no thread is holding the lock
+        // - following six bits (bits 10 thru 15) is recursion level used for the thin locks
+        //   value is zero if lock is not taken or only taken once by the same thread
+        private const int SBLK_MASK_LOCK_THREADID = 0x000003FF;   // special value of 0 + 1023 thread ids
+        private const int SBLK_MASK_LOCK_RECLEVEL = 0x0000FC00;   // 64 recursion levels
+        private const int SBLK_LOCK_RECLEVEL_INC =  0x00000400;   // each level is this much higher than the previous one
+        private const int SBLK_RECLEVEL_SHIFT =     10;           // shift right this much to get recursion level
 
 #if TARGET_ARM || TARGET_ARM64
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -134,20 +141,22 @@ namespace System.Threading
             return bitAndValue & ~BIT_SBLK_IS_HASHCODE;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool HasSyncEntryIndex(int header)
+        {
+            return (header & (BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX | BIT_SBLK_IS_HASHCODE)) == BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX;
+        }
+
         /// <summary>
         /// Extracts the sync entry index or the hash code from the header value.  Returns true
         /// if the header value stores the sync entry index.
         /// </summary>
         // Inlining is important for lock performance
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool GetSyncEntryIndex(int header, out int hashOrIndex)
+        public static bool GetSyncEntryIndex(int header, out int index)
         {
-            hashOrIndex = header & MASK_HASHCODE_INDEX;
-            // The following is equivalent to:
-            //   return (hashOrIndex != 0) && ((header & BIT_SBLK_IS_HASHCODE) == 0);
-            // Shifting the BIT_SBLK_IS_HASHCODE bit to the sign bit saves one branch.
-            int bitAndValue = header & (BIT_SBLK_IS_HASHCODE | MASK_HASHCODE_INDEX);
-            return (bitAndValue << (31 - IS_HASHCODE_BIT_NUMBER)) > 0;
+            index = header & MASK_HASHCODE_INDEX;
+            return HasSyncEntryIndex(header);
         }
 
         /// <summary>
@@ -169,6 +178,7 @@ namespace System.Threading
                     // stored in the entry.
                     return SyncTable.GetLockObject(hashOrIndex);
                 }
+
                 // Assign a new sync entry
                 int syncIndex = SyncTable.AssignEntry(o, pHeader);
                 return SyncTable.GetLockObject(syncIndex);
@@ -183,30 +193,32 @@ namespace System.Threading
             // Holding this lock implies there is at most one thread setting the sync entry index at
             // any given time.  We also require that the sync entry index has not been already set.
             Debug.Assert(SyncTable.s_lock.IsAcquired);
-            Debug.Assert((syncIndex & MASK_HASHCODE_INDEX) == syncIndex);
-            int oldBits, newBits, hashOrIndex;
+            int oldBits, newBits;
 
             do
             {
-                oldBits = Volatile.Read(ref *pHeader);
+                oldBits = *pHeader;
                 newBits = oldBits;
 
-                if (GetSyncEntryIndex(oldBits, out hashOrIndex))
-                {
-                    // Must not get here; see the contract
-                    throw new InvalidOperationException();
-                }
+                // we shold not have a sync index yet.
+                Debug.Assert(!GetSyncEntryIndex(oldBits, out _));
 
-                Debug.Assert(((oldBits & BIT_SBLK_IS_HASHCODE) == 0) || (hashOrIndex != 0));
-                if (hashOrIndex != 0)
+                if ((oldBits & BIT_SBLK_IS_HASHCODE) != 0)
                 {
                     // Move the hash code to the sync entry
-                    SyncTable.MoveHashCodeToNewEntry(syncIndex, hashOrIndex);
+                    SyncTable.MoveHashCodeToNewEntry(syncIndex, oldBits & MASK_HASHCODE_INDEX);
+                }
+                else if ((oldBits & SBLK_MASK_LOCK_THREADID) != 0)
+                {
+                    SyncTable.MoveThinLockToNewEntry(
+                        syncIndex,
+                        oldBits & SBLK_MASK_LOCK_THREADID,
+                        (oldBits & SBLK_MASK_LOCK_RECLEVEL) >> SBLK_RECLEVEL_SHIFT);
                 }
 
                 // Store the sync entry index
                 newBits &= ~(BIT_SBLK_IS_HASHCODE | MASK_HASHCODE_INDEX);
-                newBits |= syncIndex;
+                newBits |= syncIndex | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX;
             }
             while (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) != oldBits);
         }
