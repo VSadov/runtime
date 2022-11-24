@@ -229,7 +229,7 @@ namespace System.Threading
         public static unsafe bool TryLock(object o)
         {
             int currentThreadID = Environment.CurrentManagedThreadId;
-            // thread ID does not fit
+            // does thread ID fit?
             if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
                 return false;
 
@@ -242,23 +242,27 @@ namespace System.Threading
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
                 int oldBits = *pHeader;
 
-                // if noone owns, put our thread id
                 if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                 {
+                    // if noone owns, put our thread id
                     int newBits = oldBits | currentThreadID;
                     return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
                 }
 
-                // if self-own increments recursion (not interlocked)
-                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID)
+                // if we own the lock, just try incrementing recursion level
+                if ((oldBits & (SBLK_MASK_LOCK_THREADID | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)) == currentThreadID)
                 {
-                    // TODO: VS
-                    // inc recursion level, if fits;
-                    // return true;
+                    if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != SBLK_MASK_LOCK_RECLEVEL)
+                    {
+                        // if recursion count is not full, increment by one
+                        int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
+                        *(short*)pHeader = (short)newBits;
+                        return true;
+                    }
                 }
             }
 
-            // someone else owns or has index - slow path.
+            // someone else owns or there is sync block index, or could not increment further -> slow path.
             return false;
         }
 
@@ -267,7 +271,7 @@ namespace System.Threading
         public static unsafe bool Unlock(object o)
         {
             int currentThreadID = Environment.CurrentManagedThreadId;
-            // thread ID does not fit
+            // does thread ID fit?
             if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
                 return false;
 
@@ -280,20 +284,26 @@ namespace System.Threading
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
                 int oldBits = *pHeader;
 
-                // if self-own
+                // if we own the lock
                 if ((oldBits & (SBLK_MASK_LOCK_THREADID | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)) == currentThreadID)
                 {
-                    // TODO: VS
-                    // dec recursion level, if not 0;
-
-                    // TODO: if thread id is short, can be Volatile.Write.
-                    Interlocked.And(ref *pHeader, ~SBLK_MASK_LOCK_THREADID);
+                    if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != 0)
+                    {
+                        // decrement recursion level, if not 0;
+                        int newBits = oldBits - SBLK_LOCK_RECLEVEL_INC;
+                        *(short*)pHeader = (short)newBits;
+                    }
+                    else
+                    {
+                        // otherwise just release.
+                        Volatile.Write(ref *(short*)pHeader, 0);
+                    }
 
                     return true;
                 }
             }
 
-            // someone else owns or has index - slow path.
+            // someone else owns or there is sync block index -> slow path.
             return false;
         }
     }
