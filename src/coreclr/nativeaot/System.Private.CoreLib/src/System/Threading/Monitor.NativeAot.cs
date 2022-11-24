@@ -124,11 +124,17 @@ namespace System.Threading
 
         public static void Exit(object obj)
         {
+            if (ObjectHeader.Unlock(obj))
+                return;
+
             GetLock(obj).Release();
         }
 
         public static bool IsEntered(object obj)
         {
+            //if (ObjectHeader.IsAcquired(obj))
+            //    return true;
+
             return GetLock(obj).IsAcquired;
         }
 

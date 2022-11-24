@@ -226,17 +226,18 @@ namespace System.Threading
             return TryLock(o);
         }
 
-        // no-spinning version
+        // TODO: VS must be three-state.  (if someone else owns, no need to inflate)
+        // one-shot version
         // true - success
         // false - slow path
         public static unsafe bool TryLock(object o)
         {
+            if (o == null)
+                return false;
+
             int currentThreadID = Environment.CurrentManagedThreadId;
             // does thread ID fit?
             if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
-                return false;
-
-            if (o == null)
                 return false;
 
             fixed (byte* pRawData = &o.GetRawData())
@@ -252,15 +253,14 @@ namespace System.Threading
                     return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
                 }
 
-                // if we own the lock, just try incrementing recursion level
+                // if we own the lock, try incrementing recursion level
                 if ((oldBits & (SBLK_MASK_LOCK_THREADID | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)) == currentThreadID)
                 {
                     if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != SBLK_MASK_LOCK_RECLEVEL)
                     {
                         // if recursion count is not full, increment by one
                         int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
-                        *(short*)pHeader = (short)newBits;
-                        return true;
+                        return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
                     }
                 }
             }
@@ -273,13 +273,10 @@ namespace System.Threading
         // false - slow path
         public static unsafe bool Unlock(object o)
         {
-            int currentThreadID = Environment.CurrentManagedThreadId;
-            // does thread ID fit?
-            if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
-                return false;
-
             if (o == null)
                 return false;
+
+            int currentThreadID = Environment.CurrentManagedThreadId;
 
             fixed (byte* pRawData = &o.GetRawData())
             {
@@ -288,26 +285,47 @@ namespace System.Threading
                 int oldBits = *pHeader;
 
                 // if we own the lock
-                if ((oldBits & (SBLK_MASK_LOCK_THREADID | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)) == currentThreadID)
+                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID  &&
+                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
                 {
-                    if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != 0)
-                    {
-                        // decrement recursion level, if not 0;
-                        int newBits = oldBits - SBLK_LOCK_RECLEVEL_INC;
-                        *(short*)pHeader = (short)newBits;
-                    }
-                    else
-                    {
-                        // otherwise just release.
-                        Volatile.Write(ref *(short*)pHeader, 0);
-                    }
+                    // decrement count or release entirely.
+                    int newBits = (oldBits & SBLK_MASK_LOCK_RECLEVEL) != 0 ?
+                        oldBits - SBLK_LOCK_RECLEVEL_INC :
+                        oldBits & ~SBLK_MASK_LOCK_THREADID;
 
-                    return true;
+                    return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
                 }
             }
 
             // someone else owns or there is sync block index -> slow path.
             return false;
+        }
+
+        // TODO: VS must be 3-state, no need to inflate on false.
+        // true - success
+        // false - slow path
+        public static unsafe bool IsAcquired(object o)
+        {
+            if (o == null)
+                return false;
+
+            int currentThreadID = Environment.CurrentManagedThreadId;
+
+            fixed (byte* pRawData = &o.GetRawData())
+            {
+                // The header is 4 bytes before m_pEEType field on all architectures
+                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+                int oldBits = *pHeader;
+
+                // if we own the lock
+                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
+                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
+                {
+                    return true;
+                }
+
+                return false;
+            }
         }
     }
 }
