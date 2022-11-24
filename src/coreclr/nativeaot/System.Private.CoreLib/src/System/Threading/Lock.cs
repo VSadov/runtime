@@ -45,7 +45,9 @@ namespace System.Threading
 
         internal void InitializeLocked(int threadId, int recursionCount)
         {
-            _state = Locked;
+            Debug.Assert(recursionCount == 0 || threadId != 0);
+
+            _state = threadId == 0 ? Uncontended : Locked;
             _owningThreadId = threadId;
             _recursionCount = (uint)recursionCount;
         }
