@@ -196,11 +196,14 @@ namespace System.Threading
 
                 if ((oldBits & BIT_SBLK_IS_HASHCODE) != 0)
                 {
-                    // Move the hash code to the sync entry
+                    // set the hash code in the sync entry
                     SyncTable.MoveHashCodeToNewEntry(syncIndex, oldBits & MASK_HASHCODE_INDEX);
+                    // reset the lock info, in case we have set it in the previous iteration
+                    SyncTable.MoveThinLockToNewEntry(syncIndex, 0, 0);
                 }
-                else if ((oldBits & SBLK_MASK_LOCK_THREADID) != 0)
+                else
                 {
+                    // set the lock info
                     SyncTable.MoveThinLockToNewEntry(
                         syncIndex,
                         oldBits & SBLK_MASK_LOCK_THREADID,
