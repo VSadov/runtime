@@ -43,6 +43,7 @@ namespace System.Threading
         private int _owningThreadId;
         private volatile AutoResetEvent? _lazyEvent;
 
+        // used to transfer the state when inflating thin locks
         internal void InitializeLocked(int threadId, int recursionCount)
         {
             Debug.Assert(recursionCount == 0 || threadId != 0);
@@ -72,7 +73,7 @@ namespace System.Threading
             _lazyEvent?.Dispose();
         }
 
-        private static int CurrentNativeThreadId => Environment.CurrentManagedThreadId;
+        private static int CurrentThreadId => Environment.CurrentManagedThreadId;
 
         // the inlined version of Lock.Acquire would not inline ManagedThreadId.Current,
         // while the non-inlined version has it inlined.
@@ -80,7 +81,7 @@ namespace System.Threading
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void Acquire()
         {
-            int currentThreadId = CurrentNativeThreadId;
+            int currentThreadId = CurrentThreadId;
 
             //
             // Make one quick attempt to acquire an uncontended lock
@@ -110,7 +111,7 @@ namespace System.Threading
             if (millisecondsTimeout < -1)
                 throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
 
-            int currentThreadId = CurrentNativeThreadId;
+            int currentThreadId = CurrentThreadId;
 
             //
             // Make one quick attempt to acquire an uncontended lock
@@ -253,9 +254,6 @@ namespace System.Threading
             get
             {
                 //
-                // The comment below is for platforms where CurrentNativeThreadId redirects to
-                // ManagedThreadId.Current instead of being a compiler intrinsic.
-                //
                 // Compare the current owning thread ID with the current thread ID.  We need
                 // to read the current thread's ID before we read m_owningThreadId.  Otherwise,
                 // the following might happen:
@@ -271,7 +269,7 @@ namespace System.Threading
                 // because while we're doing this check the current thread is definitely still
                 // alive.
                 //
-                int currentThreadId = CurrentNativeThreadId;
+                int currentThreadId = CurrentThreadId;
                 bool acquired = (currentThreadId == _owningThreadId);
                 if (acquired)
                     Debug.Assert((_state & Locked) != 0);
