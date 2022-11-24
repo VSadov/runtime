@@ -132,8 +132,8 @@ namespace System.Threading
 
         public static bool IsEntered(object obj)
         {
-            //if (ObjectHeader.IsAcquired(obj))
-            //    return true;
+            if (ObjectHeader.IsAcquired(obj))
+                return true;
 
             return GetLock(obj).IsAcquired;
         }

@@ -253,9 +253,11 @@ namespace System.Threading
                     return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
                 }
 
-                // if we own the lock, try incrementing recursion level
-                if ((oldBits & (SBLK_MASK_LOCK_THREADID | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)) == currentThreadID)
+                // if we own the lock
+                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
+                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
                 {
+                    // try incrementing recursion level
                     if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != SBLK_MASK_LOCK_RECLEVEL)
                     {
                         // if recursion count is not full, increment by one
