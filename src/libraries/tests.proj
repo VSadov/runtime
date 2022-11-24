@@ -502,6 +502,12 @@
 
     <!-- TODO: VS temporarily disable due to an assert in ILC -->
     <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Numerics.Vectors\tests\System.Numerics.Vectors.Tests.csproj" />
+    <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Net.Security\tests\FunctionalTests\System.Net.Security.Tests.csproj" />
+    <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.ComponentModel.Primitives\tests\System.ComponentModel.Primitives.Tests.csproj" />
+
+    <!-- TODO: VS temporarily disable due to failure at run time -->
+    <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Data.DataSetExtensions\tests\System.Data.DataSetExtensions.Tests.csproj" />
+    <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Security.Cryptography\tests\System.Security.Cryptography.Tests.csproj" />
 
     <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Net.Http.Json\tests\FunctionalTests\System.Net.Http.Json.Functional.Tests.csproj" />
     <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Linq.Parallel\tests\System.Linq.Parallel.Tests.csproj" />
