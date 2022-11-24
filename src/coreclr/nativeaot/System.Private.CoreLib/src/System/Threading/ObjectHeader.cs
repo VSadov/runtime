@@ -42,22 +42,6 @@ namespace System.Threading
         private const int SBLK_LOCK_RECLEVEL_INC =  0x00000400;   // each level is this much higher than the previous one
         private const int SBLK_RECLEVEL_SHIFT =     10;           // shift right this much to get recursion level
 
-#if TARGET_ARM || TARGET_ARM64
-        [MethodImpl(MethodImplOptions.NoInlining)]
-#else
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-#endif
-        public static unsafe int ReadVolatileMemory(int* pHeader)
-        {
-            // While in x86/amd64 Volatile.Read is cheap, in arm we have to pay the
-            // cost of a barrier. We do no inlining to get around that.
-#if TARGET_ARM || TARGET_ARM64
-            return *pHeader;
-#else
-            return Volatile.Read(ref *pHeader);
-#endif
-        }
-
         /// <summary>
         /// Returns the hash code assigned to the object.  If no hash code has yet been assigned,
         /// it assigns one in a thread-safe way.
@@ -74,7 +58,7 @@ namespace System.Threading
                 // The header is 4 bytes before m_pEEType field on all architectures
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
 
-                int bits = ReadVolatileMemory(pHeader);
+                int bits = *pHeader;
                 int hashOrIndex = bits & MASK_HASHCODE_INDEX;
                 if ((bits & BIT_SBLK_IS_HASHCODE) != 0)
                 {
@@ -82,7 +66,8 @@ namespace System.Threading
                     Debug.Assert(hashOrIndex != 0);
                     return hashOrIndex;
                 }
-                if (hashOrIndex != 0)
+
+                if ((bits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) != 0)
                 {
                     // Look up the hash code in the SyncTable
                     int hashCode = SyncTable.GetHashCode(hashOrIndex);
@@ -91,19 +76,18 @@ namespace System.Threading
                         return hashCode;
                     }
                 }
+
                 // The hash code has not yet been set.  Assign some value.
-                return AssignHashCode(pHeader);
+                return AssignHashCode(o, pHeader);
             }
         }
 
         /// <summary>
         /// Assigns a hash code to the object in a thread-safe way.
         /// </summary>
-        private static unsafe int AssignHashCode(int* pHeader)
+        private static unsafe int AssignHashCode(object o, int* pHeader)
         {
             int newHash = RuntimeHelpers.GetNewHashCode() & MASK_HASHCODE_INDEX;
-            int bitAndValue;
-
             // Never use the zero hash code.  SyncTable treats the zero value as "not assigned".
             if (newHash == 0)
             {
@@ -112,33 +96,42 @@ namespace System.Threading
 
             while (true)
             {
-                int oldBits = Volatile.Read(ref *pHeader);
-                bitAndValue = oldBits & (BIT_SBLK_IS_HASHCODE | MASK_HASHCODE_INDEX);
-                if (bitAndValue != 0)
+                int oldBits = *pHeader;
+
+                // if have hashcode, just return it
+                if ((oldBits & BIT_SBLK_IS_HASHCODE) != 0)
                 {
-                    // The header already stores some value
+                    // Found the hash code in the header
+                    int h = oldBits & MASK_HASHCODE_INDEX;
+                    Debug.Assert(h != 0);
+                    return h;
+                }
+
+                // if have something else, break, we need a syncblock.
+                if ((oldBits & MASK_HASHCODE_INDEX) != 0)
+                {
                     break;
                 }
 
-                // The header stores nothing.  Try to store the hash code.
-                int newBits = oldBits | BIT_SBLK_IS_HASHCODE | newHash;
+                // there is nothing - try set hashcode inline
+                Debug.Assert((oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0);
+                int newBits = BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX | BIT_SBLK_IS_HASHCODE | oldBits | newHash;
                 if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
                 {
                     return newHash;
                 }
 
-                // Another thread modified the header; try again
+                // contention, try again
             }
 
-            if ((bitAndValue & BIT_SBLK_IS_HASHCODE) == 0)
+            if (!GetSyncEntryIndex(*pHeader, out int syncIndex))
             {
-                // Set the hash code in SyncTable.  This call will resolve the potential race.
-                return SyncTable.SetHashCode(bitAndValue, newHash);
+                // Assign a new sync entry
+                syncIndex = SyncTable.AssignEntry(o, pHeader);
             }
 
-            // Another thread set the hash code, use it
-            Debug.Assert((bitAndValue & ~BIT_SBLK_IS_HASHCODE) != 0);
-            return bitAndValue & ~BIT_SBLK_IS_HASHCODE;
+            // Set the hash code in SyncTable. This call will resolve the potential race.
+            return SyncTable.SetHashCode(syncIndex, newHash);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -172,7 +165,7 @@ namespace System.Threading
                 // The header is 4 bytes before m_pEEType field on all architectures
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
 
-                if (GetSyncEntryIndex(ReadVolatileMemory(pHeader), out int hashOrIndex))
+                if (GetSyncEntryIndex(*pHeader, out int hashOrIndex))
                 {
                     // Already have a sync entry for this object, return the synchronization object
                     // stored in the entry.
@@ -198,9 +191,7 @@ namespace System.Threading
             do
             {
                 oldBits = *pHeader;
-                newBits = oldBits;
-
-                // we shold not have a sync index yet.
+                // we should not have a sync index yet.
                 Debug.Assert(!GetSyncEntryIndex(oldBits, out _));
 
                 if ((oldBits & BIT_SBLK_IS_HASHCODE) != 0)
@@ -217,10 +208,93 @@ namespace System.Threading
                 }
 
                 // Store the sync entry index
-                newBits &= ~(BIT_SBLK_IS_HASHCODE | MASK_HASHCODE_INDEX);
+                newBits = oldBits & ~(BIT_SBLK_IS_HASHCODE | MASK_HASHCODE_INDEX);
                 newBits |= syncIndex | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX;
             }
             while (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) != oldBits);
+        }
+
+        // true - success
+        // false - slow path
+        public static unsafe bool Lock(object o)
+        {
+            // TODO: VS spin
+
+            return TryLock(o);
+        }
+
+        // no-spinning version
+        // true - success
+        // false - slow path
+        public static unsafe bool TryLock(object o)
+        {
+            int currentThreadID = Environment.CurrentManagedThreadId;
+            // thread ID does not fit
+            if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
+                return false;
+
+            if (o == null)
+                return false;
+
+            fixed (byte* pRawData = &o.GetRawData())
+            {
+                // The header is 4 bytes before m_pEEType field on all architectures
+                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+                int oldBits = *pHeader;
+
+                // if noone owns, put our thread id
+                if ((oldBits & MASK_HASHCODE_INDEX) == 0)
+                {
+                    int newBits = oldBits | currentThreadID;
+                    return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
+                }
+
+                // if self-own increments recursion (not interlocked)
+                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID)
+                {
+                    // TODO: VS
+                    // inc recursion level, if fits;
+                    // return true;
+                }
+            }
+
+            // someone else owns or has index - slow path.
+            return false;
+        }
+
+        // true - success
+        // false - slow path
+        public static unsafe bool Unlock(object o)
+        {
+            int currentThreadID = Environment.CurrentManagedThreadId;
+            // thread ID does not fit
+            if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
+                return false;
+
+            if (o == null)
+                return false;
+
+            fixed (byte* pRawData = &o.GetRawData())
+            {
+                // The header is 4 bytes before m_pEEType field on all architectures
+                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+                int oldBits = *pHeader;
+
+                // if self-own
+                if ((oldBits & (SBLK_MASK_LOCK_THREADID | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)) == currentThreadID)
+                {
+                    // TODO: VS
+                    // dec recursion level, if not 0;
+
+                    // TODO: if thread id is short, can be Volatile.Write.
+                    Interlocked.And(ref *pHeader, ~SBLK_MASK_LOCK_THREADID);
+
+                    return true;
+                }
+            }
+
+            // someone else owns or has index - slow path.
+            return false;
         }
     }
 }

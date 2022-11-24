@@ -51,6 +51,9 @@ namespace System.Threading
 
         public static void Enter(object obj)
         {
+            if (ObjectHeader.Lock(obj))
+                return;
+
             Lock lck = GetLock(obj);
             if (lck.TryAcquire(0))
                 return;
@@ -62,12 +65,19 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
+            if (ObjectHeader.Lock(obj))
+            {
+                lockTaken = true;
+                return;
+            }
+
             Lock lck = GetLock(obj);
             if (lck.TryAcquire(0))
             {
                 lockTaken = true;
                 return;
             }
+
             TryAcquireContended(lck, obj, Timeout.Infinite);
             lockTaken = true;
         }
