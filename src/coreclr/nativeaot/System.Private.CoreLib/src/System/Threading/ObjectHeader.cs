@@ -16,7 +16,7 @@ namespace System.Threading
     /// </remarks>
     internal static class ObjectHeader
     {
-        // The following two header bits are used by the GC engine:
+        // The following three header bits are reserved for the GC engine:
         //   BIT_SBLK_UNUSED        = 0x80000000
         //   BIT_SBLK_FINALIZER_RUN = 0x40000000
         //   BIT_SBLK_GC_RESERVE    = 0x20000000
@@ -27,9 +27,9 @@ namespace System.Threading
         // entry index (indicated by BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) or thin lock data.
         private const int IS_HASHCODE_BIT_NUMBER = 26;
         private const int IS_HASH_OR_SYNCBLKINDEX_BIT_NUMBER = 27;
-        internal const int BIT_SBLK_IS_HASHCODE = 1 << IS_HASHCODE_BIT_NUMBER;
+        private const int BIT_SBLK_IS_HASHCODE = 1 << IS_HASHCODE_BIT_NUMBER;
         internal const int MASK_HASHCODE_INDEX = BIT_SBLK_IS_HASHCODE - 1;
-        internal const int BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX = 1 << IS_HASH_OR_SYNCBLKINDEX_BIT_NUMBER;
+        private const int BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX = 1 << IS_HASH_OR_SYNCBLKINDEX_BIT_NUMBER;
 
 
         // if BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX is clear, the rest of the header dword is laid out as follows:
@@ -42,6 +42,13 @@ namespace System.Threading
         private const int SBLK_LOCK_RECLEVEL_INC =  0x00000400;   // each level is this much higher than the previous one
         private const int SBLK_RECLEVEL_SHIFT =     10;           // shift right this much to get recursion level
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe int* GetHeaderPtr(byte* pRawData)
+        {
+            // The header is 4 bytes before m_pEEType field on all architectures
+            return (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+        }
+
         /// <summary>
         /// Returns the hash code assigned to the object.  If no hash code has yet been assigned,
         /// it assigns one in a thread-safe way.
@@ -49,15 +56,11 @@ namespace System.Threading
         public static unsafe int GetHashCode(object o)
         {
             if (o == null)
-            {
                 return 0;
-            }
 
             fixed (byte* pRawData = &o.GetRawData())
             {
-                // The header is 4 bytes before m_pEEType field on all architectures
-                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
-
+                int* pHeader = GetHeaderPtr(pRawData);
                 int bits = *pHeader;
                 int hashOrIndex = bits & MASK_HASHCODE_INDEX;
                 if ((bits & BIT_SBLK_IS_HASHCODE) != 0)
@@ -135,7 +138,7 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool HasSyncEntryIndex(int header)
+        private static bool HasSyncEntryIndex(int header)
         {
             return (header & (BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX | BIT_SBLK_IS_HASHCODE)) == BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX;
         }
@@ -144,7 +147,6 @@ namespace System.Threading
         /// Extracts the sync entry index or the hash code from the header value.  Returns true
         /// if the header value stores the sync entry index.
         /// </summary>
-        // Inlining is important for lock performance
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool GetSyncEntryIndex(int header, out int index)
         {
@@ -156,35 +158,16 @@ namespace System.Threading
         /// Returns the Monitor synchronization object assigned to this object.  If no synchronization
         /// object has yet been assigned, it assigns one in a thread-safe way.
         /// </summary>
-        // Called from Monitor.Enter only; inlining is important for lock performance
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe Lock GetLockObject(object o)
         {
-            fixed (byte* pRawData = &o.GetRawData())
-            {
-                // The header is 4 bytes before m_pEEType field on all architectures
-                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
-
-                if (GetSyncEntryIndex(*pHeader, out int syncIndex))
-                {
-                    // Already have a sync entry for this object, return the synchronization object
-                    // stored in the entry.
-                    return SyncTable.GetLockObject(syncIndex);
-                }
-
-                // Assign a new sync entry
-                syncIndex = SyncTable.AssignEntry(o, pHeader);
-                return SyncTable.GetLockObject(syncIndex);
-            }
+            return SyncTable.GetLockObject(GetSyncIndex(o));
         }
 
-        public static unsafe int GetSyncIndex(object o)
+        private static unsafe int GetSyncIndex(object o)
         {
             fixed (byte* pRawData = &o.GetRawData())
             {
-                // The header is 4 bytes before m_pEEType field on all architectures
-                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
-
+                int* pHeader = GetHeaderPtr(pRawData);
                 if (GetSyncEntryIndex(*pHeader, out int syncIndex))
                 {
                     return syncIndex;
@@ -234,139 +217,165 @@ namespace System.Threading
             while (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) != oldBits);
         }
 
-        // does not fail
-        // 1 - success
-        // syncIndex - retry with the Lock
-        public static unsafe int Lock(object o)
-        {
-            // TODO: VS spin
-
-            int result = TryAcquire(o);
-            if (result == 0)
-                result = GetSyncIndex(o);
-
-            return result;
-        }
-
         // only acquire if unowned.
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        public static unsafe int TryAcquire(object o)
+        public static unsafe int TryAcquire(object obj)
         {
-            Debug.Assert(o != null);
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            Debug.Assert(!(obj is Lock),
+                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
             int currentThreadID = Environment.CurrentManagedThreadId;
             // does thread ID fit?
             if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
-                return GetSyncIndex(o);
+                return GetSyncIndex(obj);
 
-            fixed (byte* pRawData = &o.GetRawData())
+            fixed (byte* pRawData = &obj.GetRawData())
             {
-                // The header is 4 bytes before m_pEEType field on all architectures
-                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+                int* pHeader = GetHeaderPtr(pRawData);
 
-            tryAgain:
-                int oldBits = *pHeader;
-
-                // if noone owns, try setting our thread id
-                if ((oldBits & MASK_HASHCODE_INDEX) == 0)
+                while (true)
                 {
-                    int newBits = oldBits | currentThreadID;
-                    if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                    int oldBits = *pHeader;
+
+                    // if noone owns, try setting our thread id
+                    if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                     {
-                        return 1;
-                    }
-
-                    goto tryAgain;
-                }
-
-                if (GetSyncEntryIndex(oldBits, out int syncIndex))
-                {
-                    return syncIndex;
-                }
-
-                // if we own the lock
-                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
-                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
-                {
-                    // try incrementing recursion level
-                    if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != SBLK_MASK_LOCK_RECLEVEL)
-                    {
-                        // if recursion count is not full, increment by one
-                        int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
+                        int newBits = oldBits | currentThreadID;
                         if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
                         {
                             return 1;
                         }
 
-                        goto tryAgain;
+                        // contention, but we do not know if there is owner, must try again
+                        continue;
                     }
-                    else
-                    {
-                        return SyncTable.AssignEntry(o, pHeader);
-                    }
-                }
 
-                // someone else owns.
-                return 0;
+                    // has sync entry
+                    if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                    {
+                        return syncIndex;
+                    }
+
+                    // has hashcode
+                    if ((oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) != 0)
+                    {
+                        return SyncTable.AssignEntry(obj, pHeader);
+                    }
+
+                    // we own the lock already
+                    if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID)
+                    {
+                        // try incrementing recursion level
+                        if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != SBLK_MASK_LOCK_RECLEVEL)
+                        {
+                            // if recursion count is not full, increment by one
+                            int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
+                            if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                            {
+                                return 1;
+                            }
+
+                            // contention, but we still own the lock and may be able to increment, try again
+                            continue;
+                        }
+                        else
+                        {
+                            return SyncTable.AssignEntry(obj, pHeader);
+                        }
+                    }
+
+                    // someone else owns.
+                    return 0;
+                }
             }
+        }
+
+        // Same as TryAcquire, but with some retrying when owned by someone else.
+        // 1 - success
+        // 0 - failed
+        // syncIndex - retry with the Lock
+        public static unsafe int Acquire(object obj)
+        {
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            Debug.Assert(!(obj is Lock),
+                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
+
+            // TODO: VS spin
+            return TryAcquire(obj);
         }
 
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        public static unsafe int Release(object o)
+        public static unsafe int Release(object obj)
         {
-            Debug.Assert(o != null);
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            Debug.Assert(!(obj is Lock),
+                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
+
             int currentThreadID = Environment.CurrentManagedThreadId;
 
-            fixed (byte* pRawData = &o.GetRawData())
+            fixed (byte* pRawData = &obj.GetRawData())
             {
-                // The header is 4 bytes before m_pEEType field on all architectures
-                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+                int* pHeader = GetHeaderPtr(pRawData);
 
-            tryAgain:
-                int oldBits = *pHeader;
-
-                // if we own the lock
-                if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID  &&
-                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
+                while (true)
                 {
-                    // decrement count or release entirely.
-                    int newBits = (oldBits & SBLK_MASK_LOCK_RECLEVEL) != 0 ?
-                        oldBits - SBLK_LOCK_RECLEVEL_INC :
-                        oldBits & ~SBLK_MASK_LOCK_THREADID;
+                    int oldBits = *pHeader;
 
-                    if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                    // if we own the lock
+                    if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
+                        (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
                     {
-                        return 1;
+                        // decrement count or release entirely.
+                        int newBits = (oldBits & SBLK_MASK_LOCK_RECLEVEL) != 0 ?
+                            oldBits - SBLK_LOCK_RECLEVEL_INC :
+                            oldBits & ~SBLK_MASK_LOCK_THREADID;
+
+                        if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                        {
+                            return 1;
+                        }
+
+                        // contention, we still own the lock, try again
+                        continue;
                     }
 
-                    goto tryAgain;
-                }
+                    if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                    {
+                        return syncIndex;
+                    }
 
-                if (GetSyncEntryIndex(oldBits, out int syncIndex))
-                {
-                    return syncIndex;
+                    // someone else owns or noone.
+                    return 0;
                 }
-
-                // someone else owns or noone.
-                return 0;
             }
         }
 
         // 1 - yes
         // 0 - no
         // syncIndex - retry with the Lock
-        public static unsafe int IsAcquired(object o)
+        public static unsafe int IsAcquired(object obj)
         {
-            Debug.Assert(o != null);
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            Debug.Assert(!(obj is Lock),
+                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
+
             int currentThreadID = Environment.CurrentManagedThreadId;
-            fixed (byte* pRawData = &o.GetRawData())
+            fixed (byte* pRawData = &obj.GetRawData())
             {
-                // The header is 4 bytes before m_pEEType field on all architectures
-                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+                int* pHeader = GetHeaderPtr(pRawData);
                 int oldBits = *pHeader;
 
                 // if we own the lock

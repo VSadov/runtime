@@ -25,18 +25,7 @@ namespace System.Threading
         #region Object->Lock/Condition mapping
 
         private static ConditionalWeakTable<object, Condition> s_conditionTable = new ConditionalWeakTable<object, Condition>();
-        private static ConditionalWeakTable<object, Condition>.CreateValueCallback s_createCondition = (o) => new Condition(GetLock(o));
-
-        internal static Lock GetLock(object obj)
-        {
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj));
-
-            Debug.Assert(!(obj is Lock),
-                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
-
-            return ObjectHeader.GetLockObject(obj);
-        }
+        private static ConditionalWeakTable<object, Condition>.CreateValueCallback s_createCondition = (o) => new Condition(ObjectHeader.GetLockObject(o));
 
         private static Condition GetCondition(object obj)
         {
@@ -51,14 +40,14 @@ namespace System.Threading
 
         public static void Enter(object obj)
         {
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj));
-
-            int resultOrIndex = ObjectHeader.Lock(obj);
+            int resultOrIndex = ObjectHeader.Acquire(obj);
             if (resultOrIndex == 1)
                 return;
 
-            Lock lck = SyncTable.GetLockObject(resultOrIndex);
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
+
             if (lck.TryAcquire(0))
                 return;
 
@@ -70,17 +59,17 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj));
-
-            int resultOrIndex = ObjectHeader.Lock(obj);
+            int resultOrIndex = ObjectHeader.Acquire(obj);
             if (resultOrIndex == 1)
             {
                 lockTaken = true;
                 return;
             }
 
-            Lock lck = SyncTable.GetLockObject(resultOrIndex);
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
+
             if (lck.TryAcquire(0))
             {
                 lockTaken = true;
@@ -93,7 +82,15 @@ namespace System.Threading
 
         public static bool TryEnter(object obj)
         {
-            return GetLock(obj).TryAcquire(0);
+            int resultOrIndex = ObjectHeader.TryAcquire(obj);
+            if (resultOrIndex == 1)
+                return true;
+
+            if (resultOrIndex == 0)
+                return false;
+
+            Lock lck = SyncTable.GetLockObject(resultOrIndex);
+            return lck.TryAcquire(0);
         }
 
         public static void TryEnter(object obj, ref bool lockTaken)
@@ -101,7 +98,21 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            lockTaken = GetLock(obj).TryAcquire(0);
+            int resultOrIndex = ObjectHeader.TryAcquire(obj);
+            if (resultOrIndex == 1)
+            {
+                lockTaken = true;
+                return;
+            }
+
+            if (resultOrIndex == 0)
+            {
+                lockTaken = false;
+                return;
+            }
+
+            Lock lck = SyncTable.GetLockObject(resultOrIndex);
+            lockTaken = lck.TryAcquire(0);
         }
 
         public static bool TryEnter(object obj, int millisecondsTimeout)
@@ -109,9 +120,17 @@ namespace System.Threading
             if (millisecondsTimeout < -1)
                 throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
 
-            Lock lck = GetLock(obj);
+            int resultOrIndex = ObjectHeader.TryAcquire(obj);
+            if (resultOrIndex == 1)
+                return true;
+
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
+
             if (lck.TryAcquire(0))
                 return true;
+
             return TryAcquireContended(lck, obj, millisecondsTimeout);
         }
 
@@ -119,41 +138,45 @@ namespace System.Threading
         {
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
+
             if (millisecondsTimeout < -1)
                 throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
 
-            Lock lck = GetLock(obj);
+            int resultOrIndex = ObjectHeader.TryAcquire(obj);
+            if (resultOrIndex == 1)
+            {
+                lockTaken = true;
+                return;
+            }
+
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
+
             if (lck.TryAcquire(0))
             {
                 lockTaken = true;
                 return;
             }
+
             lockTaken = TryAcquireContended(lck, obj, millisecondsTimeout);
         }
 
         public static void Exit(object obj)
         {
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj));
-
             int resultOrIndex = ObjectHeader.Release(obj);
             if (resultOrIndex == 1)
                 return;
 
-            if (resultOrIndex == 0)
-                throw new SynchronizationLockException();
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
 
-            SyncTable.GetLockObject(resultOrIndex).Release();
+            lck.Release();
         }
 
         public static bool IsEntered(object obj)
         {
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj));
-
-            Debug.Assert(!(obj is Lock),
-                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
-
             int resultOrIndex = ObjectHeader.IsAcquired(obj);
             if (resultOrIndex == 1)
                 return true;
