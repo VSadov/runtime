@@ -281,6 +281,11 @@ namespace System.Threading
                     goto tryAgain;
                 }
 
+                if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                {
+                    return syncIndex;
+                }
+
                 // if we own the lock
                 if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
                     (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
@@ -301,11 +306,6 @@ namespace System.Threading
                     {
                         return SyncTable.AssignEntry(o, pHeader);
                     }
-                }
-
-                if (GetSyncEntryIndex(oldBits, out int syncIndex))
-                {
-                    return syncIndex;
                 }
             }
 
