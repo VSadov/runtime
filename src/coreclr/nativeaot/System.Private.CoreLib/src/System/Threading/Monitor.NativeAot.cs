@@ -124,10 +124,17 @@ namespace System.Threading
 
         public static void Exit(object obj)
         {
-            if (ObjectHeader.Unlock(obj))
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            int resultOrIndex = ObjectHeader.Unlock(obj);
+            if (resultOrIndex == 1)
                 return;
 
-            GetLock(obj).Release();
+            if (resultOrIndex == 0)
+                throw new SynchronizationLockException();
+
+            SyncTable.GetLockObject(resultOrIndex).Release();
         }
 
         public static bool IsEntered(object obj)

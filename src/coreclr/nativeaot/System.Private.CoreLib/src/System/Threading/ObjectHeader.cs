@@ -273,17 +273,17 @@ namespace System.Threading
 
         // true - success
         // false - slow path
-        public static unsafe bool Unlock(object o)
+        public static unsafe int Unlock(object o)
         {
-            if (o == null)
-                return false;
-
+            Debug.Assert(o != null);
             int currentThreadID = Environment.CurrentManagedThreadId;
 
             fixed (byte* pRawData = &o.GetRawData())
             {
                 // The header is 4 bytes before m_pEEType field on all architectures
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+
+            tryAgain:
                 int oldBits = *pHeader;
 
                 // if we own the lock
@@ -295,16 +295,27 @@ namespace System.Threading
                         oldBits - SBLK_LOCK_RECLEVEL_INC :
                         oldBits & ~SBLK_MASK_LOCK_THREADID;
 
-                    return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
+                    if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                    {
+                        return 1;
+                    }
+
+                    goto tryAgain;
+                }
+
+                if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                {
+                    return syncIndex;
                 }
             }
 
-            // someone else owns or there is sync block index -> slow path.
-            return false;
+            // someone else owns or noone.
+            return 0;
         }
 
-        // true - success
-        // false - slow path
+        // 1 - yes
+        // 0 - no
+        // syncIndex - retry with the Lock
         public static unsafe int IsAcquired(object o)
         {
             Debug.Assert(o != null);
