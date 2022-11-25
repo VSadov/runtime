@@ -51,12 +51,17 @@ namespace System.Threading
 
         public static void Enter(object obj)
         {
-            if (ObjectHeader.Lock(obj))
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            int resultOrIndex = ObjectHeader.Lock(obj);
+            if (resultOrIndex == 1)
                 return;
 
-            Lock lck = GetLock(obj);
+            Lock lck = SyncTable.GetLockObject(resultOrIndex);
             if (lck.TryAcquire(0))
                 return;
+
             TryAcquireContended(lck, obj, Timeout.Infinite);
         }
 
@@ -65,13 +70,17 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            if (ObjectHeader.Lock(obj))
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            int resultOrIndex = ObjectHeader.Lock(obj);
+            if (resultOrIndex == 1)
             {
                 lockTaken = true;
                 return;
             }
 
-            Lock lck = GetLock(obj);
+            Lock lck = SyncTable.GetLockObject(resultOrIndex);
             if (lck.TryAcquire(0))
             {
                 lockTaken = true;

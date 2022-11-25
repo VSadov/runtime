@@ -178,6 +178,23 @@ namespace System.Threading
             }
         }
 
+        public static unsafe int GetSyncIndex(object o)
+        {
+            fixed (byte* pRawData = &o.GetRawData())
+            {
+                // The header is 4 bytes before m_pEEType field on all architectures
+                int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+
+                if (GetSyncEntryIndex(*pHeader, out int syncIndex))
+                {
+                    return syncIndex;
+                }
+
+                // Assign a new sync entry
+                return SyncTable.AssignEntry(o, pHeader);
+            }
+        }
+
         /// <summary>
         /// Sets the sync entry index in a thread-safe way.
         /// </summary>
@@ -217,40 +234,51 @@ namespace System.Threading
             while (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) != oldBits);
         }
 
-        // true - success
-        // false - slow path
-        public static unsafe bool Lock(object o)
+        // does not fail
+        // 1 - success
+        // syncIndex - retry with the Lock
+        public static unsafe int Lock(object o)
         {
             // TODO: VS spin
 
-            return TryLock(o);
+            int result = TryLock(o);
+            if (result == 0)
+                result = GetSyncIndex(o);
+
+            return result;
         }
 
-        // TODO: VS must be three-state.  (if someone else owns, no need to inflate)
         // one-shot version
-        // true - success
-        // false - slow path
-        public static unsafe bool TryLock(object o)
+        // 1 - success
+        // 0 - failed
+        // syncIndex - retry with the Lock
+        public static unsafe int TryLock(object o)
         {
-            if (o == null)
-                return false;
+            Debug.Assert(o != null);
 
             int currentThreadID = Environment.CurrentManagedThreadId;
             // does thread ID fit?
             if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
-                return false;
+                return GetSyncIndex(o);
 
             fixed (byte* pRawData = &o.GetRawData())
             {
                 // The header is 4 bytes before m_pEEType field on all architectures
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+
+            tryAgain:
                 int oldBits = *pHeader;
 
+                // if noone owns, try setting our thread id
                 if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                 {
-                    // if noone owns, put our thread id
                     int newBits = oldBits | currentThreadID;
-                    return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
+                    if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                    {
+                        return 1;
+                    }
+
+                    goto tryAgain;
                 }
 
                 // if we own the lock
@@ -262,17 +290,32 @@ namespace System.Threading
                     {
                         // if recursion count is not full, increment by one
                         int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
-                        return Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits;
+                        if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                        {
+                            return 1;
+                        }
+
+                        goto tryAgain;
                     }
+                    else
+                    {
+                        return SyncTable.AssignEntry(o, pHeader);
+                    }
+                }
+
+                if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                {
+                    return syncIndex;
                 }
             }
 
-            // someone else owns or there is sync block index, or could not increment further -> slow path.
-            return false;
+            // someone else owns.
+            return 0;
         }
 
-        // true - success
-        // false - slow path
+        // 1 - success
+        // 0 - failed
+        // syncIndex - retry with the Lock
         public static unsafe int Unlock(object o)
         {
             Debug.Assert(o != null);
@@ -338,6 +381,7 @@ namespace System.Threading
                     return syncIndex;
                 }
 
+                // someone else owns or noone.
                 return 0;
             }
         }
