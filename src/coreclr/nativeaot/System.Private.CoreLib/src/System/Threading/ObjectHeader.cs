@@ -165,15 +165,15 @@ namespace System.Threading
                 // The header is 4 bytes before m_pEEType field on all architectures
                 int* pHeader = (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
 
-                if (GetSyncEntryIndex(*pHeader, out int hashOrIndex))
+                if (GetSyncEntryIndex(*pHeader, out int syncIndex))
                 {
                     // Already have a sync entry for this object, return the synchronization object
                     // stored in the entry.
-                    return SyncTable.GetLockObject(hashOrIndex);
+                    return SyncTable.GetLockObject(syncIndex);
                 }
 
                 // Assign a new sync entry
-                int syncIndex = SyncTable.AssignEntry(o, pHeader);
+                syncIndex = SyncTable.AssignEntry(o, pHeader);
                 return SyncTable.GetLockObject(syncIndex);
             }
         }
@@ -192,7 +192,7 @@ namespace System.Threading
             {
                 oldBits = *pHeader;
                 // we should not have a sync index yet.
-                Debug.Assert(!GetSyncEntryIndex(oldBits, out _));
+                Debug.Assert(!HasSyncEntryIndex(oldBits));
 
                 if ((oldBits & BIT_SBLK_IS_HASHCODE) != 0)
                 {
@@ -303,16 +303,12 @@ namespace System.Threading
             return false;
         }
 
-        // TODO: VS must be 3-state, no need to inflate on false.
         // true - success
         // false - slow path
-        public static unsafe bool IsAcquired(object o)
+        public static unsafe int IsAcquired(object o)
         {
-            if (o == null)
-                return false;
-
+            Debug.Assert(o != null);
             int currentThreadID = Environment.CurrentManagedThreadId;
-
             fixed (byte* pRawData = &o.GetRawData())
             {
                 // The header is 4 bytes before m_pEEType field on all architectures
@@ -321,12 +317,17 @@ namespace System.Threading
 
                 // if we own the lock
                 if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
-                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
+                   (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
                 {
-                    return true;
+                    return 1;
                 }
 
-                return false;
+                if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                {
+                    return syncIndex;
+                }
+
+                return 0;
             }
         }
     }

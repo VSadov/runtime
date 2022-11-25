@@ -132,10 +132,20 @@ namespace System.Threading
 
         public static bool IsEntered(object obj)
         {
-            if (ObjectHeader.IsAcquired(obj))
+            if (obj == null)
+                throw new ArgumentNullException(nameof(obj));
+
+            Debug.Assert(!(obj is Lock),
+                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
+
+            int resultOrIndex = ObjectHeader.IsAcquired(obj);
+            if (resultOrIndex == 1)
                 return true;
 
-            return GetLock(obj).IsAcquired;
+            if (resultOrIndex == 0)
+                return false;
+
+            return SyncTable.GetLockObject(resultOrIndex).IsAcquired;
         }
 
         #endregion

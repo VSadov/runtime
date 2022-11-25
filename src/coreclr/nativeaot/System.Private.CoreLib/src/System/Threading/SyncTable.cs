@@ -51,7 +51,7 @@ namespace System.Threading
         /// </summary>
 #if DEBUG
         // Exercise table expansion more frequently in debug builds
-        private const int InitialSize = 1;
+        private const int InitialSize = 2;
 #else
         private const int InitialSize = 1 << 7;
 #endif
@@ -77,11 +77,11 @@ namespace System.Threading
         private static int s_freeEntryList;
 
         /// <summary>
-        /// The index of the lowest never used entry.  We skip the 0th entry and start with 1.
+        /// The index of the lowest never used entry.  We skip the 0th and 1st entries and start with 2.
         /// If all entries have been used, s_unusedEntryIndex == s_entries.Length.  This counter
         /// never decreases.
         /// </summary>
-        private static int s_unusedEntryIndex = 1;
+        private static int s_unusedEntryIndex = 2;
 
         /// <summary>
         /// Assigns a sync table entry to the object in a thread-safe way.
@@ -98,12 +98,11 @@ namespace System.Threading
                 using (LockHolder.Hold(s_lock))
                 {
                     // After acquiring the lock check whether another thread already assigned the sync entry
-                    if (ObjectHeader.GetSyncEntryIndex(*pHeader, out int hashOrIndex))
+                    if (ObjectHeader.GetSyncEntryIndex(*pHeader, out int syncIndex))
                     {
-                        return hashOrIndex;
+                        return syncIndex;
                     }
 
-                    int syncIndex;
                     if (s_freeEntryList != 0)
                     {
                         // Grab a free entry from the list
