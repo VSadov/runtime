@@ -241,18 +241,18 @@ namespace System.Threading
         {
             // TODO: VS spin
 
-            int result = TryLock(o);
+            int result = TryAcquire(o);
             if (result == 0)
                 result = GetSyncIndex(o);
 
             return result;
         }
 
-        // one-shot version
+        // only acquire if unowned.
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        public static unsafe int TryLock(object o)
+        public static unsafe int TryAcquire(object o)
         {
             Debug.Assert(o != null);
 
@@ -316,7 +316,7 @@ namespace System.Threading
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        public static unsafe int Unlock(object o)
+        public static unsafe int Release(object o)
         {
             Debug.Assert(o != null);
             int currentThreadID = Environment.CurrentManagedThreadId;

@@ -136,7 +136,7 @@ namespace System.Threading
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
 
-            int resultOrIndex = ObjectHeader.Unlock(obj);
+            int resultOrIndex = ObjectHeader.Release(obj);
             if (resultOrIndex == 1)
                 return;
 
