@@ -231,7 +231,7 @@ namespace System.Threading
 
             int currentThreadID = Environment.CurrentManagedThreadId;
             // does thread ID fit?
-            if ((currentThreadID & SBLK_MASK_LOCK_THREADID) != currentThreadID)
+            if (currentThreadID > SBLK_MASK_LOCK_THREADID)
                 return GetSyncIndex(obj);
 
             fixed (byte* pRawData = &obj.GetRawData())
@@ -270,11 +270,10 @@ namespace System.Threading
                     // we own the lock already
                     if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID)
                     {
-                        // try incrementing recursion level
-                        if ((oldBits & SBLK_MASK_LOCK_RECLEVEL) != SBLK_MASK_LOCK_RECLEVEL)
+                        // try incrementing recursion level, check for overflow
+                        int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
+                        if ((newBits & SBLK_MASK_LOCK_RECLEVEL) != 0)
                         {
-                            // if recursion count is not full, increment by one
-                            int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
                             if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
                             {
                                 return 1;
@@ -285,6 +284,7 @@ namespace System.Threading
                         }
                         else
                         {
+                            // overflow, transition to a Lock
                             return SyncTable.AssignEntry(obj, pHeader);
                         }
                     }
