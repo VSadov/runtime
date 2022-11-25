@@ -307,10 +307,10 @@ namespace System.Threading
                         return SyncTable.AssignEntry(o, pHeader);
                     }
                 }
-            }
 
-            // someone else owns.
-            return 0;
+                // someone else owns.
+                return 0;
+            }
         }
 
         // 1 - success
@@ -350,10 +350,10 @@ namespace System.Threading
                 {
                     return syncIndex;
                 }
-            }
 
-            // someone else owns or noone.
-            return 0;
+                // someone else owns or noone.
+                return 0;
+            }
         }
 
         // 1 - yes
