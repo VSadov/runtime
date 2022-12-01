@@ -225,7 +225,7 @@ namespace System.Threading
         // Thin lock is an optimization for such scenarios.
         //
         // If we see a thin lock held by other thread for longer than ~5 microseconds, we will "inflate" the lock
-        // and let the adaptible Lock sort it out whether we have a contentious lock or a long-held lock.
+        // and let the adaptive spinning in the fat Lock sort it out whether we have a contentious lock or a long-held lock.
         //
         // Another thing to consider is that SpinWait(1) is calibrated to about 35-50 nanoseconds,
         // as long as nop/pause does not take longer, which it should not, as that would be getting close to the RAM latency.
@@ -252,7 +252,9 @@ namespace System.Threading
         //   syncIndex - retry with the Lock
         public static unsafe int Acquire(object obj)
         {
-            return TryAcquire(obj, retries: 16);
+            // Lock.s_processorCount is lazy-initialized at fist contention.
+            // untill then assume multicore
+            return TryAcquire(obj, retries: Lock.s_processorCount == 1 ? 0 : 16);
         }
 
         // 1 - success

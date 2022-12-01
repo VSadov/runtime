@@ -18,9 +18,9 @@ namespace System.Threading
         //
         // NOTE: Lock must not have a static (class) constructor, as Lock itself is used to synchronize
         // class construction.  If Lock has its own class constructor, this can lead to infinite recursion.
-        // All static data in Lock must be pre-initialized.
+        // All static data in Lock must be lazy-initialized.
         //
-        private static int s_maxSpinCount;
+        internal static int s_processorCount;
 
         //
         // m_state layout:
@@ -38,10 +38,11 @@ namespace System.Threading
         private const int Uncontended = 0;
 
         // state of the lock
-        private volatile int _state;
-        private uint _recursionCount;
+        private int _state;
         private int _owningThreadId;
-        private volatile AutoResetEvent? _lazyEvent;
+        private uint _recursionCount;
+        private int _maxSpinCount;
+        private AutoResetEvent? _lazyEvent;
 
         // used to transfer the state when inflating thin locks
         internal void InitializeLocked(int threadId, int recursionCount)
@@ -51,6 +52,7 @@ namespace System.Threading
             _state = threadId == 0 ? Uncontended : Locked;
             _owningThreadId = threadId;
             _recursionCount = (uint)recursionCount;
+            _maxSpinCount = SpinningNotInitialized;
         }
 
         private AutoResetEvent Event
@@ -149,17 +151,22 @@ namespace System.Threading
 
             int spins = 1;
 
-            if (s_maxSpinCount == SpinningNotInitialized)
+            if (s_processorCount == 0)
             {
                 // Use RhGetProcessCpuCount directly to avoid Environment.ProcessorCount->ClassConstructorRunner->Lock->Environment.ProcessorCount cycle
-                s_maxSpinCount = (RuntimeImports.RhGetProcessCpuCount() > 1) ? MaxSpinningValue : SpinningDisabled;
+                s_processorCount = RuntimeImports.RhGetProcessCpuCount();
+            }
+
+            if (_maxSpinCount == SpinningNotInitialized)
+            {
+                _maxSpinCount = (s_processorCount > 1) ? MaxSpinningValue : SpinningDisabled;
             }
 
             while (true)
             {
                 //
                 // Try to grab the lock.  We may take the lock here even if there are existing waiters.  This creates the possibility
-                // of starvation of waiters, but it also prevents lock convoys from destroying perf.
+                // of starvation of waiters, but it also prevents lock convoys and preempted waiters from destroying perf.
                 // The starvation issue is largely mitigated by the priority boost the OS gives to a waiter when we set
                 // the event, after we release the lock.  Eventually waiters will be boosted high enough to preempt this thread.
                 //
@@ -170,7 +177,7 @@ namespace System.Threading
                 //
                 // Back off by a factor of 2 for each attempt, up to MaxSpinCount
                 //
-                if (spins <= s_maxSpinCount)
+                if (spins <= _maxSpinCount)
                 {
                     Thread.SpinWaitInternal(spins);
                     spins *= 2;
