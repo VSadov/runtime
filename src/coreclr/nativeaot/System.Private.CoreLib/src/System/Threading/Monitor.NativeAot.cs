@@ -59,24 +59,7 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            int resultOrIndex = ObjectHeader.Acquire(obj);
-            if (resultOrIndex == 1)
-            {
-                lockTaken = true;
-                return;
-            }
-
-            Lock lck = resultOrIndex == 0 ?
-                ObjectHeader.GetLockObject(obj) :
-                SyncTable.GetLockObject(resultOrIndex);
-
-            if (lck.TryAcquire(0))
-            {
-                lockTaken = true;
-                return;
-            }
-
-            TryAcquireContended(lck, obj, Timeout.Infinite);
+            Enter(obj);
             lockTaken = true;
         }
 
@@ -98,21 +81,7 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            int resultOrIndex = ObjectHeader.TryAcquire(obj);
-            if (resultOrIndex == 1)
-            {
-                lockTaken = true;
-                return;
-            }
-
-            if (resultOrIndex == 0)
-            {
-                lockTaken = false;
-                return;
-            }
-
-            Lock lck = SyncTable.GetLockObject(resultOrIndex);
-            lockTaken = lck.TryAcquire(0);
+            lockTaken = TryEnter(obj);
         }
 
         public static bool TryEnter(object obj, int millisecondsTimeout)
@@ -139,27 +108,7 @@ namespace System.Threading
             if (lockTaken)
                 throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            if (millisecondsTimeout < -1)
-                throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
-
-            int resultOrIndex = ObjectHeader.TryAcquire(obj);
-            if (resultOrIndex == 1)
-            {
-                lockTaken = true;
-                return;
-            }
-
-            Lock lck = resultOrIndex == 0 ?
-                ObjectHeader.GetLockObject(obj) :
-                SyncTable.GetLockObject(resultOrIndex);
-
-            if (lck.TryAcquire(0))
-            {
-                lockTaken = true;
-                return;
-            }
-
-            lockTaken = TryAcquireContended(lck, obj, millisecondsTimeout);
+            lockTaken = TryEnter(obj, millisecondsTimeout);
         }
 
         public static void Exit(object obj)
@@ -257,20 +206,19 @@ namespace System.Threading
         }
 
         // Represents an item a thread is blocked on. This structure is allocated on the stack and accessed by the debugger.
-        // Fields are volatile to avoid potential compiler optimizations.
         private struct DebugBlockingItem
         {
             // The object the thread is waiting on
-            public volatile object _object;
+            public object _object;
 
             // Indicates how the thread is blocked on the item
-            public volatile DebugBlockingItemType _blockingType;
+            public DebugBlockingItemType _blockingType;
 
             // Blocking timeout in milliseconds or Timeout.Infinite for no timeout
-            public volatile int _timeout;
+            public int _timeout;
 
             // Next pointer in the linked list of DebugBlockingItem records
-            public volatile IntPtr _next;
+            public IntPtr _next;
         }
 
         private unsafe struct DebugBlockingScope : IDisposable
