@@ -342,7 +342,7 @@ namespace System.Threading
 
                 // spin a bit before retrying (1 spinwait is roughly 35 nsec)
                 // the object is not pinned here
-                Thread.SpinWait(iteration);
+                Thread.SpinWaitInternal(iteration);
             }
 
             // owned by somebody else
