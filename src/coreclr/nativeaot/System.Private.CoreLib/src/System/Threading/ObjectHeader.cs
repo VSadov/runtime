@@ -217,11 +217,48 @@ namespace System.Threading
             while (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) != oldBits);
         }
 
-        // only acquire if unowned.
+        //
+        // A few words about spinning choices:
+        //
+        // Most locks are not contentious. In fact most locks provide exclusive access safety, but in reality are used by
+        // one thread. And then there are locks that do see multiple threads, but the accesses are short and not overlapping.
+        // Thin lock is an optimization for such scenarios.
+        //
+        // If we see a thin lock held by other thread for longer than ~5 microseconds, we will "inflate" the lock
+        // and let the adaptible Lock sort it out whether we have a contentious lock or a long-held lock.
+        //
+        // Another thing to consider is that SpinWait(1) is calibrated to about 35-50 nanoseconds,
+        // as long as nop/pause does not take longer, which it should not, as that would be getting close to the RAM latency.
+        //
+        // Considering that taking and releaseing the lock takes 2 CAS instructions + some overhead, we can estimate shortest
+        // time the lock can be held in hundreds of nanoseconds. (TODO: VS measure that) Thus it is unlikely to see more than
+        // 8-10 threads contending for the lock without inflating it. Therefore we can expect to acquire a thin lock in
+        // under 16 tries.
+        //
+        // As for the backoff strategy we have two choices:
+        // Exponential back-off with a lmit:
+        //   0, 1, 2, 4, 8, 8, 8, 8, 8, 8, 8, . . . .
+        //
+        // Linear back-off
+        //   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, . . . .
+        //
+        // Here these strategies are close in terms of average and worst case latency, so we will prefer linear back-off
+        // as it favors low-contention scenario, which we expect.
+        //
+
+        // Returs:
+        //   1 - success
+        //   0 - failed
+        //   syncIndex - retry with the Lock
+        public static unsafe int Acquire(object obj)
+        {
+            return TryAcquire(obj, retries: 16);
+        }
+
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        public static unsafe int TryAcquire(object obj)
+        public static unsafe int TryAcquire(object obj, int retries = 0)
         {
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
@@ -234,86 +271,88 @@ namespace System.Threading
             if (currentThreadID > SBLK_MASK_LOCK_THREADID)
                 return GetSyncIndex(obj);
 
-            fixed (byte* pRawData = &obj.GetRawData())
+            // loop when the lock is owned by somebody else.
+            // this loop will spinwait between iterations.
+            for(int iteration = 0; iteration <= retries; retries++)
             {
-                int* pHeader = GetHeaderPtr(pRawData);
-
-                while (true)
+                fixed (byte* pRawData = &obj.GetRawData())
                 {
-                    int oldBits = *pHeader;
+                    int* pHeader = GetHeaderPtr(pRawData);
 
-                    // if noone owns, try setting our thread id
-                    if ((oldBits & MASK_HASHCODE_INDEX) == 0)
+                    // rare retries when lock is not owned by somebody else.
+                    // these do not count as iterations and do not spinwait.
+                    while (true)
                     {
-                        int newBits = oldBits | currentThreadID;
-                        if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                        int oldBits = *pHeader;
+
+                        // if noone owns, try setting our thread id
+                        if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                         {
-                            return 1;
-                        }
-
-                        // contention, but we do not know if there is owner, must try again
-                        continue;
-                    }
-
-                    // has sync entry
-                    if (GetSyncEntryIndex(oldBits, out int syncIndex))
-                    {
-                        return syncIndex;
-                    }
-
-                    // has hashcode
-                    if ((oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) != 0)
-                    {
-                        return SyncTable.AssignEntry(obj, pHeader);
-                    }
-
-                    // we own the lock already
-                    if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID)
-                    {
-                        // try incrementing recursion level, check for overflow
-                        int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
-                        if ((newBits & SBLK_MASK_LOCK_RECLEVEL) != 0)
-                        {
+                            int newBits = oldBits | currentThreadID;
                             if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
                             {
                                 return 1;
                             }
 
-                            // contention, but we still own the lock and may be able to increment, try again
+                            // contention on a lock that noone owned,
+                            // but we do not know if there is an owner yet, so try again
                             continue;
                         }
-                        else
+
+                        // has sync entry -> slow path
+                        if (GetSyncEntryIndex(oldBits, out int syncIndex))
                         {
-                            // overflow, transition to a Lock
+                            return syncIndex;
+                        }
+
+                        // has hashcode -> slow path
+                        if ((oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) != 0)
+                        {
                             return SyncTable.AssignEntry(obj, pHeader);
                         }
+
+                        // we own the lock already
+                        if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID)
+                        {
+                            // try incrementing recursion level, check for overflow
+                            int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
+                            if ((newBits & SBLK_MASK_LOCK_RECLEVEL) != 0)
+                            {
+                                if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                                {
+                                    return 1;
+                                }
+
+                                // contention on owned lock,
+                                // perhaps hashcode was installed or finalization bits were touched.
+                                // we still own the lock though and may be able to increment, try again
+                                continue;
+                            }
+                            else
+                            {
+                                // overflow, transition to a fat Lock
+                                return SyncTable.AssignEntry(obj, pHeader);
+                            }
+                        }
+
+                        // someone else owns.
+                        break;
                     }
-
-                    // someone else owns.
-                    return 0;
                 }
+
+                // spin a bit before retrying (1 spinwait is roughly 35 nsec)
+                // the object is not pinned here
+                Thread.SpinWait(iteration);
             }
+
+            // owned by somebody else
+            return 0;
         }
 
-        // Same as TryAcquire, but with some retrying when owned by someone else.
-        // 1 - success
-        // 0 - failed
-        // syncIndex - retry with the Lock
-        public static unsafe int Acquire(object obj)
-        {
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj));
-
-            Debug.Assert(!(obj is Lock),
-                "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
-
-            // TODO: VS spin
-            return TryAcquire(obj);
-        }
-
-        // 1 - success
-        // 0 - failed
-        // syncIndex - retry with the Lock
+        // Returs:
+        //   1 - success
+        //   0 - failed
+        //   syncIndex - retry with the Lock
         public static unsafe int Release(object obj)
         {
             if (obj == null)
@@ -361,9 +400,10 @@ namespace System.Threading
             }
         }
 
-        // 1 - yes
-        // 0 - no
-        // syncIndex - retry with the Lock
+        // Returs:
+        //   1 - yes
+        //   0 - no
+        //   syncIndex - retry with the Lock
         public static unsafe int IsAcquired(object obj)
         {
             if (obj == null)
