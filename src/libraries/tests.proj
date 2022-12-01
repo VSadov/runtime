@@ -501,7 +501,6 @@
     <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Net.Mail\tests\Functional\System.Net.Mail.Functional.Tests.csproj"
                       Condition="'$(TargetOS)' == 'windows'"/>
 
-    <!-- TODO: VS temporarily disable due to an assert in ILC -->
 
     <!-- TODO: VS temporarily disable due to failure at run time -->
     <ProjectExclusions Include="$(MSBuildThisFileDirectory)System.Data.DataSetExtensions\tests\System.Data.DataSetExtensions.Tests.csproj" />
