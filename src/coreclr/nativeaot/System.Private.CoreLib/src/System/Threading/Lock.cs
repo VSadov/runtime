@@ -11,10 +11,10 @@ namespace System.Threading
     public sealed class Lock : IDisposable
     {
         // The following constants define characteristics of spinning logic in the Lock class
-        private const int SpinningNotInitialized = -1;
-        private const int SpinningDisabled = 0;
-        private const int MaxSpinCount = 200;
-        private const int MinSpinCount = 10;
+        private const uint MaxSpinCount = 200;
+        private const uint MinSpinCount = 10;
+        private const uint SpinningNotInitialized = MaxSpinCount + 1;
+        private const uint SpinningDisabled = 0;
 
         //
         // NOTE: Lock must not have a static (class) constructor, as Lock itself is used to synchronize
