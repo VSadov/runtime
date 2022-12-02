@@ -11,9 +11,10 @@ namespace System.Threading
     public sealed class Lock : IDisposable
     {
         // The following constants define characteristics of spinning logic in the Lock class
-        private const int SpinningNotInitialized = 0;
-        private const int SpinningDisabled = -1;
-        private const int MaxSpinningValue = 1000;
+        private const int SpinningNotInitialized = -1;
+        private const int SpinningDisabled = 0;
+        private const int MaxSpinCount = 200;
+        private const int MinSpinCount = 10;
 
         //
         // NOTE: Lock must not have a static (class) constructor, as Lock itself is used to synchronize
@@ -41,7 +42,7 @@ namespace System.Threading
         private int _state;
         private int _owningThreadId;
         private uint _recursionCount;
-        private int _maxSpinCount;
+        private uint _spinCount;
         private AutoResetEvent? _lazyEvent;
 
         // used to transfer the state when inflating thin locks
@@ -52,7 +53,7 @@ namespace System.Threading
             _state = threadId == 0 ? Uncontended : Locked;
             _owningThreadId = threadId;
             _recursionCount = (uint)recursionCount;
-            _maxSpinCount = SpinningNotInitialized;
+            _spinCount = SpinningNotInitialized;
         }
 
         private AutoResetEvent Event
@@ -149,19 +150,18 @@ namespace System.Threading
             if (millisecondsTimeout == 0)
                 return false;
 
-            int spins = 1;
-
             if (s_processorCount == 0)
             {
                 // Use RhGetProcessCpuCount directly to avoid Environment.ProcessorCount->ClassConstructorRunner->Lock->Environment.ProcessorCount cycle
                 s_processorCount = RuntimeImports.RhGetProcessCpuCount();
             }
 
-            if (_maxSpinCount == SpinningNotInitialized)
+            if (_spinCount == SpinningNotInitialized)
             {
-                _maxSpinCount = (s_processorCount > 1) ? MaxSpinningValue : SpinningDisabled;
+                _spinCount = (s_processorCount > 1) ? MaxSpinCount : SpinningDisabled;
             }
 
+            uint iteration = 0;
             while (true)
             {
                 //
@@ -172,17 +172,24 @@ namespace System.Threading
                 //
                 int oldState = _state;
                 if ((oldState & Locked) == 0 && Interlocked.CompareExchange(ref _state, oldState | Locked, oldState) == oldState)
-                    goto GotTheLock;
-
-                //
-                // Back off by a factor of 2 for each attempt, up to MaxSpinCount
-                //
-                if (spins <= _maxSpinCount)
                 {
-                    Thread.SpinWaitInternal(spins);
-                    spins *= 2;
+                    // if spinning was successful, update spin count
+                    if (iteration < _spinCount)
+                        _spinCount = Math.Min(_spinCount + 1, MaxSpinCount);
+
+                    goto GotTheLock;
                 }
-                else if (oldState != 0)
+
+                // if spinning was unsuccessful. reduce spin count.
+                if (iteration == _spinCount && _spinCount != SpinningDisabled)
+                    _spinCount = Math.Max(_spinCount - 1, MinSpinCount);
+
+                if (iteration++ < _spinCount)
+                {
+                    Thread.SpinWaitInternal(1);
+                    continue;
+                }
+                else if ((oldState & Locked) != 0)
                 {
                     //
                     // We reached our spin limit, and need to wait.  Increment the waiter count.
@@ -194,6 +201,8 @@ namespace System.Threading
                     if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                         break;
                 }
+
+                // TODO: VS exponential backoff
             }
 
             //
@@ -245,6 +254,8 @@ namespace System.Threading
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                             break;
                     }
+
+                    // TODO: VS exponential backoff ?
                 }
             }
 
@@ -354,6 +365,8 @@ namespace System.Threading
                     if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                         return;
                 }
+
+                // TODO: VS exponential backoff
             }
         }
 
