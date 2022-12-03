@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using System.IO;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 
@@ -15,6 +16,13 @@ namespace System.Threading
         private const uint MinSpinCount = 10;
         private const uint SpinningNotInitialized = MaxSpinCount + 1;
         private const uint SpinningDisabled = 0;
+
+        // We will use exponential backoff in cases when we need to change state atomically and cannot
+        // make progress due to contention.
+        // While we cannot know how much wait we need between successfull attempts, exponential backoff
+        // should generally be within 2X of that and will do a lot less attempts than an eager retry.
+        // To protect against degenerate cases we will cap the iteration wait up to 1024 spinwaits.
+        private const uint MaxExponentialBackoffBits = 10;
 
         //
         // NOTE: Lock must not have a static (class) constructor, as Lock itself is used to synchronize
@@ -133,6 +141,17 @@ namespace System.Threading
             return TryAcquireContended(currentThreadId, millisecondsTimeout, trackContentions);
         }
 
+        private static unsafe void ExponentialBackoff(uint iteration)
+        {
+            if (iteration > 0)
+            {
+                // no need for much randomness here, we will just hash the frame address + iteration.
+                uint rand = ((uint)&iteration + iteration) * 2654435769u;
+                uint spins = rand >> (byte)(32 - Math.Min(iteration, MaxExponentialBackoffBits));
+                Thread.SpinWaitInternal((int)spins);
+            }
+        }
+
         private bool TryAcquireContended(int currentThreadId, int millisecondsTimeout, bool trackContentions = false)
         {
             //
@@ -197,12 +216,13 @@ namespace System.Threading
                     // we'd need to have about 1 billion waiting threads, which is inconceivable anytime in the
                     // forseeable future.
                     //
-                    int newState = (oldState + WaiterCountIncrement) & ~WaiterWoken;
+                    int newState = oldState + WaiterCountIncrement;
                     if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                         break;
                 }
 
-                // TODO: VS exponential backoff
+                Debug.Assert(iteration >= _spinCount);
+                ExponentialBackoff(iteration - _spinCount);
             }
 
             //
@@ -217,6 +237,7 @@ namespace System.Threading
             TimeoutTracker timeoutTracker = TimeoutTracker.Start(millisecondsTimeout);
             AutoResetEvent ev = Event;
 
+            iteration = 0;
             while (true)
             {
                 Debug.Assert(_state >= WaiterCountIncrement);
@@ -239,10 +260,12 @@ namespace System.Threading
 
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                             goto GotTheLock;
+
+                        // TODO: VS spin before considering the rest??
                     }
                     else if (!waitSucceeded)
                     {
-                        // The lock is not available, and we timed out.  We're not going to wait agin.
+                        // The lock is not available, and we timed out.  We're not going to wait again.
                         newState -= WaiterCountIncrement;
 
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
@@ -255,7 +278,7 @@ namespace System.Threading
                             break;
                     }
 
-                    // TODO: VS exponential backoff ?
+                    ExponentialBackoff(iteration++);
                 }
             }
 
@@ -342,6 +365,7 @@ namespace System.Threading
             Debug.Assert(_recursionCount == 0);
             Debug.Assert(_owningThreadId == 0);
 
+            uint iteration = 0;
             while (true)
             {
                 int oldState = _state;
@@ -366,7 +390,7 @@ namespace System.Threading
                         return;
                 }
 
-                // TODO: VS exponential backoff
+                ExponentialBackoff(iteration++);
             }
         }
 
