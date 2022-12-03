@@ -31,7 +31,6 @@ namespace System.Threading
         internal const int MASK_HASHCODE_INDEX = BIT_SBLK_IS_HASHCODE - 1;
         private const int BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX = 1 << IS_HASH_OR_SYNCBLKINDEX_BIT_NUMBER;
 
-
         // if BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX is clear, the rest of the header dword is laid out as follows:
         // - lower ten bits (bits 0 thru 9) is thread id used for the thin locks
         //   value is zero if no thread is holding the lock
@@ -39,8 +38,8 @@ namespace System.Threading
         //   value is zero if lock is not taken or only taken once by the same thread
         private const int SBLK_MASK_LOCK_THREADID = 0x000003FF;   // special value of 0 + 1023 thread ids
         private const int SBLK_MASK_LOCK_RECLEVEL = 0x0000FC00;   // 64 recursion levels
-        private const int SBLK_LOCK_RECLEVEL_INC =  0x00000400;   // each level is this much higher than the previous one
-        private const int SBLK_RECLEVEL_SHIFT =     10;           // shift right this much to get recursion level
+        private const int SBLK_LOCK_RECLEVEL_INC = 0x00000400;    // each level is this much higher than the previous one
+        private const int SBLK_RECLEVEL_SHIFT = 10;               // shift right this much to get recursion level
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static unsafe int* GetHeaderPtr(byte* pRawData)
@@ -227,8 +226,9 @@ namespace System.Threading
         // If we see a thin lock held by other thread for longer than ~5 microseconds, we will "inflate" the lock
         // and let the adaptive spinning in the fat Lock sort it out whether we have a contentious lock or a long-held lock.
         //
-        // Another thing to consider is that SpinWait(1) is calibrated to about 35-50 nanoseconds,
-        // as long as nop/pause does not take longer, which it should not, as that would be getting close to the RAM latency.
+        // Another thing to consider is that SpinWait(1) is calibrated to about 35-50 nanoseconds.
+        // It can take much longer only if nop/pause takes much longer, which it should not, as that would be getting
+        // close to the RAM latency.
         //
         // Considering that taking and releaseing the lock takes 2 CAS instructions + some overhead, we can estimate shortest
         // time the lock can be held in hundreds of nanoseconds. (TODO: VS measure that) Thus it is unlikely to see more than
@@ -269,13 +269,44 @@ namespace System.Threading
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
             int currentThreadID = Environment.CurrentManagedThreadId;
+
+            // common cases - lock is unused or there is a sync entry
+            fixed (byte* pRawData = &obj.GetRawData())
+            {
+                int* pHeader = GetHeaderPtr(pRawData);
+                int oldBits = *pHeader;
+                // if unused for anything, try setting our thread id
+                // N.B. neither the hashcode nor thread ID nor index can be 0, and hashcode is largest of all
+                if ((oldBits & MASK_HASHCODE_INDEX) == 0 &&      // TODO: VS tuning just compare with 0 ? (and use 0 in interlocked)
+                    (uint)currentThreadID <= SBLK_MASK_LOCK_THREADID &&
+                    Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
+                {
+                    return 1;
+                }
+
+                // has sync entry -> slow path
+                if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                {
+                    return syncIndex;
+                }
+            }
+
+            return TryAcquireUncommon(obj, currentThreadID, retries);
+        }
+
+        // handling uncommon cases here - recursive lock, contention, retries
+        // 1 - success
+        // 0 - failed
+        // syncIndex - retry with the Lock
+        private static unsafe int TryAcquireUncommon(object obj, int currentThreadID, int retries)
+        {
             // does thread ID fit?
             if (currentThreadID > SBLK_MASK_LOCK_THREADID)
                 return GetSyncIndex(obj);
 
-            // loop when the lock is owned by somebody else.
+            // retry when the lock is owned by somebody else.
             // this loop will spinwait between iterations.
-            for(int iteration = 0; iteration <= retries; retries++)
+            for (int iteration = 0; iteration <= retries; retries++)
             {
                 fixed (byte* pRawData = &obj.GetRawData())
                 {
@@ -287,7 +318,8 @@ namespace System.Threading
                     {
                         int oldBits = *pHeader;
 
-                        // if noone owns, try setting our thread id
+                        // if unused for anything, try setting our thread id
+                        // N.B. neither the hashcode nor thread ID nor index can be 0, and hashcode is largest of all
                         if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                         {
                             int newBits = oldBits | currentThreadID;
@@ -325,7 +357,7 @@ namespace System.Threading
                                     return 1;
                                 }
 
-                                // contention on owned lock,
+                                // rare contention on owned lock,
                                 // perhaps hashcode was installed or finalization bits were touched.
                                 // we still own the lock though and may be able to increment, try again
                                 continue;
@@ -387,7 +419,8 @@ namespace System.Threading
                             return 1;
                         }
 
-                        // contention, we still own the lock, try again
+                        // rare contention on owned lock,
+                        // we still own the lock, try again
                         continue;
                     }
 
