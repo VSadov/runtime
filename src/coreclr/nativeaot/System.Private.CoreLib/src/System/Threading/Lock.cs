@@ -180,103 +180,99 @@ namespace System.Threading
                 _spinCount = (s_processorCount > 1) ? MaxSpinCount : SpinningDisabled;
             }
 
-            uint iteration = 0;
+            bool hasWaited = false;
+            // we will retry after waking up
             while (true)
             {
-                //
-                // Try to grab the lock.  We may take the lock here even if there are existing waiters.  This creates the possibility
-                // of starvation of waiters, but it also prevents lock convoys and preempted waiters from destroying perf.
-                // The starvation issue is largely mitigated by the priority boost the OS gives to a waiter when we set
-                // the event, after we release the lock.  Eventually waiters will be boosted high enough to preempt this thread.
-                //
-                int oldState = _state;
-                if ((oldState & Locked) == 0 && Interlocked.CompareExchange(ref _state, oldState | Locked, oldState) == oldState)
-                {
-                    // if spinning was successful, update spin count
-                    if (iteration < _spinCount)
-                        _spinCount = Math.Min(_spinCount + 1, MaxSpinCount);
-
-                    goto GotTheLock;
-                }
-
-                // if spinning was unsuccessful. reduce spin count.
-                if (iteration == _spinCount && _spinCount != SpinningDisabled)
-                    _spinCount = Math.Max(_spinCount - 1, MinSpinCount);
-
-                if (iteration++ < _spinCount)
-                {
-                    Thread.SpinWaitInternal(1);
-                    continue;
-                }
-                else if ((oldState & Locked) != 0)
+                uint iteration = 0;
+                uint localSpinCount = _spinCount;
+                // inner loop where we try acquiring the lock or registering as a waiter
+                while (true)
                 {
                     //
-                    // We reached our spin limit, and need to wait.  Increment the waiter count.
-                    // Note that we do not do any overflow checking on this increment.  In order to overflow,
-                    // we'd need to have about 1 billion waiting threads, which is inconceivable anytime in the
-                    // forseeable future.
+                    // Try to grab the lock.  We may take the lock here even if there are existing waiters.  This creates the possibility
+                    // of starvation of waiters, but it also prevents lock convoys and preempted waiters from destroying perf.
                     //
-                    int newState = oldState + WaiterCountIncrement;
-                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
-                        break;
+                    int oldState = _state;
+                    if ((oldState & Locked) == 0)
+                    {
+                        int newState = oldState | Locked;
+                        if (hasWaited)
+                            newState = (newState - WaiterCountIncrement) & ~WaiterWoken;
+
+                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                        {
+                            // spinning was successful, update spin count
+                            if (iteration < localSpinCount && localSpinCount < MaxSpinCount)
+                                _spinCount = localSpinCount + 1;
+
+                            goto GotTheLock;
+                        }
+                    }
+
+                    // spinning was unsuccessful. reduce spin count.
+                    if (iteration == localSpinCount && localSpinCount > MinSpinCount)
+                        _spinCount = localSpinCount - 1;
+
+                    if (iteration++ < localSpinCount)
+                    {
+                        Thread.SpinWaitInternal(1);
+                        continue;
+                    }
+                    else if ((oldState & Locked) != 0)
+                    {
+                        //
+                        // We reached our spin limit, and need to wait.  Increment the waiter count.
+                        // Note that we do not do any overflow checking on this increment.  In order to overflow,
+                        // we'd need to have about 1 billion waiting threads, which is inconceivable anytime in the
+                        // forseeable future.
+                        //
+                        int newState = oldState + WaiterCountIncrement;
+                        if (hasWaited)
+                            newState = (newState - WaiterCountIncrement) & ~WaiterWoken;
+
+                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                            break;
+                    }
+
+                    Debug.Assert(iteration >= localSpinCount);
+                    ExponentialBackoff(iteration - localSpinCount);
                 }
 
-                Debug.Assert(iteration >= _spinCount);
-                ExponentialBackoff(iteration - _spinCount);
-            }
+                //
+                // Now we wait.
+                //
 
-            //
-            // Now we wait.
-            //
+                if (trackContentions)
+                {
+                    Monitor.IncrementLockContentionCount();
+                }
 
-            if (trackContentions)
-            {
-                Monitor.IncrementLockContentionCount();
-            }
-
-            TimeoutTracker timeoutTracker = TimeoutTracker.Start(millisecondsTimeout);
-            AutoResetEvent ev = Event;
-
-            iteration = 0;
-            while (true)
-            {
+                TimeoutTracker timeoutTracker = TimeoutTracker.Start(millisecondsTimeout);
+                Debug.Assert(_state >= WaiterCountIncrement);
+                bool waitSucceeded = Event.WaitOne(millisecondsTimeout);
                 Debug.Assert(_state >= WaiterCountIncrement);
 
-                bool waitSucceeded = ev.WaitOne(timeoutTracker.Remaining);
+                if (!waitSucceeded)
+                    break;
 
+                // we did not time out and will try acquiring the lock
+                hasWaited = true;
+                millisecondsTimeout = timeoutTracker.Remaining;
+            }
+
+            // We timed out.  We're not going to wait again.
+            {
+                uint iteration = 0;
                 while (true)
                 {
                     int oldState = _state;
                     Debug.Assert(oldState >= WaiterCountIncrement);
 
-                    // Clear the "waiter woken" bit.
-                    int newState = oldState & ~WaiterWoken;
+                    int newState = oldState - WaiterCountIncrement;
 
-                    if ((oldState & Locked) == 0)
-                    {
-                        // The lock is available, try to get it.
-                        newState |= Locked;
-                        newState -= WaiterCountIncrement;
-
-                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
-                            goto GotTheLock;
-
-                        // TODO: VS spin before considering the rest??
-                    }
-                    else if (!waitSucceeded)
-                    {
-                        // The lock is not available, and we timed out.  We're not going to wait again.
-                        newState -= WaiterCountIncrement;
-
-                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
-                            return false;
-                    }
-                    else
-                    {
-                        // The lock is not available, and we didn't time out.  We're going to wait again.
-                        if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
-                            break;
-                    }
+                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                        return false;
 
                     ExponentialBackoff(iteration++);
                 }
