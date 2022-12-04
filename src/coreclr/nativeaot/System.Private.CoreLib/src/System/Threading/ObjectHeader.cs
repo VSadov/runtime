@@ -276,7 +276,7 @@ namespace System.Threading
                 int* pHeader = GetHeaderPtr(pRawData);
                 int oldBits = *pHeader;
                 // if unused for anything, try setting our thread id
-                // N.B. neither the hashcode nor thread ID nor index can be 0, and hashcode is largest of all
+                // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all, so we check hashcode value
                 if ((oldBits & MASK_HASHCODE_INDEX) == 0 &&      // TODO: VS tuning just compare with 0 ? (and use 0 in interlocked)
                     (uint)currentThreadID <= SBLK_MASK_LOCK_THREADID &&
                     Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
@@ -306,7 +306,7 @@ namespace System.Threading
 
             // retry when the lock is owned by somebody else.
             // this loop will spinwait between iterations.
-            for (int iteration = 0; iteration <= retries; retries++)
+            for (int iteration = 0; iteration <= retries; iteration++)
             {
                 fixed (byte* pRawData = &obj.GetRawData())
                 {
