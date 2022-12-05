@@ -250,17 +250,19 @@ namespace System.Threading
         //   1 - success
         //   0 - failed
         //   syncIndex - retry with the Lock
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe int Acquire(object obj)
         {
             // Lock.s_processorCount is lazy-initialized at fist contention.
             // untill then assume multicore
-            return TryAcquire(obj, retries: Lock.s_processorCount == 1 ? 0 : 16);
+            return TryAcquire(obj, oneShot: false);
         }
 
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        public static unsafe int TryAcquire(object obj, int retries = 0)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe int TryAcquire(object obj, bool oneShot = true)
         {
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
@@ -268,41 +270,46 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
-            int currentThreadID = Environment.CurrentManagedThreadId;
-
-            // common cases - lock is unused or there is a sync entry
+            // for an object used in locking there are two common cases:
+            // - header bits are unused or
+            // - there is a sync entry
             fixed (byte* pRawData = &obj.GetRawData())
             {
                 int* pHeader = GetHeaderPtr(pRawData);
                 int oldBits = *pHeader;
                 // if unused for anything, try setting our thread id
-                // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all, so we check hashcode value
-                if ((oldBits & MASK_HASHCODE_INDEX) == 0 &&      // TODO: VS tuning just compare with 0 ? (and use 0 in interlocked)
-                    (uint)currentThreadID <= SBLK_MASK_LOCK_THREADID &&
-                    Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
+                // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
+                if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                 {
-                    return 1;
+                    int currentThreadID = Environment.CurrentManagedThreadId;
+                    if ((uint)currentThreadID <= SBLK_MASK_LOCK_THREADID &&
+                        Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
+                    {
+                        return 1;
+                    }
                 }
-
-                // has sync entry -> slow path
-                if (GetSyncEntryIndex(oldBits, out int syncIndex))
+                else if (GetSyncEntryIndex(oldBits, out int syncIndex))
                 {
+                    // has sync entry -> slow path
                     return syncIndex;
                 }
             }
 
-            return TryAcquireUncommon(obj, currentThreadID, retries);
+            return TryAcquireUncommon(obj, oneShot);
         }
 
         // handling uncommon cases here - recursive lock, contention, retries
         // 1 - success
         // 0 - failed
         // syncIndex - retry with the Lock
-        private static unsafe int TryAcquireUncommon(object obj, int currentThreadID, int retries)
+        private static unsafe int TryAcquireUncommon(object obj, bool oneShot)
         {
             // does thread ID fit?
+            int currentThreadID = Environment.CurrentManagedThreadId;
             if (currentThreadID > SBLK_MASK_LOCK_THREADID)
                 return GetSyncIndex(obj);
+
+            int retries = oneShot || Lock.s_processorCount == 1 ? 0 : 16;
 
             // retry when the lock is owned by somebody else.
             // this loop will spinwait between iterations.
@@ -319,7 +326,7 @@ namespace System.Threading
                         int oldBits = *pHeader;
 
                         // if unused for anything, try setting our thread id
-                        // N.B. neither the hashcode nor thread ID nor index can be 0, and hashcode is largest of all
+                        // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
                         if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                         {
                             int newBits = oldBits | currentThreadID;
@@ -387,6 +394,7 @@ namespace System.Threading
         //   1 - success
         //   0 - failed
         //   syncIndex - retry with the Lock
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe int Release(object obj)
         {
             if (obj == null)

@@ -38,6 +38,7 @@ namespace System.Threading
 
         #region Public Enter/Exit methods
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Enter(object obj)
         {
             int resultOrIndex = ObjectHeader.Acquire(obj);
