@@ -141,6 +141,23 @@ namespace System.Threading
             return TryAcquireContended(currentThreadId, millisecondsTimeout, trackContentions);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal bool TryAcquireOneShot(int currentThreadId)
+        {
+            //
+            // Make one quick attempt to acquire an uncontended lock
+            //
+            if (Interlocked.CompareExchange(ref _state, Locked, Uncontended) == Uncontended)
+            {
+                Debug.Assert(_owningThreadId == 0);
+                Debug.Assert(_recursionCount == 0);
+                _owningThreadId = currentThreadId;
+                return true;
+            }
+
+            return false;
+        }
+
         private static unsafe void ExponentialBackoff(uint iteration)
         {
             if (iteration > 0)

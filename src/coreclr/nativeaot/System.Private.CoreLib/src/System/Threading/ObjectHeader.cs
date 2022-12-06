@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Internal.Runtime;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -42,10 +43,10 @@ namespace System.Threading
         private const int SBLK_RECLEVEL_SHIFT = 10;               // shift right this much to get recursion level
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe int* GetHeaderPtr(byte* pRawData)
+        private static unsafe int* GetHeaderPtr(MethodTable** ppMethodTable)
         {
             // The header is 4 bytes before m_pEEType field on all architectures
-            return (int*)(pRawData - sizeof(IntPtr) - sizeof(int));
+            return (int*)ppMethodTable - 1;
         }
 
         /// <summary>
@@ -57,9 +58,9 @@ namespace System.Threading
             if (o == null)
                 return 0;
 
-            fixed (byte* pRawData = &o.GetRawData())
+            fixed (MethodTable** ppMethodTable = &o.GetMethodTableRef())
             {
-                int* pHeader = GetHeaderPtr(pRawData);
+                int* pHeader = GetHeaderPtr(ppMethodTable);
                 int bits = *pHeader;
                 int hashOrIndex = bits & MASK_HASHCODE_INDEX;
                 if ((bits & BIT_SBLK_IS_HASHCODE) != 0)
@@ -164,9 +165,9 @@ namespace System.Threading
 
         private static unsafe int GetSyncIndex(object o)
         {
-            fixed (byte* pRawData = &o.GetRawData())
+            fixed (MethodTable** ppMethodTable = &o.GetMethodTableRef())
             {
-                int* pHeader = GetHeaderPtr(pRawData);
+                int* pHeader = GetHeaderPtr(ppMethodTable);
                 if (GetSyncEntryIndex(*pHeader, out int syncIndex))
                 {
                     return syncIndex;
@@ -270,18 +271,19 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
+            int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
+
             // for an object used in locking there are two common cases:
             // - header bits are unused or
             // - there is a sync entry
-            fixed (byte* pRawData = &obj.GetRawData())
+            fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
             {
-                int* pHeader = GetHeaderPtr(pRawData);
+                int* pHeader = GetHeaderPtr(ppMethodTable);
                 int oldBits = *pHeader;
                 // if unused for anything, try setting our thread id
                 // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
                 if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                 {
-                    int currentThreadID = Environment.CurrentManagedThreadId;
                     if ((uint)currentThreadID <= SBLK_MASK_LOCK_THREADID &&
                         Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
                     {
@@ -290,6 +292,11 @@ namespace System.Threading
                 }
                 else if (GetSyncEntryIndex(oldBits, out int syncIndex))
                 {
+                    if (SyncTable.GetLockObject(syncIndex).TryAcquireOneShot(currentThreadID))
+                    {
+                        return 1;
+                    }
+
                     // has sync entry -> slow path
                     return syncIndex;
                 }
@@ -315,9 +322,9 @@ namespace System.Threading
             // this loop will spinwait between iterations.
             for (int iteration = 0; iteration <= retries; iteration++)
             {
-                fixed (byte* pRawData = &obj.GetRawData())
+                fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
                 {
-                    int* pHeader = GetHeaderPtr(pRawData);
+                    int* pHeader = GetHeaderPtr(ppMethodTable);
 
                     // rare retries when lock is not owned by somebody else.
                     // these do not count as iterations and do not spinwait.
@@ -405,10 +412,9 @@ namespace System.Threading
 
             int currentThreadID = Environment.CurrentManagedThreadId;
 
-            fixed (byte* pRawData = &obj.GetRawData())
+            fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
             {
-                int* pHeader = GetHeaderPtr(pRawData);
-
+                int* pHeader = GetHeaderPtr(ppMethodTable);
                 while (true)
                 {
                     int oldBits = *pHeader;
@@ -456,9 +462,9 @@ namespace System.Threading
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
             int currentThreadID = Environment.CurrentManagedThreadId;
-            fixed (byte* pRawData = &obj.GetRawData())
+            fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
             {
-                int* pHeader = GetHeaderPtr(pRawData);
+                int* pHeader = GetHeaderPtr(ppMethodTable);
                 int oldBits = *pHeader;
 
                 // if we own the lock

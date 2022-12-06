@@ -176,7 +176,7 @@ namespace System.Threading
             }
         }
 
-        public const int IdNone = 0;
+        public const int IdNone = -1;
 
         // The main thread takes the first available id, which is 1. This id will not be recycled until the process exit.
         // We use this id to detect the main thread and report it as a foreground one.

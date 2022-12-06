@@ -281,6 +281,8 @@ void Thread::Construct()
         m_pThreadStressLog = StressLog::CreateThreadStressLog(this);
 #endif // STRESS_LOG
 
+    m_managedThreadId = (uint32_t) -1;
+
     // Everything else should be initialized to 0 via the static initialization of tls_CurrentThread.
 
     ASSERT(m_pThreadLocalModuleStatics == NULL);
@@ -294,7 +296,6 @@ void Thread::Construct()
     ASSERT(m_redirectionContextBuffer == NULL);
 #endif //FEATURE_SUSPEND_REDIRECTION
     ASSERT(m_interruptedContext == NULL);
-    ASSERT(m_managedThreadId == 0);
 }
 
 bool Thread::IsInitialized()
