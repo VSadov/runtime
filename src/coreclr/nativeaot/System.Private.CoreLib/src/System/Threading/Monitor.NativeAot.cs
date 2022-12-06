@@ -114,15 +114,7 @@ namespace System.Threading
 
         public static void Exit(object obj)
         {
-            int resultOrIndex = ObjectHeader.Release(obj);
-            if (resultOrIndex == 1)
-                return;
-
-            Lock lck = resultOrIndex == 0 ?
-                ObjectHeader.GetLockObject(obj) :
-                SyncTable.GetLockObject(resultOrIndex);
-
-            lck.Release();
+            ObjectHeader.Release(obj);
         }
 
         public static bool IsEntered(object obj)

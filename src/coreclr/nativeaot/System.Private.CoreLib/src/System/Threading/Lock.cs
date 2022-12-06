@@ -331,6 +331,18 @@ namespace System.Threading
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void Release(int currentThreadId)
+        {
+            if (currentThreadId == _owningThreadId && _recursionCount == 0)
+            {
+                ReleaseCore();
+                return;
+            }
+
+            Release();
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void Release()
         {

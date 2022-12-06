@@ -397,12 +397,8 @@ namespace System.Threading
             return 0;
         }
 
-        // Returs:
-        //   1 - success
-        //   0 - failed
-        //   syncIndex - retry with the Lock
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe int Release(object obj)
+        public static unsafe void Release(object obj)
         {
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
@@ -410,14 +406,15 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
-            int currentThreadID = Environment.CurrentManagedThreadId;
+            int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
 
+            int oldBits;
             fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
             {
                 int* pHeader = GetHeaderPtr(ppMethodTable);
                 while (true)
                 {
-                    int oldBits = *pHeader;
+                    oldBits = *pHeader;
 
                     // if we own the lock
                     if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
@@ -430,7 +427,7 @@ namespace System.Threading
 
                         if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
                         {
-                            return 1;
+                            return;
                         }
 
                         // rare contention on owned lock,
@@ -438,15 +435,18 @@ namespace System.Threading
                         continue;
                     }
 
-                    if (GetSyncEntryIndex(oldBits, out int syncIndex))
-                    {
-                        return syncIndex;
-                    }
-
-                    // someone else owns or noone.
-                    return 0;
+                    break;
                 }
             }
+
+            if (GetSyncEntryIndex(oldBits, out int syncIndex))
+            {
+                SyncTable.GetLockObject(syncIndex).Release(currentThreadID);
+                return;
+            }
+
+            // someone else owns or noone.
+            throw new SynchronizationLockException();
         }
 
         // Returs:

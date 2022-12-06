@@ -40,15 +40,7 @@ namespace Internal.Runtime.CompilerHelpers
             if (!lockTaken)
                 return;
 
-            int resultOrIndex = ObjectHeader.Release(obj);
-            if (resultOrIndex == 1)
-                return;
-
-            Lock lck = resultOrIndex == 0 ?
-                ObjectHeader.GetLockObject(obj) :
-                SyncTable.GetLockObject(resultOrIndex);
-
-            lck.Release();
+            ObjectHeader.Release(obj);
             lockTaken = false;
         }
 
@@ -83,15 +75,7 @@ namespace Internal.Runtime.CompilerHelpers
                 return;
 
             object obj = GetStaticLockObject(pEEType);
-            int resultOrIndex = ObjectHeader.Release(obj);
-            if (resultOrIndex == 1)
-                return;
-
-            Lock lck = resultOrIndex == 0 ?
-                ObjectHeader.GetLockObject(obj) :
-                SyncTable.GetLockObject(resultOrIndex);
-
-            lck.Release();
+            ObjectHeader.Release(obj);
             lockTaken = false;
         }
 
