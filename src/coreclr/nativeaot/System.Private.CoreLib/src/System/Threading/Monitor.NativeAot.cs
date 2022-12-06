@@ -118,16 +118,10 @@ namespace System.Threading
             ObjectHeader.Release(obj);
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static bool IsEntered(object obj)
         {
-            int resultOrIndex = ObjectHeader.IsAcquired(obj);
-            if (resultOrIndex == 1)
-                return true;
-
-            if (resultOrIndex == 0)
-                return false;
-
-            return SyncTable.GetLockObject(resultOrIndex).IsAcquired;
+            return ObjectHeader.IsAcquired(obj);
         }
 
         #endregion

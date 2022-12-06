@@ -324,11 +324,17 @@ namespace System.Threading
                 // alive.
                 //
                 int currentThreadId = CurrentThreadId;
-                bool acquired = (currentThreadId == _owningThreadId);
-                if (acquired)
-                    Debug.Assert((_state & Locked) != 0);
-                return acquired;
+                return IsAcquiredByThread(currentThreadId);
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal bool IsAcquiredByThread(int currentThreadId)
+        {
+            bool acquired = (currentThreadId == _owningThreadId);
+            if (acquired)
+                Debug.Assert((_state & Locked) != 0);
+            return acquired;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

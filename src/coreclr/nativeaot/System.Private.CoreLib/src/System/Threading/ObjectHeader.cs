@@ -449,11 +449,8 @@ namespace System.Threading
             throw new SynchronizationLockException();
         }
 
-        // Returs:
-        //   1 - yes
-        //   0 - no
-        //   syncIndex - retry with the Lock
-        public static unsafe int IsAcquired(object obj)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe bool IsAcquired(object obj)
         {
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
@@ -471,16 +468,16 @@ namespace System.Threading
                 if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
                    (oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0)
                 {
-                    return 1;
+                    return true;
                 }
 
                 if (GetSyncEntryIndex(oldBits, out int syncIndex))
                 {
-                    return syncIndex;
+                    return SyncTable.GetLockObject(syncIndex).IsAcquiredByThread(currentThreadID);
                 }
 
                 // someone else owns or noone.
-                return 0;
+                return false;
             }
         }
     }
