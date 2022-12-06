@@ -112,6 +112,7 @@ namespace System.Threading
             lockTaken = TryEnter(obj, millisecondsTimeout);
         }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static void Exit(object obj)
         {
             ObjectHeader.Release(obj);
