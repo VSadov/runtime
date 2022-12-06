@@ -284,7 +284,7 @@ namespace System.Threading
                 // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
                 if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                 {
-                    if ((uint)currentThreadID <= SBLK_MASK_LOCK_THREADID &&
+                    if ((uint)currentThreadID <= (uint)SBLK_MASK_LOCK_THREADID &&
                         Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
                     {
                         return 1;
@@ -292,7 +292,7 @@ namespace System.Threading
                 }
                 else if (GetSyncEntryIndex(oldBits, out int syncIndex))
                 {
-                    if (SyncTable.GetLockObject(syncIndex).TryAcquireOneShot(currentThreadID))
+                    if (SyncTable.GetLockObject(syncIndex).TryAcquireUncontended(currentThreadID))
                     {
                         return 1;
                     }
