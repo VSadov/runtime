@@ -142,7 +142,7 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal bool TryAcquireUncontended(int currentThreadId)
+        internal bool TryAcquireOneShot(int currentThreadId)
         {
             //
             // Make one quick attempt to acquire an uncontended lock

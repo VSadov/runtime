@@ -271,6 +271,7 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
+            // thread ID may be uninitialized (-1), that is ok, it will trigger the "uncommon" helper.
             int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
 
             // for an object used in locking there are two common cases:
@@ -284,6 +285,7 @@ namespace System.Threading
                 // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
                 if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                 {
+                    // if thread ID is too big or uninitialized, we do uncommon part.
                     if ((uint)currentThreadID <= (uint)SBLK_MASK_LOCK_THREADID &&
                         Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
                     {
@@ -292,7 +294,7 @@ namespace System.Threading
                 }
                 else if (GetSyncEntryIndex(oldBits, out int syncIndex))
                 {
-                    if (SyncTable.GetLockObject(syncIndex).TryAcquireUncontended(currentThreadID))
+                    if (SyncTable.GetLockObject(syncIndex).TryAcquireOneShot(currentThreadID))
                     {
                         return 1;
                     }
@@ -406,6 +408,7 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
+            // thread ID may be uninitialized (-1), that is the same as not owning the lock.
             int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
 
             int oldBits;
@@ -458,7 +461,9 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
-            int currentThreadID = Environment.CurrentManagedThreadId;
+            // thread ID may be uninitialized (-1), that is the same as not owning the lock.
+            int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
+
             fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
             {
                 int* pHeader = GetHeaderPtr(ppMethodTable);
