@@ -271,36 +271,36 @@ namespace System.Threading
             Debug.Assert(!(obj is Lock),
                 "Do not use Monitor.Enter or TryEnter on a Lock instance; use Lock methods directly instead.");
 
-            // thread ID may be uninitialized (-1), that is ok, it will trigger the "uncommon" helper.
             int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
-
-            // for an object used in locking there are two common cases:
-            // - header bits are unused or
-            // - there is a sync entry
-            fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
+            // if thread ID is uninitialized too big, we do uncommon part.
+            if ((uint)currentThreadID <= (uint)SBLK_MASK_LOCK_THREADID)
             {
-                int* pHeader = GetHeaderPtr(ppMethodTable);
-                int oldBits = *pHeader;
-                // if unused for anything, try setting our thread id
-                // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
-                if ((oldBits & MASK_HASHCODE_INDEX) == 0)
+                // for an object used in locking there are two common cases:
+                // - header bits are unused or
+                // - there is a sync entry
+                fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
                 {
-                    // if thread ID is too big or uninitialized, we do uncommon part.
-                    if ((uint)currentThreadID <= (uint)SBLK_MASK_LOCK_THREADID &&
-                        Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
+                    int* pHeader = GetHeaderPtr(ppMethodTable);
+                    int oldBits = *pHeader;
+                    // if unused for anything, try setting our thread id
+                    // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
+                    if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                     {
-                        return 1;
+                        if (Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
+                        {
+                            return 1;
+                        }
                     }
-                }
-                else if (GetSyncEntryIndex(oldBits, out int syncIndex))
-                {
-                    if (SyncTable.GetLockObject(syncIndex).TryAcquireOneShot(currentThreadID))
+                    else if (GetSyncEntryIndex(oldBits, out int syncIndex))
                     {
-                        return 1;
-                    }
+                        if (SyncTable.GetLockObject(syncIndex).TryAcquireOneShot(currentThreadID))
+                        {
+                            return 1;
+                        }
 
-                    // has sync entry -> slow path
-                    return syncIndex;
+                        // has sync entry -> slow path
+                        return syncIndex;
+                    }
                 }
             }
 
