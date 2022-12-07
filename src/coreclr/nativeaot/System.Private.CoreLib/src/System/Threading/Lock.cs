@@ -12,9 +12,9 @@ namespace System.Threading
     public sealed class Lock : IDisposable
     {
         // The following constants define characteristics of spinning logic in the Lock class
-        private const uint MaxSpinCount = 200;
-        private const uint MinSpinCount = 10;
-        private const uint SpinningNotInitialized = MaxSpinCount + 1;
+        private const uint MaxSpinLimit = 200;
+        private const uint MinSpinLimit = 10;
+        private const uint SpinningNotInitialized = MaxSpinLimit + 1;
         private const uint SpinningDisabled = 0;
 
         // We will use exponential backoff in cases when we need to change state atomically and cannot
@@ -50,7 +50,7 @@ namespace System.Threading
         private int _state;
         private int _owningThreadId;
         private uint _recursionCount;
-        private uint _spinCount;
+        private uint _spinLimit;
         private AutoResetEvent? _lazyEvent;
 
         // used to transfer the state when inflating thin locks
@@ -61,7 +61,7 @@ namespace System.Threading
             _state = threadId == 0 ? Uncontended : Locked;
             _owningThreadId = threadId;
             _recursionCount = (uint)recursionCount;
-            _spinCount = SpinningNotInitialized;
+            _spinLimit = SpinningNotInitialized;
         }
 
         private AutoResetEvent Event
@@ -192,9 +192,9 @@ namespace System.Threading
                 s_processorCount = RuntimeImports.RhGetProcessCpuCount();
             }
 
-            if (_spinCount == SpinningNotInitialized)
+            if (_spinLimit == SpinningNotInitialized)
             {
-                _spinCount = (s_processorCount > 1) ? MaxSpinCount : SpinningDisabled;
+                _spinLimit = (s_processorCount > 1) ? MaxSpinLimit : SpinningDisabled;
             }
 
             bool hasWaited = false;
@@ -202,7 +202,7 @@ namespace System.Threading
             while (true)
             {
                 uint iteration = 0;
-                uint localSpinCount = _spinCount;
+                uint localSpinLimit = _spinLimit;
                 // inner loop where we try acquiring the lock or registering as a waiter
                 while (true)
                 {
@@ -220,18 +220,18 @@ namespace System.Threading
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                         {
                             // spinning was successful, update spin count
-                            if (iteration < localSpinCount && localSpinCount < MaxSpinCount)
-                                _spinCount = localSpinCount + 1;
+                            if (iteration < localSpinLimit && localSpinLimit < MaxSpinLimit)
+                                _spinLimit = localSpinLimit + 1;
 
                             goto GotTheLock;
                         }
                     }
 
                     // spinning was unsuccessful. reduce spin count.
-                    if (iteration == localSpinCount && localSpinCount > MinSpinCount)
-                        _spinCount = localSpinCount - 1;
+                    if (iteration == localSpinLimit && localSpinLimit > MinSpinLimit)
+                        _spinLimit = localSpinLimit - 1;
 
-                    if (iteration++ < localSpinCount)
+                    if (iteration++ < localSpinLimit)
                     {
                         Thread.SpinWaitInternal(1);
                         continue;
@@ -252,8 +252,8 @@ namespace System.Threading
                             break;
                     }
 
-                    Debug.Assert(iteration >= localSpinCount);
-                    ExponentialBackoff(iteration - localSpinCount);
+                    Debug.Assert(iteration >= localSpinLimit);
+                    ExponentialBackoff(iteration - localSpinLimit);
                 }
 
                 //
