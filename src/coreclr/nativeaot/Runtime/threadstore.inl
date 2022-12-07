@@ -1,7 +1,11 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-EXTERN_C DECLSPEC_THREAD ThreadBuffer tls_CurrentThread;
+#ifdef _MSC_VER
+__declspec(selectany) __declspec(thread) ThreadBuffer tls_CurrentThread;
+#else
+EXTERN_C __thread ThreadBuffer tls_CurrentThread;
+#endif
 
 // static
 inline Thread * ThreadStore::RawGetCurrentThread()
