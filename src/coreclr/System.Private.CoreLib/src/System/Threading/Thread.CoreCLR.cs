@@ -128,7 +128,7 @@ namespace System.Threading
         /// a explicit busy loop because the hardware can be informed that it is busy waiting.
         /// </summary>
         [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern void SpinWaitInternal(int iterations);
+        internal static extern void SpinWaitInternal(int iterations);
 
         public static void SpinWait(int iterations) => SpinWaitInternal(iterations);
 

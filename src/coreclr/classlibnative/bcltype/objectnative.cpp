@@ -92,6 +92,8 @@ FCIMPL1(INT32, ObjectNative::GetHashCode, Object* obj) {
     }
     CONTRACTL_END;
 
+    _ASSERTE(!"get hash code");
+
     VALIDATEOBJECT(obj);
 
     if (obj == 0)

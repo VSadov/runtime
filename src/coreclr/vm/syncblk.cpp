@@ -2068,36 +2068,36 @@ BOOL ObjHeader::Validate (BOOL bVerifySyncBlkIndex)
         }
     }
 
-    //Don't know how to verify BIT_SBLK_SPIN_LOCK (0x10000000)
+    ////Don't know how to verify BIT_SBLK_SPIN_LOCK (0x10000000)
 
-    //BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX (0x08000000)
-    if (bits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)
-    {
-        //if BIT_SBLK_IS_HASHCODE (0x04000000) is not set,
-        //rest of the DWORD is SyncBlk Index
-        if (!(bits & BIT_SBLK_IS_HASHCODE))
-        {
-            if (bVerifySyncBlkIndex  && GCHeapUtilities::GetGCHeap()->RuntimeStructuresValid ())
-            {
-                DWORD sbIndex = bits & MASK_SYNCBLOCKINDEX;
-                ASSERT_AND_CHECK(SyncTableEntry::GetSyncTableEntry()[sbIndex].m_Object == obj);
-            }
-        }
-        else
-        {
-            //  rest of the DWORD is a hash code and we don't have much to validate it
-        }
-    }
-    else
-    {
-        //if BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX is clear, rest of DWORD is thin lock thread ID,
-        //thin lock recursion level and appdomain index
-        DWORD lockThreadId = bits & SBLK_MASK_LOCK_THREADID;
-        DWORD recursionLevel = (bits & SBLK_MASK_LOCK_RECLEVEL) >> SBLK_RECLEVEL_SHIFT;
-        //if thread ID is 0, recursionLeve got to be zero
-        //but thread ID doesn't have to be valid because the lock could be orphanend
-        ASSERT_AND_CHECK (lockThreadId != 0 || recursionLevel == 0 );
-    }
+    ////BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX (0x08000000)
+    //if (bits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX)
+    //{
+    //    //if BIT_SBLK_IS_HASHCODE (0x04000000) is not set,
+    //    //rest of the DWORD is SyncBlk Index
+    //    if (!(bits & BIT_SBLK_IS_HASHCODE))
+    //    {
+    //        if (bVerifySyncBlkIndex  && GCHeapUtilities::GetGCHeap()->RuntimeStructuresValid ())
+    //        {
+    //            DWORD sbIndex = bits & MASK_SYNCBLOCKINDEX;
+    //            ASSERT_AND_CHECK(SyncTableEntry::GetSyncTableEntry()[sbIndex].m_Object == obj);
+    //        }
+    //    }
+    //    else
+    //    {
+    //        //  rest of the DWORD is a hash code and we don't have much to validate it
+    //    }
+    //}
+    //else
+    //{
+    //    //if BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX is clear, rest of DWORD is thin lock thread ID,
+    //    //thin lock recursion level and appdomain index
+    //    DWORD lockThreadId = bits & SBLK_MASK_LOCK_THREADID;
+    //    DWORD recursionLevel = (bits & SBLK_MASK_LOCK_RECLEVEL) >> SBLK_RECLEVEL_SHIFT;
+    //    //if thread ID is 0, recursionLeve got to be zero
+    //    //but thread ID doesn't have to be valid because the lock could be orphanend
+    //    ASSERT_AND_CHECK (lockThreadId != 0 || recursionLevel == 0 );
+    //}
 
     return TRUE;
 }

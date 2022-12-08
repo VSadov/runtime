@@ -111,8 +111,10 @@ namespace System.Runtime.CompilerServices
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern void PrepareDelegate(Delegate d);
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern int GetHashCode(object? o);
+        public static int GetHashCode(object? o)
+        {
+            return ObjectHeader.GetHashCode(o);
+        }
 
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern new bool Equals(object? o1, object? o2);
@@ -216,6 +218,9 @@ namespace System.Runtime.CompilerServices
 
         internal static ref byte GetRawData(this object obj) =>
             ref Unsafe.As<RawData>(obj).Data;
+
+        internal static unsafe ref nint GetMethodTableRef(this object obj)
+            => ref Unsafe.Add(ref Unsafe.As<byte, IntPtr>(ref obj.GetRawData()), -1);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static unsafe nuint GetRawObjectDataSize(object obj)

@@ -1390,7 +1390,7 @@ void SystemDomain::LoadBaseSystemClasses()
 
     // Make sure that FCall mapping for Monitor.Enter is initialized. We need it in case Monitor.Enter is used only as JIT helper.
     // For more details, see comment in code:JITutil_MonEnterWorker around "__me = GetEEFuncEntryPointMacro(JIT_MonEnter)".
-    ECall::GetFCallImpl(CoreLibBinder::GetMethod(METHOD__MONITOR__ENTER));
+    // ECall::GetFCallImpl(CoreLibBinder::GetMethod(METHOD__MONITOR__ENTER));
 
 #ifdef PROFILING_SUPPORTED
     // Note that g_profControlBlock.fBaseSystemClassesLoaded must be set to TRUE only after

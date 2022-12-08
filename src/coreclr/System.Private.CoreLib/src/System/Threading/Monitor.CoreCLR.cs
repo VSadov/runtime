@@ -1,7 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-//
 /*=============================================================================
 **
 **
@@ -12,185 +11,255 @@
 **
 =============================================================================*/
 
+using System;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
 namespace System.Threading
 {
     public static partial class Monitor
     {
-        /*=========================================================================
-        ** Obtain the monitor lock of obj. Will block if another thread holds the lock
-        ** Will not block if the current thread holds the lock,
-        ** however the caller must ensure that the same number of Exit
-        ** calls are made as there were Enter calls.
-        **
-        ** Exceptions: ArgumentNullException if object is null.
-        =========================================================================*/
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern void Enter(object obj);
+        #region Object->Lock/Condition mapping
 
+        private static ConditionalWeakTable<object, Condition> s_conditionTable = new ConditionalWeakTable<object, Condition>();
+        private static ConditionalWeakTable<object, Condition>.CreateValueCallback s_createCondition = (o) => new Condition(ObjectHeader.GetLockObject(o));
 
-        // Use a ref bool instead of out to ensure that unverifiable code must
-        // initialize this value to something.  If we used out, the value
-        // could be uninitialized if we threw an exception in our prolog.
-        // The JIT should inline this method to allow check of lockTaken argument to be optimized out
-        // in the typical case. Note that the method has to be transparent for inlining to be allowed by the VM.
+        private static Condition GetCondition(object obj)
+        {
+            Debug.Assert(
+                !(obj is Condition || obj is Lock),
+                "Do not use Monitor.Pulse or Wait on a Lock or Condition instance; use the methods on Condition instead.");
+            return s_conditionTable.GetValue(obj, s_createCondition);
+        }
+        #endregion
+
+        #region Public Enter/Exit methods
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void Enter(object obj)
+        {
+            int resultOrIndex = ObjectHeader.Acquire(obj);
+            if (resultOrIndex == 1)
+                return;
+
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
+
+            if (lck.TryAcquire(0))
+                return;
+
+            TryAcquireContended(lck, obj, Timeout.Infinite);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Enter(object obj, ref bool lockTaken)
         {
+            // we are inlining lockTaken check as the check is likely be optimizied away
             if (lockTaken)
-                ThrowLockTakenException();
+                throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            ReliableEnter(obj, ref lockTaken);
-            Debug.Assert(lockTaken);
+            Enter(obj);
+            lockTaken = true;
         }
 
-        [DoesNotReturn]
-        private static void ThrowLockTakenException()
-        {
-            throw new ArgumentException(SR.Argument_MustBeFalse, "lockTaken");
-        }
-
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern void ReliableEnter(object obj, ref bool lockTaken);
-
-
-
-        /*=========================================================================
-        ** Release the monitor lock. If one or more threads are waiting to acquire the
-        ** lock, and the current thread has executed as many Exits as
-        ** Enters, one of the threads will be unblocked and allowed to proceed.
-        **
-        ** Exceptions: ArgumentNullException if object is null.
-        **             SynchronizationLockException if the current thread does not
-        **             own the lock.
-        =========================================================================*/
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        public static extern void Exit(object obj);
-
-        /*=========================================================================
-        ** Similar to Enter, but will never block. That is, if the current thread can
-        ** acquire the monitor lock without blocking, it will do so and TRUE will
-        ** be returned. Otherwise FALSE will be returned.
-        **
-        ** Exceptions: ArgumentNullException if object is null.
-        =========================================================================*/
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static bool TryEnter(object obj)
         {
-            bool lockTaken = false;
-            TryEnter(obj, 0, ref lockTaken);
-            return lockTaken;
+            int resultOrIndex = ObjectHeader.TryAcquire(obj);
+            if (resultOrIndex == 1)
+                return true;
+
+            if (resultOrIndex == 0)
+                return false;
+
+            Lock lck = SyncTable.GetLockObject(resultOrIndex);
+            return lck.TryAcquire(0);
         }
 
-        // The JIT should inline this method to allow check of lockTaken argument to be optimized out
-        // in the typical case. Note that the method has to be transparent for inlining to be allowed by the VM.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void TryEnter(object obj, ref bool lockTaken)
         {
+            // we are inlining lockTaken check as the check is likely be optimizied away
             if (lockTaken)
-                ThrowLockTakenException();
+                throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            ReliableEnterTimeout(obj, 0, ref lockTaken);
+            lockTaken = TryEnter(obj);
         }
 
-        /*=========================================================================
-        ** Version of TryEnter that will block, but only up to a timeout period
-        ** expressed in milliseconds. If timeout == Timeout.Infinite the method
-        ** becomes equivalent to Enter.
-        **
-        ** Exceptions: ArgumentNullException if object is null.
-        **             ArgumentException if timeout < -1 (Timeout.Infinite).
-        =========================================================================*/
-        // The JIT should inline this method to allow check of lockTaken argument to be optimized out
-        // in the typical case. Note that the method has to be transparent for inlining to be allowed by the VM.
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static bool TryEnter(object obj, int millisecondsTimeout)
         {
-            bool lockTaken = false;
-            TryEnter(obj, millisecondsTimeout, ref lockTaken);
-            return lockTaken;
+            if (millisecondsTimeout < -1)
+                throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
+
+            int resultOrIndex = ObjectHeader.TryAcquire(obj);
+            if (resultOrIndex == 1)
+                return true;
+
+            Lock lck = resultOrIndex == 0 ?
+                ObjectHeader.GetLockObject(obj) :
+                SyncTable.GetLockObject(resultOrIndex);
+
+            if (lck.TryAcquire(0))
+                return true;
+
+            return TryAcquireContended(lck, obj, millisecondsTimeout);
         }
 
-        // The JIT should inline this method to allow check of lockTaken argument to be optimized out
-        // in the typical case. Note that the method has to be transparent for inlining to be allowed by the VM.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void TryEnter(object obj, int millisecondsTimeout, ref bool lockTaken)
         {
+            // we are inlining lockTaken check as the check is likely be optimizied away
             if (lockTaken)
-                ThrowLockTakenException();
+                throw new ArgumentException(SR.Argument_MustBeFalse, nameof(lockTaken));
 
-            ReliableEnterTimeout(obj, millisecondsTimeout, ref lockTaken);
+            lockTaken = TryEnter(obj, millisecondsTimeout);
         }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern void ReliableEnterTimeout(object obj, int timeout, ref bool lockTaken);
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void Exit(object obj)
+        {
+            ObjectHeader.Release(obj);
+        }
 
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public static bool IsEntered(object obj)
         {
-            ArgumentNullException.ThrowIfNull(obj);
-
-            return IsEnteredNative(obj);
+            return ObjectHeader.IsAcquired(obj);
         }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern bool IsEnteredNative(object obj);
+        #endregion
 
-        /*========================================================================
-    ** Waits for notification from the object (via a Pulse/PulseAll).
-    ** timeout indicates how long to wait before the method returns.
-    ** This method acquires the monitor waithandle for the object
-    ** If this thread holds the monitor lock for the object, it releases it.
-    ** On exit from the method, it obtains the monitor lock back.
-    **
-        ** Exceptions: ArgumentNullException if object is null.
-    ========================================================================*/
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern bool ObjWait(int millisecondsTimeout, object obj);
+        #region Public Wait/Pulse methods
 
         [UnsupportedOSPlatform("browser")]
         public static bool Wait(object obj, int millisecondsTimeout)
         {
-            if (obj == null)
-                throw (new ArgumentNullException(nameof(obj)));
-            if (millisecondsTimeout < -1)
-                throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
+            Condition condition = GetCondition(obj);
 
-            return ObjWait(millisecondsTimeout, obj);
+            using (new DebugBlockingScope(obj, DebugBlockingItemType.MonitorEvent, millisecondsTimeout, out _))
+            {
+                return condition.Wait(millisecondsTimeout);
+            }
         }
-
-        /*========================================================================
-        ** Sends a notification to a single waiting object.
-        * Exceptions: SynchronizationLockException if this method is not called inside
-        * a synchronized block of code.
-        ========================================================================*/
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern void ObjPulse(object obj);
 
         public static void Pulse(object obj)
         {
-            ArgumentNullException.ThrowIfNull(obj);
+            if (obj == null)
+            {
+                throw new ArgumentNullException(nameof(obj));
+            }
 
-            ObjPulse(obj);
+            GetCondition(obj).SignalOne();
         }
-        /*========================================================================
-        ** Sends a notification to all waiting objects.
-        ========================================================================*/
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern void ObjPulseAll(object obj);
 
         public static void PulseAll(object obj)
         {
-            ArgumentNullException.ThrowIfNull(obj);
+            if (obj == null)
+            {
+                throw new ArgumentNullException(nameof(obj));
+            }
 
-            ObjPulseAll(obj);
+            GetCondition(obj).SignalAll();
         }
+
+        #endregion
+
+        #region Slow path for Entry/TryEnter methods.
+
+        internal static bool TryAcquireContended(Lock lck, object obj, int millisecondsTimeout)
+        {
+            using (new DebugBlockingScope(obj, DebugBlockingItemType.MonitorCriticalSection, millisecondsTimeout, out _))
+            {
+                return lck.TryAcquire(millisecondsTimeout, trackContentions: true);
+            }
+        }
+
+        #endregion
+
+        #region Debugger support
+
+        // The debugger binds to the fields below by name. Do not change any names or types without
+        // updating the debugger!
+
+        // The head of the list of DebugBlockingItem stack objects used by the debugger to implement
+        // ICorDebugThread4::GetBlockingObjects. Usually the list either is empty or contains a single
+        // item. However, a wait on an STA thread may reenter via the message pump and cause the thread
+        // to be blocked on a second object.
+        [ThreadStatic]
+        private static IntPtr t_firstBlockingItem;
+
+        // Different ways a thread can be blocked that the debugger will expose.
+        // Do not change or add members without updating the debugger code.
+        private enum DebugBlockingItemType
+        {
+            MonitorCriticalSection = 0,
+            MonitorEvent = 1
+        }
+
+        // Represents an item a thread is blocked on. This structure is allocated on the stack and accessed by the debugger.
+        private struct DebugBlockingItem
+        {
+            // The object the thread is waiting on
+            public object _object;
+
+            // Indicates how the thread is blocked on the item
+            public DebugBlockingItemType _blockingType;
+
+            // Blocking timeout in milliseconds or Timeout.Infinite for no timeout
+            public int _timeout;
+
+            // Next pointer in the linked list of DebugBlockingItem records
+            public IntPtr _next;
+        }
+
+        private unsafe struct DebugBlockingScope : IDisposable
+        {
+            public DebugBlockingScope(object obj, DebugBlockingItemType blockingType, int timeout, out DebugBlockingItem blockingItem)
+            {
+                blockingItem._object = obj;
+                blockingItem._blockingType = blockingType;
+                blockingItem._timeout = timeout;
+                blockingItem._next = t_firstBlockingItem;
+
+                t_firstBlockingItem = (IntPtr)Unsafe.AsPointer(ref blockingItem);
+            }
+
+            public void Dispose()
+            {
+                t_firstBlockingItem = Unsafe.Read<DebugBlockingItem>((void*)t_firstBlockingItem)._next;
+            }
+        }
+
+        #endregion
+
+        #region Metrics
+
+        private static readonly ThreadInt64PersistentCounter s_lockContentionCounter = new ThreadInt64PersistentCounter();
+
+        [ThreadStatic]
+        private static object? t_ContentionCountObject;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static object CreateThreadLocalContentionCountObject()
+        {
+            Debug.Assert(t_ContentionCountObject == null);
+
+            object threadLocalContentionCountObject = s_lockContentionCounter.CreateThreadLocalCountObject();
+            t_ContentionCountObject = threadLocalContentionCountObject;
+            return threadLocalContentionCountObject;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void IncrementLockContentionCount() => ThreadInt64PersistentCounter.Increment(t_ContentionCountObject ?? CreateThreadLocalContentionCountObject());
 
         /// <summary>
         /// Gets the number of times there was contention upon trying to take a <see cref="Monitor"/>'s lock so far.
         /// </summary>
-        public static long LockContentionCount => GetLockContentionCount();
+        public static long LockContentionCount => s_lockContentionCounter.Count;
 
-        [LibraryImport(RuntimeHelpers.QCall, EntryPoint = "ObjectNative_GetMonitorLockContentionCount")]
-        private static partial long GetLockContentionCount();
+        #endregion
     }
 }

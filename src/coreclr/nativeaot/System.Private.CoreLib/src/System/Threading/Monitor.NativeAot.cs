@@ -242,7 +242,7 @@ namespace System.Threading
         private static readonly ThreadInt64PersistentCounter s_lockContentionCounter = new ThreadInt64PersistentCounter();
 
         [ThreadStatic]
-        private static object t_ContentionCountObject;
+        private static object? t_ContentionCountObject;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static object CreateThreadLocalContentionCountObject()

@@ -240,6 +240,11 @@
     <Compile Include="$(BclSourcesRoot)\System\Threading\ProcessorIdCache.cs" />
     <Compile Include="$(BclSourcesRoot)\System\Threading\ThreadPool.CoreCLR.cs" />
     <Compile Include="$(BclSourcesRoot)\System\Threading\WaitHandle.CoreCLR.cs" />
+    <Compile Include="$(BclSourcesRoot)\System\Threading\Lock.cs" />
+    <Compile Include="$(BclSourcesRoot)\System\Threading\LockHolder.cs" />
+    <Compile Include="$(BclSourcesRoot)\System\Threading\ObjectHeader.cs" />
+    <Compile Include="$(BclSourcesRoot)\System\Threading\SyncTable.cs" />
+    <Compile Include="$(BclSourcesRoot)\System\Threading\Condition.cs" />
     <Compile Include="$(BclSourcesRoot)\System\Type.CoreCLR.cs" />
     <Compile Include="$(BclSourcesRoot)\System\TypedReference.CoreCLR.cs" />
     <Compile Include="$(BclSourcesRoot)\System\TypeLoadException.CoreCLR.cs" />
