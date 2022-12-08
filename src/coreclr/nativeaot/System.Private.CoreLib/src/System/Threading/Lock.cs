@@ -47,9 +47,9 @@ namespace System.Threading
         private const int Uncontended = 0;
 
         // state of the lock
-        private int _state;
         private int _owningThreadId;
         private uint _recursionCount;
+        private int _state;
         private uint _spinLimit;
         private AutoResetEvent? _lazyEvent;
 

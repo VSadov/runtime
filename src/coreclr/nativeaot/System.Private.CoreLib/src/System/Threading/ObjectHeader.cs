@@ -339,7 +339,7 @@ namespace System.Threading
                         if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                         {
                             int newBits = oldBits | currentThreadID;
-                            if (oldBits == Interlocked.CompareExchange(ref *pHeader, newBits, oldBits))
+                            if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
                             {
                                 return 1;
                             }
