@@ -411,13 +411,13 @@ namespace System.Threading
             // thread ID may be uninitialized (-1), that is the same as not owning the lock.
             int currentThreadID = Environment.CurrentManagedThreadIdUnchecked;
 
-            int oldBits;
+            Lock fatLock;
             fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
             {
                 int* pHeader = GetHeaderPtr(ppMethodTable);
                 while (true)
                 {
-                    oldBits = *pHeader;
+                    int oldBits = *pHeader;
 
                     // if we own the lock
                     if ((oldBits & SBLK_MASK_LOCK_THREADID) == currentThreadID &&
@@ -438,18 +438,18 @@ namespace System.Threading
                         continue;
                     }
 
+                    if (!GetSyncEntryIndex(oldBits, out int syncIndex))
+                    {
+                        // someone else owns or noone.
+                        throw new SynchronizationLockException();
+                    }
+
+                    fatLock = SyncTable.GetLockObject(syncIndex);
                     break;
                 }
             }
 
-            if (GetSyncEntryIndex(oldBits, out int syncIndex))
-            {
-                SyncTable.GetLockObject(syncIndex).Release(currentThreadID);
-                return;
-            }
-
-            // someone else owns or noone.
-            throw new SynchronizationLockException();
+            fatLock.Release(currentThreadID);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

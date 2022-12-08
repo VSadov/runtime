@@ -19,8 +19,8 @@ namespace System.Threading
 
         // We will use exponential backoff in cases when we need to change state atomically and cannot
         // make progress due to contention.
-        // While we cannot know how much wait we need between successfull attempts, exponential backoff
-        // should generally be within 2X of that and will do a lot less attempts than an eager retry.
+        // While we cannot know how much wait we need until a successfull attempt, exponential backoff
+        // should generally be not more than 2X of that and will do a lot less tries than an eager retry.
         // To protect against degenerate cases we will cap the iteration wait up to 1024 spinwaits.
         private const uint MaxExponentialBackoffBits = 10;
 
