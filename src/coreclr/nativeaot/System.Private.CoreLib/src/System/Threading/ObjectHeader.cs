@@ -232,7 +232,7 @@ namespace System.Threading
         // close to the RAM latency.
         //
         // Considering that taking and releaseing the lock takes 2 CAS instructions + some overhead, we can estimate shortest
-        // time the lock can be held in hundreds of nanoseconds. (TODO: VS measure that) Thus it is unlikely to see more than
+        // time the lock can be held to be in hundreds of nanoseconds. Thus it is unlikely to see more than
         // 8-10 threads contending for the lock without inflating it. Therefore we can expect to acquire a thin lock in
         // under 16 tries.
         //
@@ -243,8 +243,8 @@ namespace System.Threading
         // Linear back-off
         //   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, . . . .
         //
-        // Here these strategies are close in terms of average and worst case latency, so we will prefer linear back-off
-        // as it favors low-contention scenario, which we expect.
+        // In this case these strategies are close in terms of average and worst case latency, so we will prefer linear
+        // back-off as it favors micro-contention scenario, which we expect.
         //
 
         // Returs:
@@ -322,7 +322,7 @@ namespace System.Threading
 
             // retry when the lock is owned by somebody else.
             // this loop will spinwait between iterations.
-            for (int iteration = 0; iteration <= retries; iteration++)
+            for (int i = 0; i <= retries; i++)
             {
                 fixed (MethodTable** ppMethodTable = &obj.GetMethodTableRef())
                 {
@@ -339,7 +339,7 @@ namespace System.Threading
                         if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                         {
                             int newBits = oldBits | currentThreadID;
-                            if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                            if (oldBits == Interlocked.CompareExchange(ref *pHeader, newBits, oldBits))
                             {
                                 return 1;
                             }
@@ -392,7 +392,7 @@ namespace System.Threading
 
                 // spin a bit before retrying (1 spinwait is roughly 35 nsec)
                 // the object is not pinned here
-                Thread.SpinWaitInternal(iteration);
+                Thread.SpinWaitInternal(i);
             }
 
             // owned by somebody else
