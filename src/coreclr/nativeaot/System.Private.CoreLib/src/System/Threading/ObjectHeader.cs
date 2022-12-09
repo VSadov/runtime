@@ -449,7 +449,7 @@ namespace System.Threading
                 }
             }
 
-            fatLock.Release(currentThreadID);
+            fatLock.ReleaseByThread(currentThreadID);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

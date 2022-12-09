@@ -47,11 +47,11 @@ namespace System.Threading
         private const int Uncontended = 0;
 
         // state of the lock
+        private AutoResetEvent? _lazyEvent;
         private int _owningThreadId;
         private uint _recursionCount;
         private int _state;
         private uint _spinLimit;
-        private AutoResetEvent? _lazyEvent;
 
         // used to transfer the state when inflating thin locks
         internal void InitializeLocked(int threadId, int recursionCount)
@@ -93,17 +93,8 @@ namespace System.Threading
         public void Acquire()
         {
             int currentThreadId = CurrentThreadId;
-
-            //
-            // Make one quick attempt to acquire an uncontended lock
-            //
-            if (Interlocked.CompareExchange(ref _state, Locked, Uncontended) == Uncontended)
-            {
-                Debug.Assert(_owningThreadId == 0);
-                Debug.Assert(_recursionCount == 0);
-                _owningThreadId = currentThreadId;
+            if (TryAcquireOneShot(currentThreadId))
                 return;
-            }
 
             //
             // Fall back to the slow path for contention
@@ -337,28 +328,25 @@ namespace System.Threading
             return acquired;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal void Release(int currentThreadId)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void Release()
         {
-            if (currentThreadId == _owningThreadId && _recursionCount == 0)
+            ReleaseByThread(CurrentThreadId);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void ReleaseByThread(int threadId)
+        {
+            if (threadId != _owningThreadId)
+                throw new SynchronizationLockException();
+
+            if (_recursionCount == 0)
             {
                 ReleaseCore();
                 return;
             }
 
-            Release();
-        }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        public void Release()
-        {
-            if (!IsAcquired)
-                throw new SynchronizationLockException();
-
-            if (_recursionCount > 0)
-                _recursionCount--;
-            else
-                ReleaseCore();
+            _recursionCount--;
         }
 
         internal uint ReleaseAll()
