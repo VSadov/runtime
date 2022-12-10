@@ -270,6 +270,8 @@ namespace System.Threading
             }
 
             // We timed out.  We're not going to wait again.
+            // We could not have observed a wake, or the wait would've succeeded
+            // so we do not bother about WaiterWoken
             {
                 uint iteration = 0;
                 while (true)
