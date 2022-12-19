@@ -1526,7 +1526,7 @@ static DWORD MAPMmapProtToAccessFlags( int prot )
     {
         flAccess = 0;
     }
-    else if (((PROT_READ | PROT_WRIT | PROT_EXEC) & prot) == (PROT_READ | PROT_WRITE | PROT_EXEC))
+    else if (((PROT_READ | PROT_WRITE | PROT_EXEC) & prot) == (PROT_READ | PROT_WRITE | PROT_EXEC))
     {
         flAccess = FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE;
     }
