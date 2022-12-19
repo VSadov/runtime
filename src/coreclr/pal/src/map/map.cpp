@@ -404,7 +404,8 @@ CorUnix::InternalCreateFileMapping(
 
     if (PAGE_READWRITE != flProtect
         && PAGE_READONLY != flProtect
-        && PAGE_WRITECOPY != flProtect)
+        && PAGE_WRITECOPY != flProtect
+        && ((PAGE_EXECUTE_READWRITE != flProtect) || (hFile != INVALID_HANDLE_VALUE)))
     {
         ASSERT( "invalid flProtect %#x, acceptable values are PAGE_READONLY "
                 "(%#x), PAGE_READWRITE (%#x) and PAGE_WRITECOPY (%#x).\n",
@@ -1423,6 +1424,10 @@ static DWORD MAPConvertProtectToAccess( DWORD flProtect )
     {
         return FILE_MAP_COPY;
     }
+    if (PAGE_EXECUTE_READWRITE == flProtect)
+    {
+        return FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE;
+    }
 
     ASSERT( "Unknown flag for flProtect. This line "
             "should not have been executed.\n " );
@@ -1443,6 +1448,10 @@ static DWORD MAPConvertAccessToProtect(DWORD flAccess)
     if (flAccess == FILE_MAP_ALL_ACCESS)
     {
         return PAGE_READWRITE;
+    }
+    else if (flAccess == (FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE))
+    {
+        return PAGE_EXECUTE_READWRITE;
     }
     else if ((flAccess == FILE_MAP_COPY) || (flAccess == FILE_MAP_WRITE))
     {
@@ -1493,6 +1502,11 @@ static INT MAPFileMapToMmapFlags( DWORD flags )
         TRACE( "FILE_MAP_COPY\n");
         return PROT_READ | PROT_WRITE;
     }
+    else if ((FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE) == flags)
+    {
+        TRACE("PROT_READ | PROT_WRITE | PROT_EXEC\n");
+        return PROT_READ | PROT_WRITE | PROT_EXEC;
+    }
 
     ASSERT( "Unknown flag. This line should not have been executed.\n" );
     return -1;
@@ -1503,7 +1517,6 @@ Function :
     MAPMmapProtToAccessFlags
 
     Converts unix protection flags to file access flags.
-    We ignore PROT_EXEC.
 --*/
 static DWORD MAPMmapProtToAccessFlags( int prot )
 {
@@ -1512,6 +1525,10 @@ static DWORD MAPMmapProtToAccessFlags( int prot )
     if (PROT_NONE == prot)
     {
         flAccess = 0;
+    }
+    else if (((PROT_READ | PROT_WRIT | PROT_EXECE) & prot) == (PROT_READ | PROT_WRITE | PROT_EXEC))
+    {
+        flAccess = FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE;
     }
     else if ( ((PROT_READ | PROT_WRITE) & prot) == (PROT_READ | PROT_WRITE) )
     {
