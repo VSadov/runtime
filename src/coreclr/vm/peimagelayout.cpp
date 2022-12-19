@@ -658,7 +658,13 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
             // We will create another anonymous memory-only mapping and uncompress file there.
             // The flat image will refer to the anonymous mapping instead and we will release the original mapping.
 
-            HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, uncompressedSize >> 32, (DWORD)uncompressedSize, NULL);
+            DWORD anonMapAccess = PAGE_READWRITE;
+
+#if defined(__APPLE__) && defined(HOST_ARM64)
+            anonMapAccess = PAGE_EXECUTE_READWRITE;
+#endif
+
+            HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, anonMapAccess, uncompressedSize >> 32, (DWORD)uncompressedSize, NULL);
             if (anonMap == NULL)
                 ThrowLastError();
 
@@ -676,6 +682,12 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
 
             // we match the compression side here. 15 is the window sise, negative means no zlib header.
             const int Deflate_DefaultWindowBits = -15;
+
+#if defined(__APPLE__) && defined(HOST_ARM64)
+            // Enable writing on Apple Silicon
+            PAL_JitWriteProtect(true);
+#endif
+
             if (CompressionNative_InflateInit2_(&zStream, Deflate_DefaultWindowBits) != PAL_Z_OK)
                 ThrowHR(COR_E_BADIMAGEFORMAT);
 
@@ -691,6 +703,11 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
             }
 
             CompressionNative_InflateEnd(&zStream);
+
+#if defined(__APPLE__) && defined(HOST_ARM64)
+            // Disable writing on Apple Silicon
+            PAL_JitWriteProtect(false);
+#endif
 
             addr = anonView;
             size = uncompressedSize;
