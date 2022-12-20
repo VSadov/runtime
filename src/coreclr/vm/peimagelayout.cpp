@@ -659,16 +659,18 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
             // The flat image will refer to the anonymous mapping instead and we will release the original mapping.
 
             DWORD anonMapAccess = PAGE_READWRITE;
+            DWORD anonViewAccess = FILE_MAP_READ | FILE_MAP_WRITE;
 
 #if defined(__APPLE__) && defined(HOST_ARM64)
             anonMapAccess = PAGE_EXECUTE_READWRITE;
+            anonViewAccess |= FILE_MAP_EXECUTE;
 #endif
 
             HandleHolder anonMap = WszCreateFileMapping(INVALID_HANDLE_VALUE, NULL, anonMapAccess, uncompressedSize >> 32, (DWORD)uncompressedSize, NULL);
             if (anonMap == NULL)
                 ThrowLastError();
 
-            LPVOID anonView = CLRMapViewOfFile(anonMap, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+            LPVOID anonView = CLRMapViewOfFile(anonMap, anonViewAccess, 0, 0, 0);
             if (anonView == NULL)
                 ThrowLastError();
 
