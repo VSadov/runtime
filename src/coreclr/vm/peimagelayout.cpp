@@ -799,9 +799,9 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
     allocationType |= MEM_RESERVE_EXECUTABLE;
 
     COUNT_T allocSize = ALIGN_UP(this->GetVirtualSize(), g_SystemInfo.dwAllocationGranularity);
-    LPVOID base = ClrVirtualAlloc(preferredBase, allocSize, allocationType, PAGE_READWRITE);
+    LPVOID base = ClrVirtualAlloc(preferredBase, allocSize, allocationType, PAGE_EXECUTE_READWRITE);
     if (base == NULL && preferredBase != NULL)
-        base = ClrVirtualAlloc(NULL, allocSize, allocationType, PAGE_READWRITE);
+        base = ClrVirtualAlloc(NULL, allocSize, allocationType, PAGE_EXECUTE_READWRITE);
 
     if (base == NULL)
         ThrowLastError();
@@ -844,7 +844,7 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
     {
         // Add appropriate page protection.
         DWORD newProtection = section->Characteristics & IMAGE_SCN_MEM_EXECUTE ?
-            PAGE_EXECUTE_READ :
+            PAGE_EXECUTE_READWRITE :
             section->Characteristics & IMAGE_SCN_MEM_WRITE ?
             PAGE_READWRITE :
             PAGE_READONLY;
