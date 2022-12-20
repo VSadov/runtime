@@ -1387,9 +1387,8 @@ static PAL_ERROR MAPDesiredAccessAllowed( DWORD flProtect,
                "opened with read access.\n" );
         return ERROR_ACCESS_DENIED;
     }
-    if ( ( dwUserDesiredAccess & FILE_MAP_WRITE ) &&
-        !( ( dwDesiredAccessWhenOpened == FILE_MAP_WRITE ) ||
-           ( dwDesiredAccessWhenOpened == FILE_MAP_ALL_ACCESS ) ) )
+    if ((dwUserDesiredAccess & FILE_MAP_WRITE) &&
+       !(dwDesiredAccessWhenOpened & FILE_MAP_WRITE))
     {
         ERROR( "dwDesiredAccess conflict : write access requested, object not "
                "opened with write access.\n" );
