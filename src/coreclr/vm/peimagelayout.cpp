@@ -840,7 +840,7 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
     // Apply write protection to copied headers
     DWORD oldProtection;
     if (!ClrVirtualProtect((void*)base, VAL32(FindNTHeaders()->OptionalHeader.SizeOfHeaders),
-        PAGE_READONLY, &oldProtection))
+        PAGE_EXECUTE_READ, &oldProtection))
         ThrowLastError();
 
     // Finally, apply proper protection to copied sections
@@ -851,7 +851,7 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
             PAGE_EXECUTE_READWRITE :
             section->Characteristics & IMAGE_SCN_MEM_WRITE ?
             PAGE_READWRITE :
-            PAGE_READONLY;
+            PAGE_EXECUTE_READ;
 
         if (!ClrVirtualProtect((void*)((BYTE*)base + VAL32(section->VirtualAddress)),
             VAL32(section->Misc.VirtualSize),
