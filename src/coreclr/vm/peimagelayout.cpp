@@ -685,7 +685,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
 
 #if defined(__APPLE__) && defined(HOST_ARM64)
             // Enable writing on Apple Silicon
-            PAL_JitWriteProtect(true);
+           // PAL_JitWriteProtect(true);
 #endif
 
             if (CompressionNative_InflateInit2_(&zStream, Deflate_DefaultWindowBits) != PAL_Z_OK)
@@ -706,7 +706,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
 
 #if defined(__APPLE__) && defined(HOST_ARM64)
             // Disable writing on Apple Silicon
-            PAL_JitWriteProtect(false);
+           // PAL_JitWriteProtect(false);
 #endif
 
             addr = anonView;
