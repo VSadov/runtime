@@ -1666,6 +1666,7 @@ static BOOL MAPContainsInvalidFlags( DWORD flags )
     if ( (flags == FILE_MAP_READ) ||
          (flags == FILE_MAP_WRITE) ||
          (flags == FILE_MAP_ALL_ACCESS) ||
+         (flags == (FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE)) ||
          (flags == FILE_MAP_COPY) )
     {
         return FALSE;
