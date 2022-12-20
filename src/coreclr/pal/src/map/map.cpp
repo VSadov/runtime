@@ -1022,7 +1022,11 @@ CorUnix::InternalMapViewOfFile(
 
             if ((dwDesiredAccess & (FILE_MAP_WRITE | FILE_MAP_EXECUTE)) == (FILE_MAP_WRITE | FILE_MAP_EXECUTE))
             {
-                flags |= MAP_JIT;
+                //TODO: VS assert that pProcessLocalData->UnixFd == -1
+                //
+                // MAC64 requires we pass MAP_SHARED (or MAP_PRIVATE) flags - otherwise, the call is failed.
+                // Refer to mmap documentation at http://www.manpagez.com/man/2/mmap/ for details.
+                flags = MAP_ANON | MAP_PRIVATE | MAP_JIT;
             }
 
             pvBaseAddress = mmap(
