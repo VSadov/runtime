@@ -63,6 +63,8 @@ static PAL_ERROR MAPCreateTempFile(CPalThread *, PINT, PSZ);
 #endif // !CORECLR
 static PAL_ERROR MAPGrowLocalFile(INT, off_t);
 static PMAPPED_VIEW_LIST MAPGetViewForAddress( LPCVOID );
+
+__attribute__((noinline))
 static PAL_ERROR MAPDesiredAccessAllowed( DWORD, DWORD, DWORD );
 
 static INT MAPProtectionToFileOpenFlags( DWORD );
@@ -1346,6 +1348,7 @@ Function :
     ERROR_INVALID_PARAMETER, if the dwDesiredAccess conflicts with
     dwDesiredAccessWhenOpened, then the error code is ERROR_ACCESS_DENIED
 --*/
+__attribute__((noinline))
 static PAL_ERROR MAPDesiredAccessAllowed( DWORD flProtect,
                                      DWORD dwUserDesiredAccess,
                                      DWORD dwDesiredAccessWhenOpened )
