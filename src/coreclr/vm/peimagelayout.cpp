@@ -794,10 +794,14 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
     }
 #endif // FEATURE_ENABLE_NO_ADDRESS_SPACE_RANDOMIZATION
 
+    DWORD allocationType = MEM_RESERVE | MEM_COMMIT;
+
+    allocationType |= MEM_RESERVE_EXECUTABLE;
+
     COUNT_T allocSize = ALIGN_UP(this->GetVirtualSize(), g_SystemInfo.dwAllocationGranularity);
-    LPVOID base = ClrVirtualAlloc(preferredBase, allocSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    LPVOID base = ClrVirtualAlloc(preferredBase, allocSize, allocationType, PAGE_READWRITE);
     if (base == NULL && preferredBase != NULL)
-        base = ClrVirtualAlloc(NULL, allocSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        base = ClrVirtualAlloc(NULL, allocSize, allocationType, PAGE_READWRITE);
 
     if (base == NULL)
         ThrowLastError();
