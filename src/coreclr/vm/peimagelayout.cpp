@@ -811,6 +811,8 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
 
     // We're going to copy everything first, and write protect what we need to later.
 
+    PAL_JitWriteProtect(true);
+
     // First, copy headers
     CopyMemory(base, (void*)GetBase(), VAL32(FindNTHeaders()->OptionalHeader.SizeOfHeaders));
 
@@ -832,6 +834,8 @@ void* FlatImageLayout::LoadImageByCopyingParts(SIZE_T* m_imageParts) const
 
         section++;
     }
+
+    PAL_JitWriteProtect(false);
 
     // Apply write protection to copied headers
     DWORD oldProtection;
