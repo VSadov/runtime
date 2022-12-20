@@ -1020,6 +1020,11 @@ CorUnix::InternalMapViewOfFile(
                 flags |= MAP_ANON;
             }
 
+            if (dwDesiredAccess & (FILE_MAP_WRITE | FILE_MAP_EXECUTE) == (FILE_MAP_WRITE | FILE_MAP_EXECUTE))
+            {
+                flags |= MAP_JIT;
+            }
+
             pvBaseAddress = mmap(
                 NULL,
                 dwNumberOfBytesToMap,
