@@ -21,6 +21,7 @@
 #include "HardwareExceptions.h"
 #include "cgroupcpu.h"
 #include "threadstore.h"
+#include "thread.h"
 
 #define _T(s) s
 #include "RhConfig.h"
@@ -968,22 +969,26 @@ static void ActivationHandler(int code, siginfo_t* siginfo, void* context)
         g_pHijackCallback((NATIVE_CONTEXT*)context, NULL);
         errno = savedErrNo;
     }
+
+    Thread* pThread = ThreadStore::GetCurrentThreadIfAvailable();
+    if (pThread)
+    {
+        pThread->SetSuspensionApcPending(false);
+    }
+
+    // Call the original handler when it is not ignored or default (terminate).
+    if (g_previousActivationHandler.sa_flags & SA_SIGINFO)
+    {
+        _ASSERTE(g_previousActivationHandler.sa_sigaction != NULL);
+        g_previousActivationHandler.sa_sigaction(code, siginfo, context);
+    }
     else
     {
-        // Call the original handler when it is not ignored or default (terminate).
-        if (g_previousActivationHandler.sa_flags & SA_SIGINFO)
+        if (g_previousActivationHandler.sa_handler != SIG_IGN &&
+            g_previousActivationHandler.sa_handler != SIG_DFL)
         {
-            _ASSERTE(g_previousActivationHandler.sa_sigaction != NULL);
-            g_previousActivationHandler.sa_sigaction(code, siginfo, context);
-        }
-        else
-        {
-            if (g_previousActivationHandler.sa_handler != SIG_IGN &&
-                g_previousActivationHandler.sa_handler != SIG_DFL)
-            {
-                _ASSERTE(g_previousActivationHandler.sa_handler != NULL);
-                g_previousActivationHandler.sa_handler(code);
-            }
+            _ASSERTE(g_previousActivationHandler.sa_handler != NULL);
+            g_previousActivationHandler.sa_handler(code);
         }
     }
 }
