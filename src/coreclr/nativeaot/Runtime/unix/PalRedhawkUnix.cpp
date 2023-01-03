@@ -1004,20 +1004,29 @@ REDHAWK_PALEXPORT UInt32_BOOL REDHAWK_PALAPI PalRegisterHijackCallback(_In_ PalH
 REDHAWK_PALEXPORT void REDHAWK_PALAPI PalHijack(HANDLE hThread, _In_opt_ void* pThreadToHijack)
 {
     ThreadUnixHandle* threadHandle = (ThreadUnixHandle*)hThread;
+    Thread* pThread = (Thread*)pThreadToHijack;
+    pThread->SetSuspensionApcPending(true);
+
     int status = pthread_kill(*threadHandle->GetObject(), INJECT_ACTIVATION_SIGNAL);
+
     // We can get EAGAIN when printing stack overflow stack trace and when other threads hit
     // stack overflow too. Those are held in the sigsegv_handler with blocked signals until
     // the process exits.
-
+    // ESRCH may happen on some OSes when the thread is exiting.
+    // The thread should leave cooperative mode, but we could have seen it in its earlier state.
+    if ((status == EAGAIN)
+     || (status == ESRCH)
 #ifdef __APPLE__
-    // On Apple, pthread_kill is not allowed to be sent to dispatch queue threads
-    if (status == ENOTSUP)
+        // On Apple, pthread_kill is not allowed to be sent to dispatch queue threads
+     || (status == = ENOTSUP)
+#endif
+       )
     {
+        pThread->SetSuspensionApcPending(false);
         return;
     }
-#endif
 
-    if ((status != 0) && (status != EAGAIN) && (status != ESRCH))
+    if (status != 0)
     {
         // Failure to send the signal is fatal. There are only two cases when sending
         // the signal can fail. First, if the signal ID is invalid and second,
