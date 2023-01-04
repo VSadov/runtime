@@ -21,6 +21,7 @@
 #include "HardwareExceptions.h"
 #include "cgroupcpu.h"
 #include "threadstore.h"
+#include "threadstore.inl"
 #include "thread.h"
 
 #define _T(s) s
