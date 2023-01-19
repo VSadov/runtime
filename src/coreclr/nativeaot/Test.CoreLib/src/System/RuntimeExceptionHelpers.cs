@@ -17,14 +17,6 @@ namespace System
 
     internal static class RuntimeExceptionHelpers
     {
-        //------------------------------------------------------------------------------------------------------------
-        // @TODO: this function is related to throwing exceptions out of Rtm. If we did not have to throw
-        // out of Rtm, then we would note have to have the code below to get a classlib exception object given
-        // an exception id, or the special functions to back up the MDIL THROW_* instructions, or the allocation
-        // failure helper. If we could move to a world where we never throw out of Rtm, perhaps by moving parts
-        // of Rtm that do need to throw out to Bartok- or Binder-generated functions, then we could remove all of this.
-        //------------------------------------------------------------------------------------------------------------
-
         // This is the classlib-provided "get exception" function that will be invoked whenever the runtime
         // needs to throw an exception back to a method in a non-runtime module. The classlib is expected
         // to convert every code in the ExceptionIDs enum to an exception object.
@@ -35,9 +27,6 @@ namespace System
             // back into the dispatcher.
             try
             {
-                // @TODO: this function should return pre-allocated exception objects, either frozen in the image
-                // or preallocated during DllMain(). In particular, this function will be called when out of memory,
-                // and failure to create an exception will result in infinite recursion and therefore a stack overflow.
                 switch (id)
                 {
                     case ExceptionIDs.OutOfMemory:

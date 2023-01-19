@@ -17,7 +17,6 @@ namespace Internal.Runtime.CompilerHelpers
     {
         public static void InitializeLibrary()
         {
-            PreallocatedOutOfMemoryException.Initialize();
             ClassConstructorRunner.Initialize();
             TypeLoaderExports.Initialize();
         }
