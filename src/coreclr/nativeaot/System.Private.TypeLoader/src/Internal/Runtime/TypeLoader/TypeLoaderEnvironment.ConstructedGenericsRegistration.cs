@@ -35,6 +35,42 @@ namespace Internal.Runtime.TypeLoader
                 GenericTypeEntry[] registeredTypes = null;
                 GenericMethodEntry[] registeredMethods = null;
 
+                // this method is called in an exception filter for its sideeffects.
+                bool UndoDynamicRegistrations()
+                {
+                    // Undo types that were registered. There should be no memory allocations or other failure points.
+                    try
+                    {
+                        for (int i = 0; i < registeredTypesCount; i++)
+                        {
+                            var typeEntry = registeredTypes[i];
+                            // There is no Remove feature in the LockFreeReaderHashtable...
+                            GenericTypeEntry failedEntry = _dynamicGenericTypes.GetValueIfExists(typeEntry);
+                            if (failedEntry != null)
+                                failedEntry._isRegisteredSuccessfully = false;
+                        }
+                        for (int i = 0; i < registeredMethodsCount; i++)
+                        {
+                            // There is no Remove feature in the LockFreeReaderHashtable...
+                            GenericMethodEntry failedEntry = _dynamicGenericMethods.GetValueIfExists(registeredMethods[i]);
+                            if (failedEntry != null)
+                                failedEntry._isRegisteredSuccessfully = false;
+
+                            failedEntry = _dynamicGenericMethodComponents.GetValueIfExists(registeredMethods[i]);
+                            if (failedEntry != null)
+                                failedEntry._isRegisteredSuccessfully = false;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        // Catch any exceptions and fail fast just in case
+                        Environment.FailFast("Exception during registration rollback", e);
+                    }
+
+                    // we will not catch the exception.
+                    return false;
+                }
+
                 try
                 {
                     if (registrationData.TypesToRegister != null)
@@ -87,43 +123,12 @@ namespace Internal.Runtime.TypeLoader
                     }
                     Debug.Assert(registeredMethodsCount == registrationData.MethodsToRegisterCount);
                 }
-                catch
+                // Undo registrations in a filter. Otherwise, filters that are run during
+                // the first pass of exception unwind may see partially registered types.
+                catch when (UndoDynamicRegistrations())
                 {
-                    // Catch and rethrow any exceptions instead of using finally block. Otherwise, filters that are run during
-                    // the first pass of exception unwind may see partially registered types.
-
-                    // TODO: Convert this to filter for better diagnostics once we switch to Roslyn
-
-                    // Undo types that were registered. There should be no memory allocations or other failure points.
-                    try
-                    {
-                        for (int i = 0; i < registeredTypesCount; i++)
-                        {
-                            var typeEntry = registeredTypes[i];
-                            // There is no Remove feature in the LockFreeReaderHashtable...
-                            GenericTypeEntry failedEntry = _dynamicGenericTypes.GetValueIfExists(typeEntry);
-                            if (failedEntry != null)
-                                failedEntry._isRegisteredSuccessfully = false;
-                        }
-                        for (int i = 0; i < registeredMethodsCount; i++)
-                        {
-                            // There is no Remove feature in the LockFreeReaderHashtable...
-                            GenericMethodEntry failedEntry = _dynamicGenericMethods.GetValueIfExists(registeredMethods[i]);
-                            if (failedEntry != null)
-                                failedEntry._isRegisteredSuccessfully = false;
-
-                            failedEntry = _dynamicGenericMethodComponents.GetValueIfExists(registeredMethods[i]);
-                            if (failedEntry != null)
-                                failedEntry._isRegisteredSuccessfully = false;
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        // Catch any exceptions and fail fast just in case
-                        Environment.FailFast("Exception during registration rollback", e);
-                    }
-
-                    throw;
+                    // unreachable code, the filter always returns "false"
+                    Debug.Assert(false);
                 }
             }
         }

@@ -168,15 +168,16 @@ namespace Internal.Runtime.TypeLoader
 
                     t_isReentrant = false;
                 }
-                catch
+                // undo t_isReentrant in a filter. Otherwise, filters that are run during
+                // the first pass of exception unwind may hit the re-entrancy fail fast above.
+#pragma warning disable IDE0100 // Remove redundant equality
+                catch when ((t_isReentrant = false) == true)
+#pragma warning restore IDE0100 // Remove redundant equality
                 {
-                    // Catch and rethrow any exceptions instead of using finally block. Otherwise, filters that are run during
-                    // the first pass of exception unwind may hit the re-entrancy fail fast above.
-
-                    // TODO: Convert this to filter for better diagnostics once we switch to Roslyn
-
-                    t_isReentrant = false;
-                    throw;
+                    // filter always returns false
+                    Debug.Assert(false);
+                    result = 0;
+                    auxResult = 0;
                 }
             }
 
