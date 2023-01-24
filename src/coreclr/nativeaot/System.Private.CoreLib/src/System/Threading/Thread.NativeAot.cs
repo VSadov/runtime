@@ -314,14 +314,6 @@ namespace System.Threading
             return JoinInternal(millisecondsTimeout);
         }
 
-        /// <summary>
-        /// Max value to be passed into <see cref="SpinWait(int)"/> for optimal delaying. Currently, the value comes from
-        /// defaults in CoreCLR's Thread::InitializeYieldProcessorNormalized(). This value is supposed to be normalized to be
-        /// appropriate for the processor.
-        /// TODO: See issue https://github.com/dotnet/corert/issues/4430
-        /// </summary>
-        internal const int OptimalMaxSpinWaitsPerSpinIteration = 8;
-
         // Max iterations to be done in RhSpinWait.
         // RhSpinWait does not switch GC modes and we want to avoid native spinning in coop mode for too long.
         private const int SpinWaitCoopThreshold = 1024;
