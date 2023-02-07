@@ -13,7 +13,7 @@ namespace System.Threading
     /// </summary>
     internal sealed partial class PortableThreadPool
     {
-        private const int ThreadPoolThreadTimeoutMs = 20 * 1000; // If you change this make sure to change the timeout times in the tests.
+        internal const int ThreadPoolThreadTimeoutMs = 20 * 1000; // If you change this make sure to change the timeout times in the tests.
         private const int SmallStackSizeBytes = 256 * 1024;
 
         private const short MaxPossibleThreadCount = short.MaxValue;

@@ -8,57 +8,82 @@ using System.Runtime.InteropServices;
 namespace System.Threading
 {
     /// <summary>
-    /// A LIFO semaphore.
-    /// Waits on this semaphore are uninterruptible.
+    /// A semaphore used by the thread pool for parking out-of-work threads.
     /// </summary>
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
     {
+        // This semaphore is a hybrid spinning/blocking semaphore with dynamically adjusted spinning.
+        // On a multiprocessor machine an acquiring thread will try to acquire multiple times
+        // before going to sleep. The amount of spinning is dynamically adjusted based on past
+        // history of the semaphore and will stay in the following range.
+        private const uint MaxSpinLimit = 400;
+        private const uint MinSpinLimit = 20;
+        private const uint SpinningDisabled = 0;
+
+        private const short MaximumSignalCount = short.MaxValue;
+
         private CacheLineSeparatedCounts _separated;
 
-        private readonly int _maximumSignalCount;
-        private readonly int _spinCount;
+        //
+        // We will use exponential backoff in rare cases when we need to change state atomically and cannot
+        // make progress due to concurrent state changes by other threads.
+        // While we cannot know the ideal amount of wait needed before making a successfull attempt,
+        // the exponential backoff will generally be not more than 2X worse than the perfect guess and
+        // will do a lot less attempts than an simple retry. On multiprocessor machine fruitless attempts
+        // will cause unnecessary sharing of the contended state which may make modifying the state more expensive.
+        // To protect against degenerate cases we will cap the per-iteration wait to 1024 spinwaits.
+        //
+        private const uint MaxExponentialBackoffBits = 10;
+
+        private uint _spinLimit;
         private readonly Action _onWait;
 
-        private const int SpinSleep0Threshold = 10;
-
-        public LowLevelLifoSemaphore(int initialSignalCount, int maximumSignalCount, int spinCount, Action onWait)
+        public LowLevelLifoSemaphore(Action onWait)
         {
-            Debug.Assert(initialSignalCount >= 0);
-            Debug.Assert(initialSignalCount <= maximumSignalCount);
-            Debug.Assert(maximumSignalCount > 0);
-            Debug.Assert(spinCount >= 0);
-
             _separated = default;
-            _separated._counts.SignalCount = (uint)initialSignalCount;
-            _maximumSignalCount = maximumSignalCount;
-            _spinCount = spinCount;
+            _spinLimit = (Environment.ProcessorCount > 1) ? MaxSpinLimit : SpinningDisabled;
             _onWait = onWait;
 
-            Create(maximumSignalCount);
+            Create(MaximumSignalCount);
         }
 
-        public bool Wait(int timeoutMs, bool spinWait)
+        private static unsafe void ExponentialBackoff(uint iteration)
         {
-            Debug.Assert(timeoutMs >= -1);
+            if (iteration > 0)
+            {
+                // no need for much randomness here, we will just hash the stack address + iteration.
+                uint rand = ((uint)&iteration + iteration) * 2654435769u;
+                // set the highmost bit to ensure minimum number of spins is exponentialy increasing
+                // that is in case some stack location results in a sequence of very low spin counts
+                rand |= (1 << 32);
+                uint spins = rand >> (byte)(32 - Math.Min(iteration, MaxExponentialBackoffBits));
+                Thread.SpinWait((int)spins);
+            }
+        }
 
-            int spinCount = spinWait ? _spinCount : 0;
+        public bool Wait(bool spinWait)
+        {
+            uint spinCount = spinWait ? _spinLimit: SpinningDisabled;
+            int processorCount = Environment.ProcessorCount;
 
             // Try to acquire the semaphore or
-            // a) register as a spinner if spinCount > 0 and timeoutMs > 0
-            // b) register as a waiter if there's already too many spinners or spinCount == 0 and timeoutMs > 0
-            // c) bail out if timeoutMs == 0 and return false
-            Counts counts = _separated._counts;
+            // a) register as a spinner if spinCount > 0
+            // b) register as a waiter if there's already too many spinners or spinCount == 0
+            uint iteration = 0;
             while (true)
             {
-                Debug.Assert(counts.SignalCount <= _maximumSignalCount);
+                Counts counts = _separated._counts;
+                Debug.Assert(counts.SignalCount <= MaximumSignalCount);
                 Counts newCounts = counts;
                 if (counts.SignalCount != 0)
                 {
                     newCounts.DecrementSignalCount();
                 }
-                else if (timeoutMs != 0)
+                else
                 {
-                    if (spinCount > 0 && newCounts.SpinnerCount < byte.MaxValue)
+                    if (spinCount > 0 &&
+                        newCounts.SpinnerCount < byte.MaxValue &&
+                        newCounts.SpinnerCount < processorCount - 1)
                     {
                         newCounts.IncrementSpinnerCount();
                     }
@@ -78,32 +103,21 @@ namespace System.Threading
                     }
                     if (newCounts.WaiterCount != counts.WaiterCount)
                     {
-                        return WaitForSignal(timeoutMs);
+                        return WaitForSignal();
                     }
-                    if (timeoutMs == 0)
-                    {
-                        return false;
-                    }
+
+                    // registered as spinner
                     break;
                 }
 
-                counts = countsBeforeUpdate;
+                ExponentialBackoff(iteration);
             }
 
-#if CORECLR && TARGET_UNIX
-            // The PAL's wait subsystem is slower, spin more to compensate for the more expensive wait
-            spinCount *= 2;
-#endif
-            int processorCount = Environment.ProcessorCount;
-            int spinIndex = processorCount > 1 ? 0 : SpinSleep0Threshold;
-            while (spinIndex < spinCount)
+            for (uint spinIndex = 0; spinIndex < spinCount; spinIndex++)
             {
-                LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, processorCount);
-                spinIndex++;
-
                 // Try to acquire the semaphore and unregister as a spinner
-                counts = _separated._counts;
-                while (counts.SignalCount > 0)
+                Counts counts = _separated._counts;
+                if (counts.SignalCount > 0)
                 {
                     Counts newCounts = counts;
                     newCounts.DecrementSignalCount();
@@ -112,17 +126,25 @@ namespace System.Threading
                     Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
                     if (countsBeforeUpdate == counts)
                     {
+                        if (spinCount < MaxSpinLimit)
+                            _spinLimit = spinCount + 1;
+
                         return true;
                     }
-
-                    counts = countsBeforeUpdate;
                 }
+
+                Thread.SpinWait(1);
             }
 
+            // unsuccessfull spin
+            if (spinCount > MinSpinLimit)
+                _spinLimit = spinCount - 1;
+
             // Unregister as spinner, and acquire the semaphore or register as a waiter
-            counts = _separated._counts;
+            iteration = 0;
             while (true)
             {
+                Counts counts = _separated._counts;
                 Counts newCounts = counts;
                 newCounts.DecrementSpinnerCount();
                 if (counts.SignalCount != 0)
@@ -137,22 +159,23 @@ namespace System.Threading
                 Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
                 if (countsBeforeUpdate == counts)
                 {
-                    return counts.SignalCount != 0 || WaitForSignal(timeoutMs);
+                    return counts.SignalCount != 0 || WaitForSignal();
                 }
 
-                counts = countsBeforeUpdate;
+                ExponentialBackoff(iteration);
             }
         }
 
         public void Release(int releaseCount)
         {
             Debug.Assert(releaseCount > 0);
-            Debug.Assert(releaseCount <= _maximumSignalCount);
+            Debug.Assert(releaseCount <= MaximumSignalCount);
 
             int countOfWaitersToWake;
-            Counts counts = _separated._counts;
+            uint iteration = 0;
             while (true)
             {
+                Counts counts = _separated._counts;
                 Counts newCounts = counts;
 
                 // Increase the signal count. The addition doesn't overflow because of the limit on the max signal count in constructor.
@@ -164,6 +187,7 @@ namespace System.Threading
                     (int)Math.Min(newCounts.SignalCount, (uint)counts.WaiterCount + counts.SpinnerCount) -
                     counts.SpinnerCount -
                     counts.CountOfWaitersSignaledToWake;
+
                 if (countOfWaitersToWake > 0)
                 {
                     // Ideally, limiting to a maximum of releaseCount would not be necessary and could be an assert instead, but since
@@ -183,25 +207,23 @@ namespace System.Threading
                 Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
                 if (countsBeforeUpdate == counts)
                 {
-                    Debug.Assert(releaseCount <= _maximumSignalCount - counts.SignalCount);
+                    Debug.Assert(releaseCount <= short.MaxValue - counts.SignalCount);
                     if (countOfWaitersToWake > 0)
                         ReleaseCore(countOfWaitersToWake);
                     return;
                 }
 
-                counts = countsBeforeUpdate;
+                ExponentialBackoff(iteration);
             }
         }
 
-        private bool WaitForSignal(int timeoutMs)
+        private bool WaitForSignal()
         {
-            Debug.Assert(timeoutMs > 0 || timeoutMs == -1);
-
             _onWait();
 
             while (true)
             {
-                if (!WaitCore(timeoutMs))
+                if (!WaitCore(PortableThreadPool.ThreadPoolThreadTimeoutMs))
                 {
                     // Unregister the waiter. The wait subsystem used above guarantees that a thread that wakes due to a timeout does
                     // not observe a signal to the object being waited upon.
@@ -210,9 +232,10 @@ namespace System.Threading
                 }
 
                 // Unregister the waiter if this thread will not be waiting anymore, and try to acquire the semaphore
-                Counts counts = _separated._counts;
+                uint iteration = 0;
                 while (true)
                 {
+                    Counts counts = _separated._counts;
                     Debug.Assert(counts.WaiterCount != 0);
                     Counts newCounts = counts;
                     if (counts.SignalCount != 0)
@@ -234,10 +257,12 @@ namespace System.Threading
                         {
                             return true;
                         }
+
+                        // TODO: VS why are we not trying to spin a bit?
                         break;
                     }
 
-                    counts = countsBeforeUpdate;
+                    ExponentialBackoff(iteration);
                 }
             }
         }
