@@ -301,6 +301,9 @@ VOID FinalizerThread::FinalizerThreadWorker(void *args)
         {
             s_InitializedFinalizerThreadForPlatform = TRUE;
             Thread::InitializationForManagedThreadInNative(GetFinalizerThread());
+
+            // also calibrate spinwait
+            YieldProcessorNormalization::PerformMeasurement();
         }
 
         JitHost::Reclaim();

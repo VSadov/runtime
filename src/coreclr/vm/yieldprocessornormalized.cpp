@@ -216,6 +216,7 @@ void YieldProcessorNormalization::ScheduleMeasurementIfNecessary()
     }
     CONTRACTL_END;
 
+
     NormalizationState normalizationState = VolatileLoadWithoutBarrier(&s_normalizationState);
     if (normalizationState == NormalizationState::Initialized)
     {
