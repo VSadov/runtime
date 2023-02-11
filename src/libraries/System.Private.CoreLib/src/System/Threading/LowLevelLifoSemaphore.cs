@@ -258,7 +258,6 @@ namespace System.Threading
                             return true;
                         }
 
-                        // TODO: VS why are we not trying to spin a bit?
                         break;
                     }
 
