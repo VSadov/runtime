@@ -32,6 +32,12 @@ namespace System.Threading
             _separated._counts.SignalCount = (uint)initialSignalCount;
             _maximumSignalCount = maximumSignalCount;
             _spinCount = spinCount;
+
+            if (int.TryParse(Environment.GetEnvironmentVariable("DOTNET_SPIN_LIMIT"), out int limit))
+            {
+                _spinCount = limit;
+            }
+
             _onWait = onWait;
 
             Create(maximumSignalCount);
@@ -90,10 +96,6 @@ namespace System.Threading
                 counts = countsBeforeUpdate;
             }
 
-#if CORECLR && TARGET_UNIX
-            // The PAL's wait subsystem is slower, spin more to compensate for the more expensive wait
-            spinCount *= 2;
-#endif
             int processorCount = Environment.ProcessorCount;
             int spinIndex = processorCount > 1 ? 0 : SpinSleep0Threshold;
             while (spinIndex < spinCount)
