@@ -21,6 +21,7 @@
 #undef _XOPEN_SOURCE
 #endif
 #include <pthread.h>
+#include <semaphore.h>
 #if defined(TARGET_OSX)
 #define _XOPEN_SOURCE
 #endif
@@ -216,6 +217,84 @@ void SystemNative_LowLevelMonitor_Signal_Release(LowLevelMonitor* monitor)
     assert(error == 0);
 
     (void)error; // unused in release build
+}
+
+void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount)
+{
+    if (maxCount < 0 || maxCount > SEM_VALUE_MAX || initialCount < 0 || initialCount > maxCount)
+    {
+        return NULL;
+    }
+
+    sem_t* semaphore = (sem_t*)malloc(sizeof(sem_t));
+    if (semaphore == NULL)
+    {
+        return NULL;
+    }
+
+    int error = sem_init(semaphore, /*pshared*/ 0, (unsigned int)initialCount);
+    if (error != 0)
+    {
+        SystemNative_NativeSemaphore_Destroy(semaphore);
+        return NULL;
+    }
+
+    return semaphore;
+}
+
+void SystemNative_NativeSemaphore_Destroy(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    int error = sem_destroy((sem_t*)semaphore);
+    assert(error == 0); // unused in release build
+    free((sem_t*)semaphore);
+}
+
+int32_t SystemNative_NativeSemaphore_Wait(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    int error;
+    do
+    {
+        error = sem_wait((sem_t*)semaphore);
+    } while (error == EINTR);
+
+    return error;
+}
+
+int32_t SystemNative_NativeSemaphore_TimedWait(void* semaphore, int32_t timeoutMilliseconds)
+{
+    assert(semaphore != NULL);
+    assert(timeoutMilliseconds >= 0);
+
+    int error;
+    struct timeval tv;
+    error = gettimeofday(&tv, NULL);
+    assert(error == 0);
+
+    struct timespec timeoutTimeSpec;
+    timeoutTimeSpec.tv_sec = tv.tv_sec;
+    timeoutTimeSpec.tv_nsec = tv.tv_usec * 1000;
+
+    uint64_t nanoseconds = (uint64_t)timeoutMilliseconds * 1000 * 1000 + (uint64_t)timeoutTimeSpec.tv_nsec;
+    timeoutTimeSpec.tv_sec += nanoseconds / (1000 * 1000 * 1000);
+    timeoutTimeSpec.tv_nsec = nanoseconds % (1000 * 1000 * 1000);
+
+    do
+    {
+        error = sem_timedwait((sem_t*)semaphore, &timeoutTimeSpec);
+    } while (error == EINTR);
+
+    return error;
+}
+
+int SystemNative_NativeSemaphore_Release(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    return sem_post((sem_t*)semaphore);
 }
 
 int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter)

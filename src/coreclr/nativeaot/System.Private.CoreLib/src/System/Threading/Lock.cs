@@ -68,12 +68,14 @@ namespace System.Threading
         private const int WaiterCountIncrement = 8;
 
         // state of the lock
-        private AutoResetEvent? _lazyEvent;
         private int _owningThreadId;
         private uint _recursionCount;
         private int _state;
         private uint _spinLimit = SpinningNotInitialized;
         private int _wakeWatchDog;
+
+        // lazy allocated semaphore if threads need to sleep
+        private LowLevelSemaphore? _lazySemaphore;
 
         // used to transfer the state when inflating thin locks
         internal void InitializeLocked(int threadId, int recursionCount)
@@ -85,20 +87,20 @@ namespace System.Threading
             _recursionCount = (uint)recursionCount;
         }
 
-        private AutoResetEvent Event
+        private LowLevelSemaphore Semaphore
         {
             get
             {
-                if (_lazyEvent == null)
-                    Interlocked.CompareExchange(ref _lazyEvent, new AutoResetEvent(false), null);
+                if (_lazySemaphore == null)
+                    Interlocked.CompareExchange(ref _lazySemaphore, new LowLevelSemaphore(initialCount: 0, maximumCount: 1), null);
 
-                return _lazyEvent;
+                return _lazySemaphore;
             }
         }
 
         public void Dispose()
         {
-            _lazyEvent?.Dispose();
+            _lazySemaphore?.Dispose();
         }
 
         private static int CurrentThreadId => Environment.CurrentManagedThreadId;
@@ -285,7 +287,7 @@ namespace System.Threading
 
                 TimeoutTracker timeoutTracker = TimeoutTracker.Start(millisecondsTimeout);
                 Debug.Assert(_state >= WaiterCountIncrement);
-                bool waitSucceeded = Event.WaitOne(millisecondsTimeout);
+                bool waitSucceeded = Semaphore.Wait(millisecondsTimeout);
                 Debug.Assert(_state >= WaiterCountIncrement);
 
                 if (!waitSucceeded)
@@ -436,7 +438,7 @@ namespace System.Threading
                             _wakeWatchDog = Environment.TickCount | 1;
                         }
 
-                        Event.Set();
+                        Semaphore.Release(1);
                         return;
                     }
                 }

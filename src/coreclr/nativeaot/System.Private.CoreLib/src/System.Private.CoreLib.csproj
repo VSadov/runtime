@@ -292,6 +292,7 @@
       <Link>Interop\Windows\Kernel32\Interop.DynamicLoad.cs</Link>
     </Compile>
     <Compile Include="System\Threading\Thread.NativeAot.Windows.cs" />
+    <Compile Include="System\Threading\LowLevelSemaphore.Windows.cs" />
     <Compile Include="$(CommonPath)\Interop\Windows\Kernel32\Interop.ThreadPoolIO.cs">
       <Link>Interop\Windows\Kernel32\Interop.ThreadPoolIO.cs</Link>
     </Compile>
@@ -311,6 +312,7 @@
     <Compile Include="System\Runtime\InteropServices\PInvokeMarshal.Unix.cs" />
     <Compile Include="System\Threading\LowLevelLifoSemaphore.Unix.cs" />
     <Compile Include="System\Threading\Thread.NativeAot.Unix.cs" />
+    <Compile Include="System\Threading\LowLevelSemaphore.Unix.cs" />
     <Compile Include="$(CommonPath)\Interop\Unix\System.Native\Interop.Abort.cs">
       <Link>Interop\Unix\System.Native\Interop.Abort.cs</Link>
     </Compile>
@@ -319,6 +321,9 @@
     </Compile>
     <Compile Include="$(CommonPath)\Interop\Unix\System.Native\Interop.Threading.cs">
       <Link>Interop\Unix\System.Native\Interop.Threading.cs</Link>
+    </Compile>
+    <Compile Include="$(CommonPath)Interop\Unix\System.Native\Interop.NativeSemaphore.cs">
+      <Link>Interop\Unix\System.Native\Interop.NativeSemaphore.cs</Link>
     </Compile>
   </ItemGroup>
   <ItemGroup>

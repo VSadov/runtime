@@ -22,6 +22,18 @@ PALEXPORT int32_t SystemNative_LowLevelMonitor_TimedWait(LowLevelMonitor *monito
 
 PALEXPORT void SystemNative_LowLevelMonitor_Signal_Release(LowLevelMonitor* monitor);
 
+
+PALEXPORT void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount);
+
+PALEXPORT void SystemNative_NativeSemaphore_Destroy(void* semaphore);
+
+PALEXPORT int32_t SystemNative_NativeSemaphore_Wait(void* semaphore);
+
+PALEXPORT int32_t SystemNative_NativeSemaphore_TimedWait(void* semaphore, int32_t timeoutMilliseconds);
+
+PALEXPORT int32_t SystemNative_NativeSemaphore_Release(void* semaphore);
+
+
 PALEXPORT int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter);
 
 PALEXPORT int32_t SystemNative_SchedGetCpu(void);
