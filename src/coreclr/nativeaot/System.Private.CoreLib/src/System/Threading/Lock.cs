@@ -92,7 +92,13 @@ namespace System.Threading
             get
             {
                 if (_lazySemaphore == null)
-                    Interlocked.CompareExchange(ref _lazySemaphore, new LowLevelSemaphore(initialCount: 0, maximumCount: 1), null);
+                {
+                    LowLevelSemaphore semaphore = new LowLevelSemaphore(initialCount: 0, maximumCount: 1);
+                    if (Interlocked.CompareExchange(ref _lazySemaphore, semaphore, null) != null)
+                    {
+                        semaphore.Dispose();
+                    }
+                }
 
                 return _lazySemaphore;
             }
