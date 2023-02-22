@@ -307,6 +307,8 @@ struct LowLevelSemaphore
     int Count;
 };
 
+typedef struct LowLevelSemaphore LowLevelSemaphore;
+
 void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount)
 {
     if (maxCount < 0 || maxCount > SEM_VALUE_MAX || initialCount < 0 || initialCount > maxCount)
