@@ -316,7 +316,7 @@ void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount
         return NULL;
     }
 
-    LowLevelSemaphore* pSemaphore = (sem_t*)malloc(sizeof(LowLevelSemaphore));
+    LowLevelSemaphore* pSemaphore = (LowLevelSemaphore*)malloc(sizeof(LowLevelSemaphore));
     if (pSemaphore == NULL)
     {
         return NULL;
