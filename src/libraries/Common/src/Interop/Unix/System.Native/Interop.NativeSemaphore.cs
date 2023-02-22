@@ -15,12 +15,14 @@ internal static partial class Interop
         internal static partial void NativeSemaphore_Destroy(IntPtr semaphore);
 
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_NativeSemaphore_Wait")]
-        internal static partial int NativeSemaphore_Wait(IntPtr semaphore);
+        internal static partial void NativeSemaphore_Wait(IntPtr semaphore);
 
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_NativeSemaphore_TimedWait")]
-        internal static partial int NativeSemaphore_TimedWait(IntPtr semaphore, int timeoutMilliseconds);
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool NativeSemaphore_TimedWait(IntPtr semaphore, int timeoutMilliseconds);
 
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_NativeSemaphore_Release")]
-        internal static partial int NativeSemaphore_Release(IntPtr semaphore);
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool NativeSemaphore_Release(IntPtr semaphore);
     }
 }

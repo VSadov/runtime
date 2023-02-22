@@ -27,7 +27,7 @@ PALEXPORT void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_
 
 PALEXPORT void SystemNative_NativeSemaphore_Destroy(void* semaphore);
 
-PALEXPORT int32_t SystemNative_NativeSemaphore_Wait(void* semaphore);
+PALEXPORT void SystemNative_NativeSemaphore_Wait(void* semaphore);
 
 PALEXPORT int32_t SystemNative_NativeSemaphore_TimedWait(void* semaphore, int32_t timeoutMilliseconds);
 

@@ -42,38 +42,21 @@ namespace System.Threading
                 return true;
             }
 
-            int ret = Interop.Sys.NativeSemaphore_TimedWait(_nativeSemaphore, timeoutMs);
-            switch (ret)
-            {
-                case (int)Interop.Error.SUCCESS:
-                    return true;
-                case (int)Interop.Error.ETIMEDOUT:
-                    return false;
-                default:
-                    throw new InvalidOperationException();
-            }
+            return Interop.Sys.NativeSemaphore_TimedWait(_nativeSemaphore, timeoutMs);
         }
 
         public void Wait()
         {
-            int ret = Interop.Sys.NativeSemaphore_Wait(_nativeSemaphore);
-            if (ret != (int)Interop.Error.SUCCESS)
-                throw new InvalidOperationException();
+            Interop.Sys.NativeSemaphore_Wait(_nativeSemaphore);
         }
 
         public void Release(int count)
         {
             for (int i = 0; i < count; i++)
             {
-                int ret = Interop.Sys.NativeSemaphore_Release(_nativeSemaphore);
-                switch (ret)
+                if (!Interop.Sys.NativeSemaphore_Release(_nativeSemaphore))
                 {
-                    case (int)Interop.Error.SUCCESS:
-                        continue;
-                    case (int)Interop.Error.EOVERFLOW:
-                        throw new SemaphoreFullException();
-                    default:
-                        throw new InvalidOperationException();
+                    throw new SemaphoreFullException();
                 }
             }
         }
