@@ -219,7 +219,7 @@ void SystemNative_LowLevelMonitor_Signal_Release(LowLevelMonitor* monitor)
     (void)error; // unused in release build
 }
 
-#ifdef TARGET_UNIX
+#ifdef TARGET_LINUX
 
 void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount)
 {
@@ -405,7 +405,7 @@ int32_t SystemNative_NativeSemaphore_Release(void* semaphore)
 
     return true;
 }
-#endif // TARGET_UNIX
+#endif // TARGET_LINUX
 
 int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter)
 {
