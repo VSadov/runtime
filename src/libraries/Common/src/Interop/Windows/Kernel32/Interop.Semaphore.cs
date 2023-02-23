@@ -12,11 +12,18 @@ internal static partial class Interop
         [LibraryImport(Libraries.Kernel32, EntryPoint = "OpenSemaphoreW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
         internal static partial SafeWaitHandle OpenSemaphore(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, string name);
 
+        [LibraryImport(Libraries.Kernel32, EntryPoint = "CreateSemaphoreW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+        internal static partial IntPtr CreateSemaphore(IntPtr lpSecurityAttributes, int initialCount, int maximumCount, string? name);
+
         [LibraryImport(Libraries.Kernel32, EntryPoint = "CreateSemaphoreExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
         internal static partial SafeWaitHandle CreateSemaphoreEx(IntPtr lpSecurityAttributes, int initialCount, int maximumCount, string? name, uint flags, uint desiredAccess);
 
         [LibraryImport(Libraries.Kernel32, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static partial bool ReleaseSemaphore(SafeWaitHandle handle, int releaseCount, out int previousCount);
+
+        [LibraryImport(Libraries.Kernel32, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ReleaseSemaphore(IntPtr handle, int releaseCount, out int previousCount);
     }
 }
