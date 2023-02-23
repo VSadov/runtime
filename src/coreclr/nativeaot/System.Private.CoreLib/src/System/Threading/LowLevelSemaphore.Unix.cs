@@ -8,7 +8,7 @@ namespace System.Threading
     /// <summary>
     /// Thin wrapper over native semaphore.
     /// </summary>
-    internal sealed class LowLevelSemaphore : IDisposable
+    internal sealed partial class LowLevelSemaphore : IDisposable
     {
         public LowLevelSemaphore(int initialCount, int maximumCount)
         {
