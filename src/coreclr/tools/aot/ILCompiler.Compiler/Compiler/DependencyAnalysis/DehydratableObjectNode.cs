@@ -5,7 +5,7 @@ namespace ILCompiler.DependencyAnalysis
 {
     public abstract class DehydratableObjectNode : ObjectNode
     {
-        public sealed override ObjectNodeSection GetSection(NodeFactory factory)
+        public override ObjectNodeSection GetSection(NodeFactory factory)
         {
             ObjectNodeSection desiredSection = GetDehydratedSection(factory);
 

@@ -67,7 +67,14 @@ namespace ILCompiler.DependencyAnalysis
             return builder.ToObjectData();
         }
 
-        protected override ObjectNodeSection GetDehydratedSection(NodeFactory factory) => ObjectNodeSection.DataSection;
+        //public override ObjectNodeSection GetSection(NodeFactory factory)
+        //{
+        //    return factory.MetadataManager.IsDataDehydrated ?
+        //        ObjectNodeSection.FrozenHeapHydrationTargetSection :
+        //        ObjectNodeSection.FrozenHeapSection;
+        //}
+
+        protected override ObjectNodeSection GetDehydratedSection(NodeFactory factory) => ObjectNodeSection.FrozenHeapSection;
         protected override string GetName(NodeFactory factory) => this.GetMangledName(factory.NameMangler);
 
         public override int ClassCode => -1771336339;

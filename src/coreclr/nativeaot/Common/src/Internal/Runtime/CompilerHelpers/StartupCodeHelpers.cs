@@ -146,6 +146,7 @@ namespace Internal.Runtime.CompilerHelpers
             IntPtr frozenObjectSection = RuntimeImports.RhGetModuleSection(typeManager, ReadyToRunSectionType.FrozenObjectRegion, out length);
             if (frozenObjectSection != IntPtr.Zero)
             {
+               // Debug.Assert(checked((int)frozenObjectSection) % 1024 * 1024 * 2 == 0);
                 Debug.Assert(length % IntPtr.Size == 0);
                 InitializeModuleFrozenObjectSegment(frozenObjectSection, length);
             }
