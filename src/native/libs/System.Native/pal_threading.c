@@ -21,6 +21,7 @@
 #undef _XOPEN_SOURCE
 #endif
 #include <pthread.h>
+#include <semaphore.h>
 #if defined(TARGET_OSX)
 #define _XOPEN_SOURCE
 #endif
@@ -217,6 +218,194 @@ void SystemNative_LowLevelMonitor_Signal_Release(LowLevelMonitor* monitor)
 
     (void)error; // unused in release build
 }
+
+#ifdef TARGET_LINUX
+
+void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount)
+{
+    if (maxCount < 0 || maxCount > SEM_VALUE_MAX || initialCount < 0 || initialCount > maxCount)
+    {
+        return NULL;
+    }
+
+    sem_t* semaphore = (sem_t*)malloc(sizeof(sem_t));
+    if (semaphore == NULL)
+    {
+        return NULL;
+    }
+
+    int error = sem_init(semaphore, /*pshared*/ 0, (unsigned int)initialCount);
+    if (error != 0)
+    {
+        SystemNative_NativeSemaphore_Destroy(semaphore);
+        return NULL;
+    }
+
+    return semaphore;
+}
+
+void SystemNative_NativeSemaphore_Destroy(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    int error = sem_destroy((sem_t*)semaphore);
+    assert(error == 0); // unused in release build
+    free((sem_t*)semaphore);
+}
+
+void SystemNative_NativeSemaphore_Wait(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    int error;
+    do
+    {
+        error = sem_wait((sem_t*)semaphore);
+    } while (error == EINTR);
+
+    assert(error == 0); // unused in release build
+}
+
+int32_t SystemNative_NativeSemaphore_TimedWait(void* semaphore, int32_t timeoutMilliseconds)
+{
+    assert(semaphore != NULL);
+    assert(timeoutMilliseconds >= 0);
+
+    int error;
+    struct timeval tv;
+    error = gettimeofday(&tv, NULL);
+    assert(error == 0);
+
+    struct timespec timeoutTimeSpec;
+    timeoutTimeSpec.tv_sec = tv.tv_sec;
+    timeoutTimeSpec.tv_nsec = tv.tv_usec * 1000;
+
+    uint64_t nanoseconds = (uint64_t)timeoutMilliseconds * 1000 * 1000 + (uint64_t)timeoutTimeSpec.tv_nsec;
+    timeoutTimeSpec.tv_sec += nanoseconds / (1000 * 1000 * 1000);
+    timeoutTimeSpec.tv_nsec = nanoseconds % (1000 * 1000 * 1000);
+
+    do
+    {
+        error = sem_timedwait((sem_t*)semaphore, &timeoutTimeSpec);
+    } while (error == EINTR);
+
+    assert(error == 0 || error == ETIMEDOUT);
+    return error == 0;
+}
+
+int32_t SystemNative_NativeSemaphore_Release(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    int error = sem_post((sem_t*)semaphore);
+    assert(error == 0 || error == EOVERFLOW);
+
+    return error == 0;
+}
+
+#else
+
+struct LowLevelSemaphore
+{
+    LowLevelMonitor* pMonitor;
+    int Count;
+};
+
+typedef struct LowLevelSemaphore LowLevelSemaphore;
+
+void* SystemNative_NativeSemaphore_Create(int32_t initialCount, int32_t maxCount)
+{
+    if (maxCount < 0 || maxCount > SEM_VALUE_MAX || initialCount < 0 || initialCount > maxCount)
+    {
+        return NULL;
+    }
+
+    LowLevelSemaphore* pSemaphore = (LowLevelSemaphore*)malloc(sizeof(LowLevelSemaphore));
+    if (pSemaphore == NULL)
+    {
+        return NULL;
+    }
+
+    pSemaphore->pMonitor = SystemNative_LowLevelMonitor_Create();
+
+    if (pSemaphore->pMonitor == NULL)
+    {
+        free(pSemaphore);
+        return NULL;
+    }
+
+    pSemaphore->Count = initialCount;
+    return pSemaphore;
+}
+
+void SystemNative_NativeSemaphore_Destroy(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    LowLevelSemaphore* pSemaphore = (LowLevelSemaphore*)semaphore;
+    SystemNative_LowLevelMonitor_Destroy(pSemaphore->pMonitor);
+    free(pSemaphore);
+}
+
+void SystemNative_NativeSemaphore_Wait(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    LowLevelSemaphore* pSemaphore = (LowLevelSemaphore*)semaphore;
+    SystemNative_LowLevelMonitor_Acquire(pSemaphore->pMonitor);
+
+    while (pSemaphore->Count == 0)
+    {
+        SystemNative_LowLevelMonitor_Wait(pSemaphore->pMonitor);
+    }
+
+    pSemaphore->Count--;
+    SystemNative_LowLevelMonitor_Release(pSemaphore->pMonitor);
+}
+
+int32_t SystemNative_NativeSemaphore_TimedWait(void* semaphore, int32_t timeoutMilliseconds)
+{
+    assert(semaphore != NULL);
+    assert(timeoutMilliseconds >= 0);
+
+    assert(semaphore != NULL);
+
+    LowLevelSemaphore* pSemaphore = (LowLevelSemaphore*)semaphore;
+    SystemNative_LowLevelMonitor_Acquire(pSemaphore->pMonitor);
+
+    while (pSemaphore->Count == 0)
+    {
+        if (!SystemNative_LowLevelMonitor_TimedWait(pSemaphore->pMonitor, timeoutMilliseconds))
+        {
+            SystemNative_LowLevelMonitor_Release(pSemaphore->pMonitor);
+            return false;
+        }
+    }
+
+    pSemaphore->Count--;
+    SystemNative_LowLevelMonitor_Release(pSemaphore->pMonitor);
+    return true;
+}
+
+int32_t SystemNative_NativeSemaphore_Release(void* semaphore)
+{
+    assert(semaphore != NULL);
+
+    LowLevelSemaphore* pSemaphore = (LowLevelSemaphore*)semaphore;
+    SystemNative_LowLevelMonitor_Acquire(pSemaphore->pMonitor);
+
+    if (pSemaphore->Count >= SEM_VALUE_MAX)
+    {
+        SystemNative_LowLevelMonitor_Release(pSemaphore->pMonitor);
+        return false;
+    }
+
+    pSemaphore->Count++;
+    SystemNative_LowLevelMonitor_Signal_Release(pSemaphore->pMonitor);
+
+    return true;
+}
+#endif // TARGET_LINUX
 
 int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter)
 {

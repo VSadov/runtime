@@ -11,25 +11,26 @@ namespace System.Threading
     /// </summary>
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
     {
-        private WaitSubsystem.WaitableObject _semaphore;
+        private LowLevelSemaphore _semaphore;
 
         private void Create(int maximumSignalCount)
         {
-            _semaphore = WaitSubsystem.WaitableObject.NewSemaphore(0, maximumSignalCount);
+            _semaphore = new LowLevelSemaphore(0, maximumSignalCount);
         }
 
         public void Dispose()
         {
+            _semaphore.Dispose();
         }
 
         private bool WaitCore(int timeoutMs)
         {
-            return WaitSubsystem.Wait(_semaphore, timeoutMs, false, true) == WaitHandle.WaitSuccess;
+            return _semaphore.Wait(timeoutMs);
         }
 
         private void ReleaseCore(int count)
         {
-            WaitSubsystem.ReleaseSemaphore(_semaphore, count);
+            _semaphore.Release(count);
         }
     }
 }
