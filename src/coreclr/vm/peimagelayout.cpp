@@ -180,7 +180,7 @@ DWORD SectionCharacteristicsToPageProtection(UINT characteristics)
 
 //To force base relocation on Vista (which uses ASLR), unmask IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE
 //(0x40) for OptionalHeader.DllCharacteristics
-void PEImageLayout::ApplyBaseRelocations(bool relocationMustWriteCopy)
+void PEImageLayout::ApplyBaseRelocations()
 {
     STANDARD_VM_CONTRACT;
 
@@ -265,7 +265,7 @@ void PEImageLayout::ApplyBaseRelocations(bool relocationMustWriteCopy)
             // Unprotect the section if it is not writable
             if (((pSection->Characteristics & VAL32(IMAGE_SCN_MEM_WRITE)) == 0))
             {
-                DWORD dwNewProtection = relocationMustWriteCopy ? PAGE_WRITECOPY : PAGE_READWRITE;
+                DWORD dwNewProtection = PAGE_READWRITE;
 #if defined(TARGET_UNIX)
                 if (((pSection->Characteristics & VAL32(IMAGE_SCN_MEM_EXECUTE)) != 0))
                 {
@@ -426,7 +426,6 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
     m_pExceptionDir = NULL;
     memset(m_imageParts, 0, sizeof(m_imageParts));
 
-    bool relocationMustWriteCopy = false;
     void* loadedImage = NULL;
 
     LOG((LF_LOADER, LL_INFO100, "PEImage: Opening manually mapped stream\n"));
@@ -436,10 +435,6 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
     if (loadedImage == NULL)
     {
         FreeImageParts();
-    }
-    else
-    {
-        relocationMustWriteCopy = true;
     }
 #endif //TARGET_WINDOWS
 
@@ -455,7 +450,7 @@ ConvertedImageLayout::ConvertedImageLayout(FlatImageLayout* source)
         // Do base relocation and exception hookup, if necessary.
         // otherwise R2R will be disabled for this image.
 
-        ApplyBaseRelocations(relocationMustWriteCopy);
+        ApplyBaseRelocations();
 
         // Check if there is a static function table and install it. (Windows only, except x86)
 #if !defined(TARGET_UNIX) && !defined(TARGET_X86)
@@ -559,7 +554,7 @@ LoadedImageLayout::LoadedImageLayout(PEImage* pOwner, HRESULT* loadFailure)
         }
 
         // Unix specifies write sharing at map time (i.e. MAP_PRIVATE implies writecopy).
-        ApplyBaseRelocations(/* relocationMustWriteCopy*/ false);
+        ApplyBaseRelocations();
         SetRelocated();
     }
 #endif
@@ -628,7 +623,7 @@ FlatImageLayout::FlatImageLayout(PEImage* pOwner)
         // to map sections into executable views on Windows the mapping must have EXECUTE permissions
         if (uncompressedSize == 0)
         {
-            mapAccess = PAGE_EXECUTE_READ;
+            mapAccess = PAGE_EXECUTE_WRITECOPY;
         }
 #endif
         m_FileMap.Assign(WszCreateFileMapping(hFile, NULL, mapAccess, 0, 0, NULL));
@@ -1208,7 +1203,7 @@ NativeImageLayout::NativeImageLayout(LPCWSTR fullPath)
 #if TARGET_UNIX
     PEDecoder::Init(loadedImage, /* relocated */ false);
     // Unix specifies write sharing at map time (i.e. MAP_PRIVATE implies writecopy).
-    ApplyBaseRelocations(/* relocationMustWriteCopy*/ false);
+    ApplyBaseRelocations();
 #else // TARGET_UNIX
     PEDecoder::Init(loadedImage, /* relocated */ true);
 #endif // TARGET_UNIX

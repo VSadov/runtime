@@ -61,7 +61,7 @@ public:
     void AddRef();
     ULONG Release();
 
-    void ApplyBaseRelocations(bool relocationMustWriteCopy);
+    void ApplyBaseRelocations();
 
 public:
 #ifdef DACCESS_COMPILE
