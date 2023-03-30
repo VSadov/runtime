@@ -209,8 +209,7 @@ namespace System.Runtime
             if (s_lock == null)
                 Interlocked.CompareExchange(ref s_lock, new Lock(), null);
 
-            s_lock.Acquire();
-            try
+            using (s_lock.EnterScope())
             {
                 // Avoid duplicate entries
                 Entry existingEntry = LookupInCache(s_cache, context, signature);
@@ -225,10 +224,6 @@ namespace System.Runtime
                 Entry newEntry = new Entry() { Context = context, Signature = signature, Result = result, AuxResult = auxResult, Next = cache[key] };
                 cache[key] = newEntry;
                 return newEntry;
-            }
-            finally
-            {
-                s_lock.Release();
             }
         }
 

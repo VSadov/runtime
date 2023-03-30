@@ -25,7 +25,7 @@ namespace Internal.Runtime.CompilerHelpers
                 ObjectHeader.GetLockObject(obj) :
                 SyncTable.GetLockObject(resultOrIndex);
 
-            if (lck.TryAcquire(0))
+            if (lck.TryEnter())
             {
                 lockTaken = true;
                 return;
@@ -59,7 +59,7 @@ namespace Internal.Runtime.CompilerHelpers
                 ObjectHeader.GetLockObject(obj) :
                 SyncTable.GetLockObject(resultOrIndex);
 
-            if (lck.TryAcquire(0))
+            if (lck.TryEnter())
             {
                 lockTaken = true;
                 return;

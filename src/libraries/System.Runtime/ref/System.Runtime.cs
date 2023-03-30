@@ -14877,6 +14877,22 @@ namespace System.Threading
         PublicationOnly = 1,
         ExecutionAndPublication = 2,
     }
+    [System.Runtime.Versioning.RequiresPreviewFeaturesAttribute]
+    public sealed partial class Lock
+    {
+        public Lock() { }
+        public void Enter() { }
+        public System.Threading.Lock.Scope EnterScope() { throw null; }
+        public void Exit() { }
+        public bool IsHeldByCurrentThread { get { throw null; } }
+        public bool TryEnter() { throw null; }
+        public bool TryEnter(int millisecondsTimeout) { throw null; }
+        public bool TryEnter(System.TimeSpan timeout) { throw null; }
+        public struct Scope : System.IDisposable
+        {
+            public void Dispose() { }
+        }
+    }
     public sealed partial class PeriodicTimer : System.IDisposable
     {
         public PeriodicTimer(System.TimeSpan period) { }
