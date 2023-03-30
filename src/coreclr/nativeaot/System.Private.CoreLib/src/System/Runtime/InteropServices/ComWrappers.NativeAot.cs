@@ -740,7 +740,7 @@ namespace System.Runtime.InteropServices
 
             if (!flags.HasFlag(CreateObjectFlags.UniqueInstance))
             {
-                using (LockHolder.Hold(_lock))
+                using (_lock.EnterScope())
                 {
                     if (_rcwCache.TryGetValue(externalComObject, out GCHandle handle))
                     {
@@ -797,7 +797,7 @@ namespace System.Runtime.InteropServices
                 return true;
             }
 
-            using (LockHolder.Hold(_lock))
+            using (_lock.EnterScope())
             {
                 object? cachedWrapper = null;
                 if (_rcwCache.TryGetValue(externalComObject, out var existingHandle))
@@ -836,7 +836,7 @@ namespace System.Runtime.InteropServices
 
         private void RemoveRCWFromCache(IntPtr comPointer, GCHandle expectedValue)
         {
-            using (LockHolder.Hold(_lock))
+            using (_lock.EnterScope())
             {
                 // TryGetOrCreateObjectForComInstanceInternal may have put a new entry into the cache
                 // in the time between the GC cleared the contents of the GC handle but before the

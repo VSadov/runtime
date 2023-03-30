@@ -65,7 +65,7 @@ namespace System.Threading.Tests
         }
 
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
-        public static void IsEntered_WhenHeldBySomeoneElse_ThrowsSynchronizationLockException()
+        public static void IsEntered_WhenHeldBySomeoneElse()
         {
             var obj = new object();
             var b = new Barrier(2);
@@ -484,6 +484,27 @@ namespace System.Threading.Tests
                         Monitor.Exit(obj);
                     }
                 } while (!t.Join(0));
+            }
+        }
+
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        public static void InterruptWaitTest()
+        {
+            object obj = new();
+            lock (obj)
+            {
+                var threadReady = new AutoResetEvent(false);
+                var t =
+                    ThreadTestHelpers.CreateGuardedThread(out Action waitForThread, () =>
+                    {
+                        threadReady.Set();
+                        Assert.Throws<ThreadInterruptedException>(() => Monitor.Enter(obj));
+                    });
+                t.IsBackground = true;
+                t.Start();
+                threadReady.CheckedWait();
+                t.Interrupt();
+                waitForThread();
             }
         }
     }

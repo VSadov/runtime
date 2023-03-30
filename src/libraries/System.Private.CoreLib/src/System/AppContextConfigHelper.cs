@@ -7,18 +7,25 @@ namespace System
 {
     internal static class AppContextConfigHelper
     {
-        internal static bool GetBooleanConfig(string configName, bool defaultValue) =>
-            AppContext.TryGetSwitch(configName, out bool value) ? value : defaultValue;
+        internal static bool GetBooleanConfig(string switchName, bool defaultValue) =>
+            AppContext.TryGetSwitch(switchName, out bool value) ? value : defaultValue;
 
         internal static bool GetBooleanConfig(string switchName, string envVariable, bool defaultValue = false)
         {
-            if (!AppContext.TryGetSwitch(switchName, out bool ret))
+            string? str = Environment.GetEnvironmentVariable(envVariable);
+            if (str != null)
             {
-                string? switchValue = Environment.GetEnvironmentVariable(envVariable);
-                ret = switchValue != null ? (bool.IsTrueStringIgnoreCase(switchValue) || switchValue.Equals("1")) : defaultValue;
+                if (str.Equals("1", StringComparison.Ordinal) || bool.IsTrueStringIgnoreCase(str))
+                {
+                    return true;
+                }
+                if (str.Equals("0", StringComparison.Ordinal) || bool.IsFalseStringIgnoreCase(str))
+                {
+                    return false;
+                }
             }
 
-            return ret;
+            return GetBooleanConfig(switchName, defaultValue);
         }
 
         internal static int GetInt32Config(string configName, int defaultValue, bool allowNegative = true)
@@ -63,6 +70,46 @@ namespace System
             {
                 return defaultValue;
             }
+        }
+
+        internal static int GetInt32Config(string configName, string envVariable, int defaultValue, bool allowNegative = true)
+        {
+            string? str = Environment.GetEnvironmentVariable(envVariable);
+            if (str != null)
+            {
+                try
+                {
+                    int result;
+                    if (str.StartsWith('0'))
+                    {
+                        if (str.Length >= 2 && str[1] == 'x')
+                        {
+                            result = Convert.ToInt32(str, 16);
+                        }
+                        else
+                        {
+                            result = Convert.ToInt32(str, 8);
+                        }
+                    }
+                    else
+                    {
+                        result = int.Parse(str, NumberStyles.AllowLeadingSign, NumberFormatInfo.InvariantInfo);
+                    }
+
+                    if (allowNegative || result >= 0)
+                    {
+                        return result;
+                    }
+                }
+                catch (FormatException)
+                {
+                }
+                catch (OverflowException)
+                {
+                }
+            }
+
+            return GetInt32Config(configName, defaultValue, allowNegative);
         }
 
 
