@@ -109,7 +109,7 @@ PEImageLayout* PEImageLayout::Load(PEImage* pOwner, HRESULT* loadFailure)
     {
         if (!pOwner->IsInBundle()
 #if defined(TARGET_UNIX)
-            || ((pOwner->GetUncompressedSize() == 0) && !disableMapping)
+            && ((pOwner->GetUncompressedSize() == 0) && !disableMapping)
 #endif
             )
         {
