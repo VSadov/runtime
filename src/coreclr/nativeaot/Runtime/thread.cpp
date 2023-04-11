@@ -1287,6 +1287,15 @@ COOP_PINVOKE_HELPER(Object**, RhGetInlineThreadStaticStorage, ())
     return pCurrentThread->GetInlineThreadStaticStorage();
 }
 
+COOP_PINVOKE_HELPER(Object*, RhpGetThreadStaticBaseForType, (void* unused, uint32_t typeIndex))
+{
+    Thread* pCurrentThread = ThreadStore::RawGetCurrentThread();
+    Object* pInlineThreadStaticStorage = *pCurrentThread->GetInlineThreadStaticStorage();
+
+    // +2 to skip MT pointer and aligned length
+    return ((Object**)pInlineThreadStaticStorage)[typeIndex + 2];
+}
+
 // This is function is used to quickly query a value that can uniquely identify a thread
 COOP_PINVOKE_HELPER(uint8_t*, RhCurrentNativeThreadId, ())
 {
