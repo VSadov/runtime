@@ -71,30 +71,61 @@ namespace ILCompiler.DependencyAnalysis
                 case ReadyToRunHelperId.GetThreadStaticBase:
                     {
                         MetadataType target = (MetadataType)Target;
-                        encoder.EmitMOV(encoder.TargetRegister.Arg2, factory.TypeThreadStaticIndex(target));
+                        encoder.EmitMOV(encoder.TargetRegister.Arg1, factory.TypeThreadStaticIndex(target));
 
-                        // First arg: address of the TypeManager slot that provides the helper with
-                        // information about module index and the type manager instance (which is used
-                        // for initialization on first access).
-                        encoder.EmitLDR(encoder.TargetRegister.Arg0, encoder.TargetRegister.Arg2);
+                        // Arg0: index of the type in the ThreadStatic section of the modules
+                        encoder.EmitLDR(encoder.TargetRegister.Arg0, encoder.TargetRegister.Arg1, factory.Target.PointerSize);
 
-                        // Second arg: index of the type in the ThreadStatic section of the modules
-                        encoder.EmitLDR(encoder.TargetRegister.Arg1, encoder.TargetRegister.Arg2, factory.Target.PointerSize);
+                        bool isSingleFile = factory.CompilationModuleGroup.IsSingleFileCompilation;
 
-                        if (!factory.PreinitializationManager.HasLazyStaticConstructor(target))
+                        if (isSingleFile)
                         {
-                            encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.GetThreadStaticBaseForType));
+                            ISymbolNode helper = factory.ExternSymbol("RhpGetThreadStaticBaseForType");
+                            if (!factory.PreinitializationManager.HasLazyStaticConstructor(target))
+                            {
+                                encoder.EmitJMP(helper);
+                            }
+                            else
+                            {
+                                // check if class is initialized
+                                encoder.EmitMOV(encoder.TargetRegister.Arg2, factory.TypeNonGCStaticsSymbol(target));
+                                encoder.EmitSUB(encoder.TargetRegister.Arg2, NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
+
+                                encoder.EmitLDR(encoder.TargetRegister.Arg3, encoder.TargetRegister.Arg2);
+                                encoder.EmitCMP(encoder.TargetRegister.Arg3, 0);
+                                encoder.EmitJE(helper);
+
+                                // Arg1: address of the TypeManager slot that provides the helper with
+                                // information about module index and the type manager instance (which is used for initialization on first access).
+                                encoder.EmitLDR(encoder.TargetRegister.Arg1, encoder.TargetRegister.Arg1);
+                                encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.EnsureClassConstructorRunAndReturnThreadStaticBase));
+                            }
                         }
                         else
                         {
-                            encoder.EmitMOV(encoder.TargetRegister.Arg2, factory.TypeNonGCStaticsSymbol(target));
-                            encoder.EmitSUB(encoder.TargetRegister.Arg2, NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
+                            ISymbolNode helper = factory.HelperEntrypoint(HelperEntrypoint.GetThreadStaticBaseForType);
 
-                            encoder.EmitLDR(encoder.TargetRegister.Arg3, encoder.TargetRegister.Arg2);
-                            encoder.EmitCMP(encoder.TargetRegister.Arg3, 0);
-                            encoder.EmitJE(factory.HelperEntrypoint(HelperEntrypoint.GetThreadStaticBaseForType));
+                            // Arg1: address of the TypeManager slot that provides the helper with
+                            // information about module index and the type manager instance (which is used for initialization on first access).
+                            encoder.EmitLDR(encoder.TargetRegister.Arg1, encoder.TargetRegister.Arg1);
 
-                            encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.EnsureClassConstructorRunAndReturnThreadStaticBase));
+                            if (!factory.PreinitializationManager.HasLazyStaticConstructor(target))
+                            {
+                                encoder.EmitJMP(helper);
+                            }
+                            else
+                            {
+                                // check if class is initialized
+                                encoder.EmitMOV(encoder.TargetRegister.Arg2, factory.TypeNonGCStaticsSymbol(target));
+                                encoder.EmitSUB(encoder.TargetRegister.Arg2, NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
+
+                                encoder.EmitLDR(encoder.TargetRegister.Arg3, encoder.TargetRegister.Arg2);
+                                encoder.EmitCMP(encoder.TargetRegister.Arg3, 0);
+                                encoder.EmitJE(helper);
+
+                                // call another helper (same arguments)
+                                encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.EnsureClassConstructorRunAndReturnThreadStaticBase));
+                            }
                         }
                     }
                     break;
