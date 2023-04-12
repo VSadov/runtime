@@ -30,7 +30,7 @@ namespace Internal.Runtime
             return length;
         }
 
-        private static unsafe bool IsInlineThreadStatic(TypeManagerSlot* pModuleData, int typeTlsIndex)
+        private static unsafe bool IsInlineThreadStatic(int typeTlsIndex, TypeManagerSlot* pModuleData)
         {
             if (pModuleData->ModuleIndex != 0)
                 return false;
@@ -42,9 +42,9 @@ namespace Internal.Runtime
         /// This method is called from a ReadyToRun helper to get base address of thread
         /// static storage for the given type.
         /// </summary>
-        internal static unsafe object GetThreadStaticBaseForType(TypeManagerSlot* pModuleData, int typeTlsIndex)
+        internal static unsafe object GetThreadStaticBaseForType(int typeTlsIndex, TypeManagerSlot* pModuleData)
         {
-            if (!IsInlineThreadStatic(pModuleData, typeTlsIndex))
+            if (!IsInlineThreadStatic(typeTlsIndex, pModuleData))
                 return GetUninlinedThreadStaticBaseForType(pModuleData, typeTlsIndex);
 
             ref object[] threadStorage = ref RuntimeImports.RhGetInlineThreadStaticStorage();

@@ -70,39 +70,61 @@ namespace ILCompiler.DependencyAnalysis
 
                 case ReadyToRunHelperId.GetThreadStaticBase:
                     {
-                        bool isMultiFile = !factory.CompilationModuleGroup.IsSingleFileCompilation;
-
                         MetadataType target = (MetadataType)Target;
+                        encoder.EmitLEAQ(encoder.TargetRegister.Arg1, factory.TypeThreadStaticIndex(target));
 
-                        encoder.EmitLEAQ(encoder.TargetRegister.Arg2, factory.TypeThreadStaticIndex(target));
+                        // Arg0: index of the type in the ThreadStatic section of the modules
+                        AddrMode loadFromArg1AndDelta = new AddrMode(encoder.TargetRegister.Arg1, null, factory.Target.PointerSize, 0, AddrModeSize.Int32);
+                        encoder.EmitMOV(encoder.TargetRegister.Arg0, ref loadFromArg1AndDelta);
 
-                        // First arg: address of the TypeManager slot that provides the helper with
-                        // information about module index and the type manager instance (which is used
-                        // for initialization on first access).
-                        AddrMode loadFromArg2 = new AddrMode(encoder.TargetRegister.Arg2, null, 0, 0, AddrModeSize.Int64);
-                        encoder.EmitMOV(encoder.TargetRegister.Arg0, ref loadFromArg2);
-
-                        // Second arg: index of the type in the ThreadStatic section of the modules
-                        AddrMode loadFromArg2AndDelta = new AddrMode(encoder.TargetRegister.Arg2, null, factory.Target.PointerSize, 0, AddrModeSize.Int32);
-                        encoder.EmitMOV(encoder.TargetRegister.Arg1, ref loadFromArg2AndDelta);
-
-                        ISymbolNode helper = isMultiFile ?
-                            factory.HelperEntrypoint(HelperEntrypoint.GetThreadStaticBaseForType) :
-                            factory.ExternSymbol("RhpGetThreadStaticBaseForType");
-
-                        if (!factory.PreinitializationManager.HasLazyStaticConstructor(target))
+                        bool isSingleFile = factory.CompilationModuleGroup.IsSingleFileCompilation;
+                        if (isSingleFile)
                         {
-                            encoder.EmitJMP(helper);
+                            ISymbolNode helper = factory.ExternSymbol("RhpGetThreadStaticBaseForType");
+                            if (!factory.PreinitializationManager.HasLazyStaticConstructor(target))
+                            {
+                                encoder.EmitJMP(helper);
+                            }
+                            else
+                            {
+                                // check if class is initialized
+                                encoder.EmitLEAQ(encoder.TargetRegister.Arg2, factory.TypeNonGCStaticsSymbol(target), -NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
+                                AddrMode initialized = new AddrMode(encoder.TargetRegister.Arg2, null, 0, 0, AddrModeSize.Int64);
+                                encoder.EmitCMP(ref initialized, 0);
+                                encoder.EmitJE(helper);
+
+                                // Arg1: address of the TypeManager slot that provides the helper with
+                                // information about module index and the type manager instance (which is used for initialization on first access).
+                                AddrMode loadFromArg1 = new AddrMode(encoder.TargetRegister.Arg1, null, 0, 0, AddrModeSize.Int64);
+                                encoder.EmitMOV(encoder.TargetRegister.Arg1, ref loadFromArg1);
+                                encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.EnsureClassConstructorRunAndReturnThreadStaticBase));
+                            }
                         }
                         else
                         {
-                            encoder.EmitLEAQ(encoder.TargetRegister.Arg2, factory.TypeNonGCStaticsSymbol(target), - NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
+                            ISymbolNode helper = factory.HelperEntrypoint(HelperEntrypoint.GetThreadStaticBaseForType);
 
-                            AddrMode initialized = new AddrMode(encoder.TargetRegister.Arg2, null, 0, 0, AddrModeSize.Int64);
-                            encoder.EmitCMP(ref initialized, 0);
-                            encoder.EmitJE(helper);
+                            // Arg1: address of the TypeManager slot that provides the helper with
+                            // information about module index and the type manager instance (which is used for initialization on first access).
+                            AddrMode loadFromArg1 = new AddrMode(encoder.TargetRegister.Arg1, null, 0, 0, AddrModeSize.Int64);
+                            encoder.EmitMOV(encoder.TargetRegister.Arg1, ref loadFromArg1);
 
-                            encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.EnsureClassConstructorRunAndReturnThreadStaticBase));
+                            if (!factory.PreinitializationManager.HasLazyStaticConstructor(target))
+                            {
+                                encoder.EmitJMP(helper);
+                            }
+                            else
+                            {
+                                // check if class is initialized
+                                encoder.EmitLEAQ(encoder.TargetRegister.Arg2, factory.TypeNonGCStaticsSymbol(target), - NonGCStaticsNode.GetClassConstructorContextSize(factory.Target));
+
+                                AddrMode initialized = new AddrMode(encoder.TargetRegister.Arg2, null, 0, 0, AddrModeSize.Int64);
+                                encoder.EmitCMP(ref initialized, 0);
+                                encoder.EmitJE(helper);
+
+                                // call another helper (same arguments)
+                                encoder.EmitJMP(factory.HelperEntrypoint(HelperEntrypoint.EnsureClassConstructorRunAndReturnThreadStaticBase));
+                            }
                         }
                     }
                     break;
