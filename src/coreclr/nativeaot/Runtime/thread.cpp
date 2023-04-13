@@ -1288,7 +1288,7 @@ COOP_PINVOKE_HELPER(Object**, RhGetInlineThreadStaticStorage, ())
 }
 
 #pragma GCC push_options
-#pragma GCC optimize ("O3")
+#pragma GCC optimize ( "O3", "omit-frame-pointer")
 
 COOP_PINVOKE_HELPER(Object*, RhpGetThreadStaticBaseForType, (uint32_t typeIndex))
 {
