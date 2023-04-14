@@ -275,17 +275,6 @@ RuntimeInstance::TypeManagerList& RuntimeInstance::GetTypeManagerList()
     return m_TypeManagerList;
 }
 
-TypeManager* RuntimeInstance::GetSingleTypeManager()
-{
-    auto head = m_TypeManagerList.GetHead();
-    if (head != NULL && head->m_pNext == NULL)
-    {
-        return head->m_pTypeManager;
-    }
-
-    return NULL;
-}
-
 // static
 bool RuntimeInstance::Initialize(HANDLE hPalInstance)
 {
