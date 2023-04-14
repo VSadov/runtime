@@ -63,7 +63,7 @@ NESTED_ENTRY RhpGetThreadStaticBaseForType, _TEXT, NoHandler
         // get per-thread storage
         mov     rax, [rax + OFFSETOF__Thread__m_pThreadLocalModuleStatics]
         test    rax, rax
-        jz      LOCAL_LABEL(RhpGetInlinedThreadStaticBaseSlow)
+        jz      LOCAL_LABEL(RhpGetThreadStaticBaseForType_RarePath)
 
         // get the actual per-type storage
         mov     rax, [rax + r12 * 8 + 0x10]
@@ -82,6 +82,6 @@ LOCAL_LABEL(RhpGetThreadStaticBaseForType_RarePath):
 
         pop_nonvol_reg r12
         pop_nonvol_reg rbx
-        jmp C_FUNC(RhpGetThreadStaticBaseForTypeSlow)
+        jmp C_FUNC(RhpGetInlinedThreadStaticBaseSlow)
 NESTED_END RhpGetThreadStaticBaseForType, _TEXT
 
