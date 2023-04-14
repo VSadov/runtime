@@ -61,7 +61,7 @@ NESTED_ENTRY RhpGetThreadStaticBaseForType, _TEXT, NoHandler
         // rax = GetThread()
         INLINE_GETTHREAD
         // get per-thread storage
-        mov     rax, [rax + OFFSETOF__Thread__m_pThreadLocalModuleStatics]
+        mov     rax, [rax + OFFSETOF__Thread__m_pInlineThreadLocalStatics]
         test    rax, rax
         jz      LOCAL_LABEL(RhpGetThreadStaticBaseForType_RarePath)
 
