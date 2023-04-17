@@ -2906,7 +2906,13 @@ namespace Internal.JitInterface
 
             Debug.Assert(fieldDesc.Offset != FieldAndOffset.InvalidOffset);
 
-            return (uint)fieldDesc.Offset.AsInt;
+            int offset = fieldDesc.Offset.AsInt;
+            if (fieldDesc.IsThreadStatic)
+            {
+                offset += _compilation.NodeFactory.GetThreadStaticBaseOffset((MetadataType)fieldDesc.OwningType);
+            }
+
+            return (uint)offset;
         }
 
         private static CORINFO_FIELD_ACCESSOR getFieldIntrinsic(FieldDesc field)

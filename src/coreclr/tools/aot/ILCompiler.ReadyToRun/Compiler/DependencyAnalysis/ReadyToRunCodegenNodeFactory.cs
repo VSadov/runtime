@@ -1008,5 +1008,10 @@ namespace ILCompiler.DependencyAnalysis
         {
             return _copiedManagedResources.GetOrAdd(module);
         }
+
+        public int GetThreadStaticBaseOffset(MetadataType type)
+        {
+            return 0;
+        }
     }
 }

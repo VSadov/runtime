@@ -162,6 +162,25 @@ namespace ILCompiler.DependencyAnalysis
             }
         }
 
+        private int _linlineThreadStaticSize;
+        private Dictionary<MetadataType, int> _inlinedThreadStaticBases = new Dictionary<MetadataType, int>();
+
+        public int GetThreadStaticBaseOffset(MetadataType type)
+        {
+            _inlinedThreadStaticBases.TryGetValue(type, out var result);
+            return result;
+        }
+
+        public Dictionary<MetadataType, int> GetInlinedThreadStaticBases()
+        {
+            return _inlinedThreadStaticBases;
+        }
+
+        public int GetInlinedThreadStaticSize()
+        {
+            return _linlineThreadStaticSize;
+        }
+
         private void CreateNodeCaches()
         {
             _typeSymbols = new NecessaryTypeSymbolHashtable(this);
@@ -213,9 +232,25 @@ namespace ILCompiler.DependencyAnalysis
             });
 
             _threadStatics = new NodeCache<MetadataType, ISymbolDefinitionNode>(CreateThreadStaticsNode);
+            _inlinedThreadStaticNode = CreateThreadStaticsNode(null);
+            TypeThreadStaticIndexNode inlinedThreadStaticIndex = new TypeThreadStaticIndexNode(null);
 
             _typeThreadStaticIndices = new NodeCache<MetadataType, TypeThreadStaticIndexNode>(type =>
             {
+                if (CompilationModuleGroup.IsSingleFileCompilation && !type.IsGenericDefinition)
+                {
+                    lock (_inlinedThreadStaticBases)
+                    {
+                        int alignment = type.ThreadGcStaticFieldAlignment.AsInt;
+                        _linlineThreadStaticSize = AlignmentHelper.AlignUp(_linlineThreadStaticSize, alignment);
+                        _inlinedThreadStaticBases[type] = _linlineThreadStaticSize;
+
+                        _linlineThreadStaticSize += type.ThreadGcStaticFieldSize.AsInt;
+                    }
+
+                    return inlinedThreadStaticIndex;
+                }
+
                 return new TypeThreadStaticIndexNode(type);
             });
 
@@ -661,9 +696,13 @@ namespace ILCompiler.DependencyAnalysis
         }
 
         private NodeCache<MetadataType, ISymbolDefinitionNode> _threadStatics;
+        private ISymbolDefinitionNode _inlinedThreadStaticNode;
 
         public ISymbolDefinitionNode TypeThreadStaticsSymbol(MetadataType type)
         {
+            if (type == null)
+                return _inlinedThreadStaticNode;
+
             // This node is always used in the context of its index within the region.
             // We should never ask for this if the current compilation doesn't contain the
             // associated type.

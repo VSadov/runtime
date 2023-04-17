@@ -20,8 +20,10 @@ namespace ILCompiler.DependencyAnalysis
 
         public void AppendMangledName(NameMangler nameMangler, Utf8StringBuilder sb)
         {
-            sb.Append(nameMangler.NodeMangler.ThreadStaticsIndex(_type));
+            string mangledName = _type == null ? "_inlinedThreadStaticsIndex" : nameMangler.NodeMangler.ThreadStaticsIndex(_type);
+            sb.Append(mangledName);
         }
+
         public int Offset => 0;
         protected override string GetName(NodeFactory factory) => this.GetMangledName(factory.NameMangler);
         protected override ObjectNodeSection GetDehydratedSection(NodeFactory factory)
@@ -61,8 +63,6 @@ namespace ILCompiler.DependencyAnalysis
 
             return objData.ToObjectData();
         }
-
-        public MetadataType Type => _type;
 
         public override int ClassCode => -149601250;
 

@@ -970,6 +970,7 @@ namespace ILCompiler.DependencyAnalysis
 
         private ISymbolNode GetThreadStaticsNode(NodeFactory context, out BagElementKind staticsBagKind)
         {
+            Debug.Assert(false);
             MetadataType closestCanonDefType = (MetadataType)_type.GetClosestDefType().ConvertToCanonForm(CanonicalFormKind.Specific);
             ISymbolNode symbol = context.GCStaticEEType(GCPointerMap.FromThreadStaticLayout(closestCanonDefType));
             staticsBagKind = BagElementKind.ThreadStaticDesc;
