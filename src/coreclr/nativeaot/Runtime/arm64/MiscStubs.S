@@ -19,7 +19,8 @@ NESTED_ENTRY RhpGetThreadStaticBaseForType, _TEXT, NoHandler
 
         // get per-thread storage
         ldr     x1, [x1, #OFFSETOF__Thread__m_pInlineThreadLocalStatics]
-        cbz     x1, C_FUNC(RhpGetInlinedThreadStaticBaseSlow)
+        cmp     x1, 0
+        beq     C_FUNC(RhpGetInlinedThreadStaticBaseSlow)
 
         // get the actual per-type storage
         add     x0, x0, #2
