@@ -3,7 +3,7 @@
 
 #include "AsmMacros.h"
 
-EXTERN RhpGetInlinedThreadStaticBaseSlow : PROC
+    EXTERN RhpGetInlinedThreadStaticBaseSlow
 
     TEXTAREA
 
@@ -18,9 +18,10 @@ EXTERN RhpGetInlinedThreadStaticBaseSlow : PROC
 
         ;; get per-thread storage
         ldr     x1, [x1, #OFFSETOF__Thread__m_pInlineThreadLocalStatics]
-        cmp     x1, 0
-        beq     RhpGetInlinedThreadStaticBaseSlow
+        cbnz    x1, HaveValue
+        b       RhpGetInlinedThreadStaticBaseSlow
 
+HaveValue
         ;; get the actual per-type storage
         add     x0, x0, #2
         ldr     x0, [x1, x0, lsl #3]  ;; x0 = *(x1 + x0 * 8)
