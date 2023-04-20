@@ -118,10 +118,13 @@
         // an object not on the epehemeral segment.
         PREPARE_EXTERNAL_VAR_INDIRECT g_ephemeral_low, x12
         cmp     \refReg, x12
-        blo     0f
 
         PREPARE_EXTERNAL_VAR_INDIRECT g_ephemeral_high, x12
-        cmp     \refReg, x12
+        ;; Compare against the upper bound if the previous comparison indicated
+        ;; that the destination address is greater than or equal to the lower
+        ;; bound. Otherwise, set the C flag (specified by the 0x2) so that the
+        ;; branch to exit is taken.
+        ccmp    \refReg, x12, #0x2, hs
         bhs     0f
 
         // Set this objects card, if it has not already been set.
