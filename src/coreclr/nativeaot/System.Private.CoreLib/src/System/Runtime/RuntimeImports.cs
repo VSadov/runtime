@@ -566,7 +566,7 @@ namespace System.Runtime
 
         [MethodImplAttribute(MethodImplOptions.InternalCall)]
         [RuntimeImport(RuntimeLibrary, "RhGetInlineThreadStaticStorage")]
-        internal static extern ref object[] RhGetInlineThreadStaticStorage();
+        internal static extern ref object RhGetInlineThreadStaticStorage();
 
         [MethodImplAttribute(MethodImplOptions.InternalCall)]
         [RuntimeImport(RuntimeLibrary, "RhCurrentNativeThreadId")]
