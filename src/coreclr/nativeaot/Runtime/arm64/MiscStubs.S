@@ -17,11 +17,9 @@ NESTED_ENTRY RhpGetInlinedThreadStaticBase, _TEXT, NoHandler
 
         // get per-thread storage
         ldr     x0, [x1, #OFFSETOF__Thread__m_pInlinedThreadLocalStatics]
-        cbnz    x0, HaveValue
+        cmp     x0, 0
+        bne     lr       // return if not null
+
+        // tailcall the slow helper
         b       C_FUNC(RhpGetInlinedThreadStaticBaseSlow)
-
-HaveValue:
-        // return it
-        ret
-
 NESTED_END RhpGetInlinedThreadStaticBase, _TEXT
