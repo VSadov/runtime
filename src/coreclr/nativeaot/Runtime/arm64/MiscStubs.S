@@ -9,7 +9,7 @@ NESTED_ENTRY RhpGetInlinedThreadStaticBase, _TEXT, NoHandler
         //   x0 - the thread static base for the given type
 
         // x1 = GetThread()
-        INLINE_GET_TLS_VAR x1 tls_InlinedThreadStatics
+        INLINE_GET_TLS_VAR x1, tls_InlinedThreadStatics
 
         // get per-thread storage
         ldr     x0, [x1]
