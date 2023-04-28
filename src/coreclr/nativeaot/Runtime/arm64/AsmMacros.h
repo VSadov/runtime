@@ -245,6 +245,49 @@ __SECTIONREL_tls_CurrentThread SETS "$__SECTIONREL_tls_CurrentThread":CC:"_"
 
     MEND
 
+;; -----------------------------------------------------------------------------
+;;
+;; Macro to get a pointer to the tls_InlinedThreadStatics for the currently executing thread
+;;
+
+    GBLS __SECTIONREL_tls_InlinedThreadStatics
+__SECTIONREL_tls_InlinedThreadStatics SETS "SECTIONREL_tls_InlinedThreadStatics"
+
+    MACRO
+        INLINE_GET_INL_THREADSTATICS $destReg, $trashReg
+
+        ;; The following macro variables are just some assembler magic to get the name of the 32-bit version
+        ;; of $trashReg. It does it by string manipulation. Replaces something like x3 with w3.
+        LCLS TrashRegister32Bit
+TrashRegister32Bit SETS "$trashReg"
+TrashRegister32Bit SETS "w":CC:("$TrashRegister32Bit":RIGHT:((:LEN:TrashRegister32Bit) - 1))
+
+        ldr         $trashReg, =_tls_index
+        ldr         $TrashRegister32Bit, [$trashReg]
+        ldr         $destReg, [xpr, #__tls_array]
+        ldr         $destReg, [$destReg, $trashReg lsl #3]
+        ldr         $trashReg, =$__SECTIONREL_tls_InlinedThreadStatics
+        ldr         $trashReg, [$trashReg]
+        add         $destReg, $destReg, $trashReg
+    MEND
+
+    ;; INLINE_GET_INL_THREADSTATICS_CONSTANT_POOL macro has to be used after the last function in the .asm file that used
+    ;; INLINE_GET_INL_THREADSTATICS. Optionally, it can be also used after any function that used INLINE_GET_INL_THREADSTATICS
+    ;; to improve density, or to reduce distance between the constant pool and its use.
+    MACRO
+        INLINE_GET_INL_THREADSTATICS_CONSTANT_POOL
+        EXTERN tls_InlinedThreadStatics
+
+    ;; Section relocs are 32 bits. Using an extra DCD initialized to zero for 8-byte alignment.
+$__SECTIONREL_tls_InlinedThreadStatics
+        DCD tls_InlinedThreadStatics
+        RELOC 8, tls_InlinedThreadStatics      ;; SECREL
+        DCD 0
+
+__SECTIONREL_tls_InlinedThreadStatics SETS "$__SECTIONREL_tls_InlinedThreadStatics":CC:"_"
+
+    MEND
+
     MACRO
         INLINE_THREAD_UNHIJACK $threadReg, $trashReg1, $trashReg2
         ;;

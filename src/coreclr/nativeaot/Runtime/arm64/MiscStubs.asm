@@ -10,12 +10,13 @@
 ;; On exit:
 ;;   x0 - the thread static base for the given type
     LEAF_ENTRY RhpGetInlinedThreadStaticBase
-        ;; x1 = GetThread(), TRASHES x2
-        INLINE_GETTHREAD x1, x2
+        ;; x1 = &tls_InlinedThreadStatics, TRASHES x2
+        INLINE_GET_INL_THREADSTATICS x1, x2
 
         ;; get per-thread storage
-        ldr     x0, [x1, #OFFSETOF__Thread__m_pInlinedThreadLocalStatics]
+        ldr     x0, [x1]
         cbnz    x0, HaveValue
+        mov     x0, x1
         b       RhpGetInlinedThreadStaticBaseSlow
 
 HaveValue
@@ -23,6 +24,6 @@ HaveValue
         ret
     LEAF_END RhpGetInlinedThreadStaticBase
 
-    INLINE_GETTHREAD_CONSTANT_POOL
+    INLINE_GET_INL_THREADSTATICS_CONSTANT_POOL
 
     end
