@@ -612,7 +612,11 @@ bool CoffNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 #if defined(TARGET_X86)
     PORTABILITY_ASSERT("CoffNativeCodeManager::UnwindStackFrame");
 #elif defined(TARGET_AMD64)
-    memcpy(&context.Xmm6, pRegisterSet->Xmm, sizeof(pRegisterSet->Xmm));
+
+    if (!(flags & USFF_GcUnwind))
+    {
+        memcpy(&context.Xmm6, pRegisterSet->Xmm, sizeof(pRegisterSet->Xmm));
+    }
 
     context.Rsp = pRegisterSet->SP;
     context.Rip = pRegisterSet->IP;
@@ -634,10 +638,16 @@ bool CoffNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 
     pRegisterSet->pIP = PTR_PCODE(pRegisterSet->SP - sizeof(TADDR));
 
-    memcpy(pRegisterSet->Xmm, &context.Xmm6, sizeof(pRegisterSet->Xmm));
+    if (!(flags & USFF_GcUnwind))
+    {
+        memcpy(pRegisterSet->Xmm, &context.Xmm6, sizeof(pRegisterSet->Xmm));
+    }
 #elif defined(TARGET_ARM64)
-    for (int i = 8; i < 16; i++)
-        context.V[i].Low = pRegisterSet->D[i - 8];
+    if (!(flags & USFF_GcUnwind))
+    {
+        for (int i = 8; i < 16; i++)
+            context.V[i].Low = pRegisterSet->D[i - 8];
+    }
 
     context.Sp = pRegisterSet->SP;
     context.Pc = pRegisterSet->IP;
@@ -659,8 +669,11 @@ bool CoffNativeCodeManager::UnwindStackFrame(MethodInfo *    pMethodInfo,
 
     pRegisterSet->pIP = contextPointers.Lr;
 
-    for (int i = 8; i < 16; i++)
-        pRegisterSet->D[i - 8] = context.V[i].Low;
+    if (!(flags & USFF_GcUnwind))
+    {
+        for (int i = 8; i < 16; i++)
+            pRegisterSet->D[i - 8] = context.V[i].Low;
+    }
 #endif // defined(TARGET_X86)
 
     FOR_EACH_NONVOLATILE_REGISTER(CONTEXT_TO_REGDISPLAY);
