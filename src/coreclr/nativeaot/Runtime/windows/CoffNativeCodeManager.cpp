@@ -13,6 +13,7 @@
 #include "CoffNativeCodeManager.h"
 #include "varint.h"
 #include "holder.h"
+#include "RhVolatile.h"
 
 #include "CommonMacros.inl"
 
@@ -180,17 +181,31 @@ CoffNativeCodeManager::~CoffNativeCodeManager()
 {
 }
 
-static int LookupUnwindInfoForMethod(uint32_t relativePc,
+static const int CACHE_BITS = 10;
+static uint64_t s_unwindLookupCache[(1 << CACHE_BITS) + 1];
+static int counter;
+
+static int32_t LookupUnwindInfoForMethod(uint32_t relativePc,
                                      PTR_RUNTIME_FUNCTION pRuntimeFunctionTable,
-                                     int low,
-                                     int high)
+                                     int32_t low,
+                                     int32_t high)
 {
+    int hash = (int)((relativePc * 2654435769ul) >> (32 - CACHE_BITS));
+
+    uint64_t entry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash]);
+    if ((uint32_t)entry == relativePc)
+        return (uint32_t)(entry >> 32);
+
+    entry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash + 1]);
+    if ((uint32_t)entry == relativePc)
+        return (uint32_t)(entry >> 32);
+
     // Binary search the RUNTIME_FUNCTION table
     // Use linear search once we get down to a small number of elements
     // to avoid Binary search overhead.
     while (high - low > 10)
     {
-       int middle = low + (high - low) / 2;
+        int32_t middle = low + (high - low) / 2;
 
        PTR_RUNTIME_FUNCTION pFunctionEntry = pRuntimeFunctionTable + middle;
        if (relativePc < pFunctionEntry->BeginAddress)
@@ -203,7 +218,7 @@ static int LookupUnwindInfoForMethod(uint32_t relativePc,
        }
     }
 
-    for (int i = low; i < high; i++)
+    for (int32_t i = low; i < high; i++)
     {
         PTR_RUNTIME_FUNCTION pNextFunctionEntry = pRuntimeFunctionTable + (i + 1);
         if (relativePc < pNextFunctionEntry->BeginAddress)
@@ -216,6 +231,22 @@ static int LookupUnwindInfoForMethod(uint32_t relativePc,
     PTR_RUNTIME_FUNCTION pFunctionEntry = pRuntimeFunctionTable + high;
     if (relativePc >= pFunctionEntry->BeginAddress)
     {
+        uint64_t newEntry = relativePc | ((uint64_t)high) << 32;
+        uint64_t oldEntry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash]);
+        if (oldEntry != newEntry)
+        {
+            if (oldEntry != 0)
+            {
+                int oldHash = (int)(((uint32_t)oldEntry * 2654435769ul) >> (32 - CACHE_BITS));
+                if (oldHash == hash)
+                {
+                    VolatileStoreWithoutBarrier(&s_unwindLookupCache[hash + 1], oldEntry);
+                }
+            }
+
+            VolatileStoreWithoutBarrier(&s_unwindLookupCache[hash], newEntry);
+        }
+
         return high;
     }
 
@@ -247,8 +278,9 @@ bool CoffNativeCodeManager::FindMethodInfo(PTR_VOID        ControlPC,
 
     TADDR relativePC = dac_cast<TADDR>(ControlPC) - m_moduleBase;
 
-    int MethodIndex = LookupUnwindInfoForMethod((uint32_t)relativePC, m_pRuntimeFunctionTable,
+    int32_t MethodIndex = LookupUnwindInfoForMethod((uint32_t)relativePC, m_pRuntimeFunctionTable,
         0, m_nRuntimeFunctionTable - 1);
+
     if (MethodIndex < 0)
         return false;
 
@@ -966,7 +998,7 @@ PTR_VOID CoffNativeCodeManager::GetAssociatedData(PTR_VOID ControlPC)
 
     TADDR relativePC = dac_cast<TADDR>(ControlPC) - m_moduleBase;
 
-    int MethodIndex = LookupUnwindInfoForMethod((uint32_t)relativePC, m_pRuntimeFunctionTable, 0, m_nRuntimeFunctionTable - 1);
+    int32_t MethodIndex = LookupUnwindInfoForMethod((uint32_t)relativePC, m_pRuntimeFunctionTable, 0, m_nRuntimeFunctionTable - 1);
     if (MethodIndex < 0)
         return NULL;
 
