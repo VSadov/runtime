@@ -181,15 +181,42 @@ CoffNativeCodeManager::~CoffNativeCodeManager()
 {
 }
 
+#define TARGET_64BIT 1
+
+// the cache relies on atomic reads/writes of 64bit integers
+#if TARGET_64BIT
 static const int CACHE_BITS = 10;
 static uint64_t s_unwindLookupCache[(1 << CACHE_BITS) + 1];
-static int counter;
+#endif
 
-static int32_t LookupUnwindInfoForMethod(uint32_t relativePc,
-                                     PTR_RUNTIME_FUNCTION pRuntimeFunctionTable,
-                                     int32_t low,
-                                     int32_t high)
+static void SetCachedUnwindInfoForMethod(uint32_t relativePc, int32_t info)
 {
+#if TARGET_64BIT
+    int hash = (int)((relativePc * 2654435769ul) >> (32 - CACHE_BITS));
+    uint64_t newEntry = relativePc | ((uint64_t)info) << 32;
+    uint64_t oldEntry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash]);
+    if (oldEntry != newEntry)
+    {
+        if (oldEntry != 0)
+        {
+            int oldHash = (int)(((uint32_t)oldEntry * 2654435769ul) >> (32 - CACHE_BITS));
+
+            // we always put the new entry in the cell where it maps to
+            // if the old value maps directly to this cell as well, move it to the next one
+            if (oldHash == hash)
+            {
+                VolatileStoreWithoutBarrier(&s_unwindLookupCache[hash + 1], oldEntry);
+            }
+        }
+
+        VolatileStoreWithoutBarrier(&s_unwindLookupCache[hash], newEntry);
+    }
+#endif
+}
+
+static int32_t TryGetCachedUnwindInfoForMethod(uint32_t relativePc)
+{
+#if TARGET_64BIT
     int hash = (int)((relativePc * 2654435769ul) >> (32 - CACHE_BITS));
 
     uint64_t entry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash]);
@@ -199,13 +226,26 @@ static int32_t LookupUnwindInfoForMethod(uint32_t relativePc,
     entry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash + 1]);
     if ((uint32_t)entry == relativePc)
         return (uint32_t)(entry >> 32);
+#endif
+
+    return 0;
+}
+
+static int32_t LookupUnwindInfoForMethod(uint32_t relativePc,
+                                     PTR_RUNTIME_FUNCTION pRuntimeFunctionTable,
+                                     int32_t low,
+                                     int32_t high)
+{
+    int32_t cachedResult = TryGetCachedUnwindInfoForMethod(relativePc);
+    if (cachedResult != 0)
+        return cachedResult;
 
     // Binary search the RUNTIME_FUNCTION table
     // Use linear search once we get down to a small number of elements
     // to avoid Binary search overhead.
     while (high - low > 10)
     {
-        int32_t middle = low + (high - low) / 2;
+       int32_t middle = low + (high - low) / 2;
 
        PTR_RUNTIME_FUNCTION pFunctionEntry = pRuntimeFunctionTable + middle;
        if (relativePc < pFunctionEntry->BeginAddress)
@@ -231,22 +271,7 @@ static int32_t LookupUnwindInfoForMethod(uint32_t relativePc,
     PTR_RUNTIME_FUNCTION pFunctionEntry = pRuntimeFunctionTable + high;
     if (relativePc >= pFunctionEntry->BeginAddress)
     {
-        uint64_t newEntry = relativePc | ((uint64_t)high) << 32;
-        uint64_t oldEntry = VolatileLoadWithoutBarrier(&s_unwindLookupCache[hash]);
-        if (oldEntry != newEntry)
-        {
-            if (oldEntry != 0)
-            {
-                int oldHash = (int)(((uint32_t)oldEntry * 2654435769ul) >> (32 - CACHE_BITS));
-                if (oldHash == hash)
-                {
-                    VolatileStoreWithoutBarrier(&s_unwindLookupCache[hash + 1], oldEntry);
-                }
-            }
-
-            VolatileStoreWithoutBarrier(&s_unwindLookupCache[hash], newEntry);
-        }
-
+        SetCachedUnwindInfoForMethod(relativePc, high);
         return high;
     }
 
