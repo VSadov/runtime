@@ -770,8 +770,10 @@ struct ProcInfoCacheEntry
     unw_proc_info_t procInfo;
 };
 
-static const int CACHE_BITS = 10;
-static ProcInfoCacheEntry cache[(1 << CACHE_BITS) + 1];
+// we use static array with 512 entries as a cache
+// that is about 45Kb  (assuming unw_proc_info_t is 9 * 8 bytes) and what we can reasonably afford.
+static const int CACHE_BITS = 9;
+static ProcInfoCacheEntry cache[1 << CACHE_BITS];
 #endif
 
 // We use a very simple caching scheme because the cost of miss is not very high.

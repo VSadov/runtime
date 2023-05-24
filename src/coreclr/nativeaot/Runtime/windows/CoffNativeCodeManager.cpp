@@ -185,6 +185,8 @@ CoffNativeCodeManager::~CoffNativeCodeManager()
 
 // the cache relies on atomic reads/writes of 64bit integers
 #if TARGET_64BIT
+// we use a static array with 1024 entries as a cache, wich is about 8Kb
+// considering typical stacks and repetitiveness of access, 1024 entries should be enough for most cases.
 static const int CACHE_BITS = 10;
 static uint64_t s_unwindLookupCache[(1 << CACHE_BITS) + 1];
 #endif
