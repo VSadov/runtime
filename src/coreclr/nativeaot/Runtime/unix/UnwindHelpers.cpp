@@ -766,7 +766,7 @@ void Registers_REGDISPLAY::setVectorRegister(int num, libunwind::v128 value)
 struct ProcInfoCacheEntry
 {
     PCODE pc;
-    size_t version;
+    volatile size_t version;
     unw_proc_info_t procInfo;
 };
 
