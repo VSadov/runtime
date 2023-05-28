@@ -784,7 +784,7 @@ static void SetCachedProcInfo(PCODE pc, unw_proc_info_t* procInfo)
 {
 #if TARGET_64BIT
     // randomize the addresses a bit and narrow the range to the cache size.
-    int idx = 1; // (int)((pc * 11400714819323198485llu) >> (64 - CACHE_BITS));
+    int idx = (int)((pc * 11400714819323198485llu) >> (64 - CACHE_BITS));
 
     ProcInfoCacheEntry* pEntry = &cache[idx];
     PCODE origPc = pEntry->pc;
@@ -815,7 +815,7 @@ static bool TryGetCachedProcInfo(PCODE pc, unw_proc_info_t* procInfo)
 {
 #if TARGET_64BIT
     // randomize the addresses a bit and narrow the range to the cache size.
-    int idx = 1; // (int)((pc * 11400714819323198485llu) >> (64 - CACHE_BITS));
+    int idx = (int)((pc * 11400714819323198485llu) >> (64 - CACHE_BITS));
 
     ProcInfoCacheEntry* pEntry = &cache[idx];
     // read version before reading the rest
