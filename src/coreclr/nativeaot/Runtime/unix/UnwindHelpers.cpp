@@ -767,7 +767,18 @@ struct ProcInfoCacheEntry
 {
     PCODE pc;
     volatile size_t version;
-    unw_proc_info_t procInfo;
+
+    //    unw_proc_info_t procInfo;
+    int32_t     start_offset;     /* start address of function relative to pc */
+    int32_t     end_offset;       /* end address of function relative to pc */
+
+    uint32_t    format;           /* compact unwind encoding, or zero if none */
+    uint32_t    unwind_info_size; /* size of DWARF unwind info, or zero if none */
+    unw_word_t  lsda;             /* address of language specific data area, */
+    unw_word_t  handler;          /* personality routine, or zero if not used */
+    unw_word_t  unwind_info;      /* address of DWARF unwind info, or zero */
+
+    unw_word_t  extra;            /* mach_header of mach-o image containing func */
 };
 
 // we use static array with 512 entries as a cache
@@ -783,6 +794,10 @@ static ProcInfoCacheEntry cache[1 << CACHE_BITS];
 static void SetCachedProcInfo(PCODE pc, unw_proc_info_t* procInfo)
 {
 #if TARGET_64BIT
+
+    if ((procInfo->end_ip - procInfo->start_ip) > INT32_MAX)
+        return;
+
     // randomize the addresses a bit and narrow the range to the cache size.
     int idx = (int)((pc * 11400714819323198485llu) >> (64 - CACHE_BITS));
 
@@ -804,7 +819,15 @@ static void SetCachedProcInfo(PCODE pc, unw_proc_info_t* procInfo)
     }
 
     pEntry->pc = pc;
-    pEntry->procInfo = *procInfo;
+    pEntry->start_offset = pc - procInfo->start_ip;
+    pEntry->end_offset = procInfo->end_ip - pc;
+    pEntry->format = procInfo->format;
+    pEntry->unwind_info_size = procInfo->unwind_info_size;
+    pEntry->lsda = procInfo->lsda;
+    pEntry->handler = procInfo->handler;
+    pEntry->unwind_info = procInfo->unwind_info;
+
+    pEntry->extra = procInfo->extra;
 
     // make the version even again after filling the entry
     __atomic_store_n(&pEntry->version, origVersion + 2, __ATOMIC_RELEASE);
@@ -822,7 +845,17 @@ static bool TryGetCachedProcInfo(PCODE pc, unw_proc_info_t* procInfo)
     size_t version = __atomic_load_n(&pEntry->version, __ATOMIC_ACQUIRE);
     if (pc == pEntry->pc)
     {
-        *procInfo = pEntry->procInfo;
+        procInfo->start_ip = pc - pEntry->start_offset;
+        procInfo->end_ip = pc + pEntry->end_offset;
+
+        procInfo->format = pEntry->format;
+        procInfo->unwind_info_size = pEntry->unwind_info_size;
+        procInfo->lsda = pEntry->lsda;
+        procInfo->handler = pEntry->handler;
+        procInfo->unwind_info = pEntry->unwind_info;
+
+        procInfo->extra = pEntry->extra;
+
         // make sure all reads are done before reading the version second time
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 
