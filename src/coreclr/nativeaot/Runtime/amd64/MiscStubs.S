@@ -45,6 +45,9 @@ LOCAL_LABEL(ProbeLoop):
         ret
 NESTED_END RhpStackProbe, _TEXT
 
+// this helper is a last resort fallback for platforms that do not inline TLS access sequences
+#if !defined(TARGET_LINUX)
+
 NESTED_ENTRY RhpGetInlinedThreadStaticBase, _TEXT, NoHandler
         // On exit:
         //   rax - the thread static base for the given type
@@ -62,3 +65,4 @@ NESTED_ENTRY RhpGetInlinedThreadStaticBase, _TEXT, NoHandler
         ret
 NESTED_END RhpGetInlinedThreadStaticBase, _TEXT
 
+#endif
