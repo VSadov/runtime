@@ -492,8 +492,9 @@ namespace ILCompiler
                 // If we have a scanner, we can inline threadstatics storage using the information
                 // we collected at scanning time.
                 // Inlined storage implies a single type manager, thus we do not do it in multifile case.
-                // This could be a command line switch if we really wanted to.
-                if (!multiFile)
+                // Linux and Windows on x64 no longer have this limitation since TLS access is inlined into the calling module.
+                if (!multiFile ||
+                    (targetArchitecture == TargetArchitecture.X64 && (targetOS == TargetOS.Windows || targetOS == TargetOS.Linux)))
                 {
                     builder.UseInlinedThreadStatics(scanResults.GetInlinedThreadStatics());
                 }
