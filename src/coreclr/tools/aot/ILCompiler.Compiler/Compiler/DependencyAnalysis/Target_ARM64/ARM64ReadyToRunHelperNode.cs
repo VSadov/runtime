@@ -247,7 +247,7 @@ namespace ILCompiler.DependencyAnalysis
 
                 // ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
                 encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGEOFF);
-                encoder.Builder.EmitUInt(0xf9400001);
+                encoder.Builder.EmitUInt(0xf9400000);
 
                 // ldr     x0, [x0]
                 encoder.Builder.EmitUInt(0xf9400000);
