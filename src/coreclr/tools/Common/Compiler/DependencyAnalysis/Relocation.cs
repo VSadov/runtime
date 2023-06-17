@@ -31,14 +31,26 @@ namespace ILCompiler.DependencyAnalysis
         //
         // Relocation operators related to TLS access
         //
-        IMAGE_REL_SECREL                     = 0x104,   // 32 bit offset from base of section containing target
+
+        // Windows x64
+        IMAGE_REL_SECREL                     = 0x104,
+
+        // Linux x64
         IMAGE_REL_TLSGD                      = 0x105,
         IMAGE_REL_TPOFF                      = 0x106,
+
+        // Linux arm64
+        IMAGE_REL_AARCH64_TLSLE_ADD_TPREL_HI12      = 0x107,
+        IMAGE_REL_AARCH64_TLSLE_ADD_TPREL_LO12_NC   = 0x108,
+        IMAGE_REL_AARCH64_TLSDESC_ADR_PAGE21        = 0x109,
+        IMAGE_REL_AARCH64_TLSDESC_LD64_LO12  = 0x10A,
+        IMAGE_REL_AARCH64_TLSDESC_ADD_LO12   = 0x10B,
+        IMAGE_REL_AARCH64_TLSDESC_CALL       = 0x10C,
 
         //
         // Relocations for R2R image production
         //
-        IMAGE_REL_SYMBOL_SIZE                = 0x1000, // The size of data in the image represented by the target symbol node
+        IMAGE_REL_SYMBOL_SIZE = 0x1000, // The size of data in the image represented by the target symbol node
         IMAGE_REL_FILE_ABSOLUTE              = 0x1001, // 32 bit offset from beginning of image
     }
 
