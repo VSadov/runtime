@@ -231,42 +231,44 @@ namespace ILCompiler.DependencyAnalysis
         // may trash volatile registers. (there are calls to the slow helper and possibly to platform's TLS support)
         private static void EmitInlineTLSAccess(NodeFactory factory, ref ARM64Emitter encoder)
         {
-            //ISymbolNode getInlinedThreadStaticBaseSlow = factory.HelperEntrypoint(HelperEntrypoint.GetInlinedThreadStaticBaseSlow);
-            //ISymbolNode tlsRoot = factory.TlsRoot;
+            ISymbolNode getInlinedThreadStaticBaseSlow = factory.HelperEntrypoint(HelperEntrypoint.GetInlinedThreadStaticBaseSlow);
+            ISymbolNode tlsRoot = factory.TlsRoot;
 
-            //if (factory.Target.IsOSXLike)
-            //{
-            //    //     F81F0FFE
-            //    //     str     lr, [sp,#-0x10]!
+            if (factory.Target.IsOSXLike)
+            {
+                // stp     x29, x30, [sp, -16]!
+                encoder.Builder.EmitUInt(0xa9bf7bfd);
+                // mov     x29, sp
+                encoder.Builder.EmitUInt(0x910003fd);
 
+                //     adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
+                encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGE);
+                encoder.Builder.EmitUInt(0x90000000);
 
-            //    //     90000000
-            //    //     adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
+                //     ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
+                encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGEOFF);
+                encoder.Builder.EmitUInt(0xf9400001);
 
-            //    //     f9400001
-            //    //     ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
+                //     f9400001
+                //     ldr     x0, [x0]
+                encoder.Builder.EmitUInt(0xf9400000);
 
-            //    //     f9400001
-            //    //     ldr     x1, [x0]
+                //     blr     x0
+                encoder.Builder.EmitUInt(0xD63F0000);
 
-            //    //     D63F0000
-            //    //     blr     x1
+                // ldp     x29, x30, [sp], 16
+                encoder.Builder.EmitUInt(0xa8c17bfd);
 
+                // mov x1, x0
+                encoder.EmitMOV(Register.X1, Register.X0);
 
-            //    //     ldr     x1, [x0]
-            //    //     cmp     x1, 0        // cbz x1, SlowHelper
-            //    //     je      SlowHelper
-
-            //    //     AA0103E0
-            //    //     mov     x0, x1
-
-            //    //     F84107FE
-            //    //     ldr     lr, [sp],#0x10
-
-            //    //     D65F03C0
-            //    //     ret
-            //}
-            //else
+                // ldr  x0, [x0]
+                encoder.Builder.EmitUInt(0xf9400000);
+                encoder.EmitCMP(Register.X0, 0);
+                encoder.EmitJE(getInlinedThreadStaticBaseSlow);
+                encoder.EmitRET();
+            }
+            else
             {
                 ISymbolNode helper = factory.ExternSymbol("RhpGetInlinedThreadStaticBase");
                 encoder.EmitJMP(helper);

@@ -35,6 +35,9 @@ namespace ILCompiler.DependencyAnalysis
         IMAGE_REL_TLSGD                      = 0x105,
         IMAGE_REL_TPOFF                      = 0x106,
 
+        IMAGE_REL_TLVPPAGE                   = 0x107,
+        IMAGE_REL_TLVPPAGEOFF                = 0x108,
+
         //
         // Relocations for R2R image production
         //
