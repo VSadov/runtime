@@ -241,28 +241,27 @@ namespace ILCompiler.DependencyAnalysis
                 // mov     x29, sp
                 encoder.Builder.EmitUInt(0x910003fd);
 
-                //     adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
+                // adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
                 encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGE);
                 encoder.Builder.EmitUInt(0x90000000);
 
-                //     ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
+                // ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
                 encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGEOFF);
                 encoder.Builder.EmitUInt(0xf9400001);
 
-                //     f9400001
-                //     ldr     x0, [x0]
+                // ldr     x0, [x0]
                 encoder.Builder.EmitUInt(0xf9400000);
 
-                //     blr     x0
+                // blr     x0
                 encoder.Builder.EmitUInt(0xD63F0000);
 
                 // ldp     x29, x30, [sp], 16
                 encoder.Builder.EmitUInt(0xa8c17bfd);
 
-                // mov x1, x0
+                // mov     x1, x0
                 encoder.EmitMOV(Register.X1, Register.X0);
 
-                // ldr  x0, [x0]
+                // ldr     x0, [x0]
                 encoder.Builder.EmitUInt(0xf9400000);
                 encoder.EmitCMP(Register.X0, 0);
                 encoder.EmitJE(getInlinedThreadStaticBaseSlow);

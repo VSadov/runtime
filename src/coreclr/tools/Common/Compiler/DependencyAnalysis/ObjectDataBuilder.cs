@@ -301,6 +301,8 @@ namespace ILCompiler.DependencyAnalysis
                 case RelocType.IMAGE_REL_BASED_DIR64:
                     EmitLong(delta);
                     break;
+                case RelocType.IMAGE_REL_TLVPPAGE:
+                case RelocType.IMAGE_REL_TLVPPAGEOFF:
                 case RelocType.IMAGE_REL_BASED_THUMB_BRANCH24:
                 case RelocType.IMAGE_REL_BASED_ARM64_BRANCH26:
                 case RelocType.IMAGE_REL_BASED_THUMB_MOV32:

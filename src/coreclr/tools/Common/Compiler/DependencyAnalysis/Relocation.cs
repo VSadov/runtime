@@ -486,6 +486,9 @@ namespace ILCompiler.DependencyAnalysis
                     return GetArm64Rel21((uint*)location);
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A:
                     return GetArm64Rel12((uint*)location);
+                case RelocType.IMAGE_REL_TLVPPAGE:
+                case RelocType.IMAGE_REL_TLVPPAGEOFF:
+                    return 0; // TLS offsets are always 0  // TODO: VS other tls relocs
                 case RelocType.IMAGE_REL_BASED_LOONGARCH64_PC:
                     return (long)GetLoongArch64PC12((uint*)location);
                 case RelocType.IMAGE_REL_BASED_LOONGARCH64_JIR:
