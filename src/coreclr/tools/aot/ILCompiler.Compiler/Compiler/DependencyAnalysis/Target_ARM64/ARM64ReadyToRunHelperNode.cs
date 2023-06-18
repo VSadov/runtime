@@ -237,26 +237,26 @@ namespace ILCompiler.DependencyAnalysis
             if (factory.Target.IsOSXLike)
             {
                 // stp     x29, x30, [sp, -16]!
-                encoder.Builder.EmitUInt(0xa9bf7bfd);
+                encoder.Builder.EmitUInt(0xa9bf7bfdu);
                 // mov     x29, sp
-                encoder.Builder.EmitUInt(0x910003fd);
+                encoder.Builder.EmitUInt(0x910003fdu);
 
                 // adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
                 encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGE);
-                encoder.Builder.EmitUInt(0x90000000);
+                encoder.Builder.EmitUInt(0x90000000u);
 
                 // ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
                 encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGEOFF);
-                encoder.Builder.EmitUInt(0xF9400000);
+                encoder.Builder.EmitUInt(0xF9400000u);
 
                 // ldr     x0, [x0]
-                encoder.Builder.EmitUInt(0xf9400000);
+                encoder.Builder.EmitUInt(0xf9400000u);
 
                 // blr     x0
-                encoder.Builder.EmitUInt(0xD63F0000);
+                encoder.Builder.EmitUInt(0xD63F0000u);
 
                 // ldp     x29, x30, [sp], 16
-                encoder.Builder.EmitUInt(0xa8c17bfd);
+                encoder.Builder.EmitUInt(0xa8c17bfdu);
 
                 // mov     x1, x0
                 encoder.EmitMOV(Register.X1, Register.X0);

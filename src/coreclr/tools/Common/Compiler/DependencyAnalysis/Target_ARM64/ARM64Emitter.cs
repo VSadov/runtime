@@ -44,7 +44,7 @@ namespace ILCompiler.DependencyAnalysis.ARM64
             Builder.EmitReloc(symbol, RelocType.IMAGE_REL_BASED_ARM64_PAGEBASE_REL21);
             Builder.EmitUInt(0x90000000u | (byte)regDst);
 
-            // Add regDst, (12bit LDR page offset reloc)
+            // Add regDst, (12bit ADD page offset reloc)
             Builder.EmitReloc(symbol, RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A);
             Builder.EmitUInt((uint)(0b1_0_0_100010_0_000000000000_00000_00000 | ((byte)regDst << 5) | (byte)regDst));
         }
