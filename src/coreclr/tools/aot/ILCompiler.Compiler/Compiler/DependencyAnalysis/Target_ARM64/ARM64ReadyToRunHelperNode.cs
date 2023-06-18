@@ -241,13 +241,13 @@ namespace ILCompiler.DependencyAnalysis
                 // mov     x29, sp
                 encoder.Builder.EmitUInt(0x910003fdu);
 
-                // adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
-                encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGE);
-                encoder.Builder.EmitUInt(0x90000000u);
+                //// adrp    x0, tlsRoot@TLVPPAGE                @TLVPPAGE
+                //encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGE);
+                //encoder.Builder.EmitUInt(0x90000000u);
 
-                //// ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
-                //encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGEOFF);
-                //encoder.Builder.EmitUInt(0xF9400000u);
+                // ldr     x0, [x0, tlsRoot@TLVPPAGEOFF]       @TLVPPAGEOFF
+                encoder.Builder.EmitReloc(tlsRoot, RelocType.IMAGE_REL_TLVPPAGEOFF);
+                encoder.Builder.EmitUInt(0xF9400000u);
 
                 // ldr     x0, [x0]
                 encoder.Builder.EmitUInt(0xf9400000u);
