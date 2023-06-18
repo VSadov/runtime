@@ -430,9 +430,11 @@ namespace ILCompiler.DependencyAnalysis
                 case RelocType.IMAGE_REL_BASED_ARM64_BRANCH26:
                     PutArm64Rel28((uint*)location, value);
                     break;
+                case RelocType.IMAGE_REL_TLVPPAGE:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEBASE_REL21:
                     PutArm64Rel21((uint*)location, (int)value);
                     break;
+                case RelocType.IMAGE_REL_TLVPPAGEOFF:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A:
                     PutArm64Rel12((uint*)location, (int)value);
                     break;
@@ -482,13 +484,12 @@ namespace ILCompiler.DependencyAnalysis
                     return (long)GetThumb2BlRel24((ushort*)location);
                 case RelocType.IMAGE_REL_BASED_ARM64_BRANCH26:
                     return (long)GetArm64Rel28((uint*)location);
+                case RelocType.IMAGE_REL_TLVPPAGE:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEBASE_REL21:
                     return GetArm64Rel21((uint*)location);
+                case RelocType.IMAGE_REL_TLVPPAGEOFF:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A:
                     return GetArm64Rel12((uint*)location);
-                case RelocType.IMAGE_REL_TLVPPAGE:
-                case RelocType.IMAGE_REL_TLVPPAGEOFF:
-                    return 0; // TLS offsets are always 0  // TODO: VS other tls relocs
                 case RelocType.IMAGE_REL_BASED_LOONGARCH64_PC:
                     return (long)GetLoongArch64PC12((uint*)location);
                 case RelocType.IMAGE_REL_BASED_LOONGARCH64_JIR:
