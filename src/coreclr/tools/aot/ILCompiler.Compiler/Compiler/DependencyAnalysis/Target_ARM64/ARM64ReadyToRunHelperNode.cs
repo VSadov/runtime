@@ -236,7 +236,7 @@ namespace ILCompiler.DependencyAnalysis
             // IsSingleFileCompilation is not enough to guarantee that we can use "Initial Executable" optimizations.
             // we need a special compiler flag analogous to /GA. Just assume "false" for now.
             // bool singleFileExe = factory.CompilationModuleGroup.IsSingleFileCompilation;
-            bool singleFileExe = false;
+            bool singleFileExe = true;
 
             if (factory.Target.OperatingSystem == TargetOS.Linux)
             {
