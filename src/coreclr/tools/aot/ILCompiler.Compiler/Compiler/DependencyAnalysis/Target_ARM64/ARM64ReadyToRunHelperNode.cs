@@ -258,15 +258,15 @@ namespace ILCompiler.DependencyAnalysis
                 // ldp     x29, x30, [sp], 16
                 encoder.Builder.EmitUInt(0xa8c17bfdu);
 
-                // ldr     x1, [x0]
-                encoder.Builder.EmitUInt(0xf9400001);
+                encoder.EmitMOV(Register.X1, Register.X0);
+                encoder.EmitLDR(Register.X0, Register.X1);
 
-                // X0: addr, X1: storage , if not allocated, call slow path.
+                // X1: addr, X0: storage , if already allocated, just return, otherwise slow path.
 
-                encoder.EmitCMP(Register.X1, 0);
-                encoder.EmitJE(getInlinedThreadStaticBaseSlow);
+                encoder.EmitCMP(Register.X0, 0);
+                encoder.EmitRETIfNotEqual();
                 encoder.EmitMOV(Register.X0, Register.X1);
-                encoder.EmitRET();
+                encoder.EmitJMP(getInlinedThreadStaticBaseSlow);
             }
             else
             {
