@@ -484,12 +484,15 @@ namespace ILCompiler.DependencyAnalysis
                     return (long)GetThumb2BlRel24((ushort*)location);
                 case RelocType.IMAGE_REL_BASED_ARM64_BRANCH26:
                     return (long)GetArm64Rel28((uint*)location);
-                case RelocType.IMAGE_REL_TLVPPAGE:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEBASE_REL21:
                     return GetArm64Rel21((uint*)location);
-                case RelocType.IMAGE_REL_TLVPPAGEOFF:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A:
                     return GetArm64Rel12((uint*)location);
+                case RelocType.IMAGE_REL_TLVPPAGE:
+                case RelocType.IMAGE_REL_TLVPPAGEOFF:
+                    // TLS relocs do not have offsets
+                    Debug.Assert((GetArm64Rel12((uint*)location) & 0xFF) == 0);
+                    return 0;
                 case RelocType.IMAGE_REL_BASED_LOONGARCH64_PC:
                     return (long)GetLoongArch64PC12((uint*)location);
                 case RelocType.IMAGE_REL_BASED_LOONGARCH64_JIR:

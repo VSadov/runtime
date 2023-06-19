@@ -1079,6 +1079,8 @@ namespace ILCompiler.DependencyAnalysis
                                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEBASE_REL21:
                                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A:
                                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12L:
+                                case RelocType.IMAGE_REL_TLVPPAGE:
+                                case RelocType.IMAGE_REL_TLVPPAGEOFF:
                                     unsafe
                                     {
                                         fixed (void* location = &nodeContents.Data[i])
