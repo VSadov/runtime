@@ -430,11 +430,9 @@ namespace ILCompiler.DependencyAnalysis
                 case RelocType.IMAGE_REL_BASED_ARM64_BRANCH26:
                     PutArm64Rel28((uint*)location, value);
                     break;
-                case RelocType.IMAGE_REL_TLVPPAGE:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEBASE_REL21:
                     PutArm64Rel21((uint*)location, (int)value);
                     break;
-                case RelocType.IMAGE_REL_TLVPPAGEOFF:
                 case RelocType.IMAGE_REL_BASED_ARM64_PAGEOFFSET_12A:
                     PutArm64Rel12((uint*)location, (int)value);
                     break;
