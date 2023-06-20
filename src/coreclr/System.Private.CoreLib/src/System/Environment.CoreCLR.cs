@@ -11,10 +11,22 @@ namespace System
 {
     public static partial class Environment
     {
-        public static extern int CurrentManagedThreadId
+        [ThreadStatic]
+        private static int _managedThreadId;
+
+        [MethodImpl(MethodImplOptions.InternalCall)]
+        private static extern int InternalGetCurrentManagedThreadId();
+
+        public static int CurrentManagedThreadId
         {
-            [MethodImpl(MethodImplOptions.InternalCall)]
-            get;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                if (_managedThreadId == 0)
+                    _managedThreadId = InternalGetCurrentManagedThreadId();
+
+                return _managedThreadId;
+            }
         }
 
         // Terminates this process with the given exit code.
