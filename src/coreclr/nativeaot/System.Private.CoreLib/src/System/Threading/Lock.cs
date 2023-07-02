@@ -16,10 +16,10 @@ namespace System.Threading
         // before going to sleep. The amount of spinning is dynamically adjusted based on past
         // history of the lock and will stay in the following range.
         //
-        private const uint MaxSpinLimit = 200;
-        private const uint MinSpinLimit = 10;
-        private const uint SpinningNotInitialized = MaxSpinLimit + 1;
-        private const uint SpinningDisabled = 0;
+        private const ushort MaxSpinLimit = 25;
+        private const ushort MinSpinLimit = 3;
+        private const ushort SpinningNotInitialized = MaxSpinLimit + 1;
+        private const ushort SpinningDisabled = 0;
 
         //
         // We will use exponential backoff in rare cases when we need to change state atomically and cannot
@@ -71,8 +71,8 @@ namespace System.Threading
         private int _owningThreadId;
         private uint _recursionCount;
         private int _state;
-        private uint _spinLimit = SpinningNotInitialized;
-        private int _wakeWatchDog;
+        private ushort _spinLimit = SpinningNotInitialized;
+        private short _wakeWatchDog;
 
         // used to transfer the state when inflating thin locks
         internal void InitializeLocked(int threadId, int recursionCount)
@@ -112,7 +112,7 @@ namespace System.Threading
             //
             // Fall back to the slow path for contention
             //
-            bool success = TryAcquireContended(currentThreadId, Timeout.Infinite);
+            bool success = TryAcquireSlow(currentThreadId, Timeout.Infinite);
             Debug.Assert(success);
         }
 
@@ -121,36 +121,48 @@ namespace System.Threading
             return TryAcquire(WaitHandle.ToTimeoutMilliseconds(timeout));
         }
 
-        public bool TryAcquire(int millisecondsTimeout, bool trackContentions = false)
+        public bool TryAcquire(int millisecondsTimeout)
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeout, -1);
 
             int currentThreadId = CurrentThreadId;
-
-            //
-            // Make one quick attempt to acquire an uncontended lock
-            //
-            if (Interlocked.CompareExchange(ref _state, Locked, Uncontended) == Uncontended)
-            {
-                Debug.Assert(_owningThreadId == 0);
-                Debug.Assert(_recursionCount == 0);
-                _owningThreadId = currentThreadId;
+            if (TryAcquireOneShot(currentThreadId))
                 return true;
-            }
 
             //
             // Fall back to the slow path for contention
             //
-            return TryAcquireContended(currentThreadId, millisecondsTimeout, trackContentions);
+            return TryAcquireSlow(currentThreadId, millisecondsTimeout, trackContentions: false);
+        }
+
+        internal bool TryAcquireNoSpin()
+        {
+            //
+            // Make one quick attempt to acquire an uncontended lock
+            //
+            int currentThreadId = CurrentThreadId;
+            if (TryAcquireOneShot(currentThreadId))
+                return true;
+
+            //
+            // If we already own the lock, just increment the recursion count.
+            //
+            if (_owningThreadId == currentThreadId)
+            {
+                checked { _recursionCount++; }
+                return true;
+            }
+
+            return false;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal bool TryAcquireOneShot(int currentThreadId)
         {
-            //
-            // Make one quick attempt to acquire an uncontended lock
-            //
-            if (Interlocked.CompareExchange(ref _state, Locked, Uncontended) == Uncontended)
+            int origState = _state;
+            int expectedState = origState & ~(YieldToWaiters | Locked);
+            int newState = origState | Locked;
+            if (Interlocked.CompareExchange(ref _state, newState, expectedState) == expectedState)
             {
                 Debug.Assert(_owningThreadId == 0);
                 Debug.Assert(_recursionCount == 0);
@@ -169,13 +181,14 @@ namespace System.Threading
                 uint rand = ((uint)&iteration + iteration) * 2654435769u;
                 // set the highmost bit to ensure minimum number of spins is exponentialy increasing
                 // that is in case some stack location results in a sequence of very low spin counts
-                rand |= (1 << 32);
+                // it basically gurantees that we spin at least 1, 2, 4, 8, 16, times, and so on
+                rand |= (1u << 31);
                 uint spins = rand >> (byte)(32 - Math.Min(iteration, MaxExponentialBackoffBits));
                 Thread.SpinWaitInternal((int)spins);
             }
         }
 
-        private bool TryAcquireContended(int currentThreadId, int millisecondsTimeout, bool trackContentions = false)
+        internal bool TryAcquireSlow(int currentThreadId, int millisecondsTimeout, bool trackContentions = false)
         {
             //
             // If we already own the lock, just increment the recursion count.
@@ -192,6 +205,9 @@ namespace System.Threading
             if (millisecondsTimeout == 0)
                 return false;
 
+            // since we have just made an attempt to accuire and failed, wait a bit
+            Thread.SpinWaitInternal(1);
+
             if (_spinLimit == SpinningNotInitialized)
             {
                 // Use RhGetProcessCpuCount directly to avoid Environment.ProcessorCount->ClassConstructorRunner->Lock->Environment.ProcessorCount cycle
@@ -206,6 +222,7 @@ namespace System.Threading
             while (true)
             {
                 uint iteration = 0;
+                uint collisions = 0;
                 uint localSpinLimit = _spinLimit;
                 // inner loop where we try acquiring the lock or registering as a waiter
                 while (true)
@@ -228,14 +245,23 @@ namespace System.Threading
 
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                         {
-                            if (hasWaited)
-                                _wakeWatchDog = 0;
-                            else
-                                // if spinning was successful, update spin count
-                                if (iteration < localSpinLimit && localSpinLimit < MaxSpinLimit)
-                                    _spinLimit = localSpinLimit + 1;
-
                             // GOT THE LOCK!!
+
+                            // now we can estimate how busy the lock is and adjust spinning accordingly
+                            if (collisions != 0)
+                            {
+                                // seeing collisions is a signal that the lock may be crowded
+                                // spinning on a crowded lock is very expensive due to cache misses,
+                                // thus we want to reduce spin limit
+                                _spinLimit = Math.Max((ushort)(_spinLimit - 1), MinSpinLimit);
+                            }
+                            else if (_spinLimit < MaxSpinLimit && newState <= WaiterCountIncrement)
+                            {
+                                // we do not see collisions or multiple waiters that have already failed to spin
+                                // we can allow a bit more spinning
+                                _spinLimit += 1;
+                            }
+
                             Debug.Assert((_state | Locked) != 0);
                             Debug.Assert(_owningThreadId == 0);
                             Debug.Assert(_recursionCount == 0);
@@ -244,13 +270,15 @@ namespace System.Threading
                         }
                     }
 
-                    // spinning was unsuccessful. reduce spin count.
-                    if (iteration == localSpinLimit && localSpinLimit > MinSpinLimit)
-                        _spinLimit = localSpinLimit - 1;
-
                     if (iteration++ < localSpinLimit)
                     {
-                        Thread.SpinWaitInternal(1);
+                        if (canAcquire)
+                            collisions++;
+
+                        // ideally we will retry right after the lock becomes free, but we cannot know when that will happen.
+                        // a retry that doubles up on every iteration will not be more than 2x worse than the ideal
+                        // but will do a lot fewer retries than a simple loop.
+                        ExponentialBackoff(Math.Min(iteration, 6) + collisions);
                         continue;
                     }
                     else if (!canAcquire)
@@ -267,10 +295,11 @@ namespace System.Threading
 
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                             break;
+
+                        collisions++;
                     }
 
-                    Debug.Assert(iteration >= localSpinLimit);
-                    ExponentialBackoff(iteration - localSpinLimit);
+                    ExponentialBackoff(collisions);
                 }
 
                 //
@@ -292,6 +321,7 @@ namespace System.Threading
 
                 // we did not time out and will try acquiring the lock
                 hasWaited = true;
+                _wakeWatchDog = 0;
                 millisecondsTimeout = timeoutTracker.Remaining;
             }
 
@@ -390,39 +420,32 @@ namespace System.Threading
         {
             Debug.Assert(_recursionCount == 0);
             _owningThreadId = 0;
-
-            //
-            // Make one quick attempt to release an uncontended lock
-            //
-            if (Interlocked.CompareExchange(ref _state, Uncontended, Locked) == Locked)
+            int origState = Interlocked.Decrement(ref _state);
+            if (origState < WaiterCountIncrement || (origState & WaiterWoken) != 0)
+            {
                 return;
+            }
 
             //
             // We have waiters; take the slow path.
             //
-            ReleaseContended();
+            AwakeWaiterIfNeeded();
         }
 
-        private void ReleaseContended()
+        private void AwakeWaiterIfNeeded()
         {
-            Debug.Assert(_recursionCount == 0);
-            Debug.Assert(_owningThreadId == 0);
-
             uint iteration = 0;
             while (true)
             {
                 int oldState = _state;
-
-                // clear the lock bit.
-                int newState = oldState & ~Locked;
-
                 if (oldState >= WaiterCountIncrement && (oldState & WaiterWoken) == 0)
                 {
                     // there are waiters, and nobody has woken one.
+                    int newState = oldState | WaiterWoken;
                     newState |= WaiterWoken;
 
-                    int lastWakeTicks = _wakeWatchDog;
-                    if (lastWakeTicks != 0 && Environment.TickCount - lastWakeTicks > 100)
+                    short lastWakeTicks = _wakeWatchDog;
+                    if (lastWakeTicks != 0 && (short)Environment.TickCount - lastWakeTicks > 100)
                     {
                         newState |= YieldToWaiters;
                     }
@@ -432,7 +455,7 @@ namespace System.Threading
                         if (lastWakeTicks == 0)
                         {
                             // nonzero timestamp of the last wake
-                            _wakeWatchDog = Environment.TickCount | 1;
+                            _wakeWatchDog = (short)(Environment.TickCount | 1);
                         }
 
                         Event.Set();
@@ -442,8 +465,7 @@ namespace System.Threading
                 else
                 {
                     // no need to wake a waiter.
-                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
-                        return;
+                    return;
                 }
 
                 ExponentialBackoff(iteration++);
