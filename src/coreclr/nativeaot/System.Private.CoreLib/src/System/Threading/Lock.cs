@@ -74,21 +74,6 @@ namespace System.Threading
         private ushort _spinLimit = SpinningNotInitialized;
         private short _wakeWatchDog;
 
-        private Config _config = s_config;
-
-        private static Config s_config = new Config();
-
-        class Config
-        {
-            public ushort _maxSpins = 16;
-            public ushort _minSpins = 3;
-            public ushort _oneSpinLimit = 4;
-
-            public uint _iterations;
-            public uint _collisions;
-            public uint _ownerChanged;
-        }
-
         // used to transfer the state when inflating thin locks
         internal void InitializeLocked(int threadId, int recursionCount)
         {
@@ -264,19 +249,15 @@ namespace System.Threading
                         {
                             // GOT THE LOCK!!
 
-                            _config._iterations = iteration;
-                            _config._collisions = collisions;
-                            _config._ownerChanged = ownerChanged;
-
                             // now we can estimate how busy the lock is and adjust spinning accordingly
                             if (ownerChanged != 0)
                             {
                                 // seeing collisions is a signal that the lock may be crowded
                                 // spinning on a crowded lock is very expensive due to cache misses,
                                 // thus we want to reduce spin limit
-                                _spinLimit = Math.Max((ushort)(_spinLimit - 1), _config._minSpins);
+                                _spinLimit = Math.Max((ushort)(_spinLimit - 1), MinSpinLimit);
                             }
-                            else if (oldState < WaiterCountIncrement && _spinLimit < _config._maxSpins)
+                            else if (oldState < WaiterCountIncrement && _spinLimit < MaxSpinLimit)
                             {
                                 // we do not see collisions or waiters that have already failed to spin
                                 // we can allow a bit more spinning
@@ -293,12 +274,12 @@ namespace System.Threading
 
                     if (iteration++ < localSpinLimit)
                     {
-                        int newOwner = _owningThreadId;
                         if (canAcquire)
                         {
                             collisions++;
                         }
 
+                        int newOwner = _owningThreadId;
                         if (newOwner != oldOwner)
                         {
                             ownerChanged++;
@@ -309,7 +290,7 @@ namespace System.Threading
                         // ideally we will retry right after the lock becomes free, but we cannot know when that will happen.
                         // a retry that doubles up on every iteration will not be more than 2x worse than the ideal guess,
                         // but will do a lot fewer retries than a simple loop.
-                        ExponentialBackoff(Math.Min(iteration, _config._oneSpinLimit) + collisions);
+                        ExponentialBackoff(Math.Min(iteration, 5) + collisions);
                         continue;
                     }
                     else if (!canAcquire)
