@@ -262,7 +262,7 @@ namespace System.Threading
         }
 
         private static bool IsAdaptiveSpinEnabled(int minSpinCount) => minSpinCount <= 0;
-        private static int TickCount => (int)TimerQueue.TickCount64;
+        private static int TickCount => Environment.TickCount;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         private bool TryEnterSlow(int timeoutMs, ThreadId currentThreadId)
