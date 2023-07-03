@@ -16,6 +16,16 @@ namespace System.Threading
         // before going to sleep. The amount of spinning is dynamically adjusted based on past
         // history of the lock and will stay in the following range.
         //
+        // We use doubling-up delays with a cap while spinning  (1,2,4,8,16,32,64,64,64,64, ...)
+        // With one spinwait being 20-50 nanoseconds. Thus 16 retries is about 10-30 microseconds.
+        // That is the max CPU time that we will allow to burn while spinning.
+        // Assuming that context switch cost is a few microseconds. At 10-30 usec the cost of being blocked/awaken
+        // may not be more than 2x of what we have already spent, so it is prudent to block even if
+        // we are the only thread that is trying to acquire the lock.
+        //
+        // NB: this may not be always optimal, but should be close enough.
+        //     I.E. in a system consisting of exactly 2 threads, unlimited spinning may work better, but we
+        //     will not optimize specifically for that.
         private const ushort MaxSpinLimit = 16;
         private const ushort MinSpinLimit = 3;
         private const ushort SpinningNotInitialized = MaxSpinLimit + 1;
@@ -222,9 +232,15 @@ namespace System.Threading
             while (true)
             {
                 uint iteration = 0;
+
+                // We will count when we failed to change the state of the lock and increase pauses
+                // so that bursts of activity are better tolerated. This should not happen often.
                 uint collisions = 0;
+
+                // We will track the cahnges of ownership while we try acquiring the lock.
                 int oldOwner = _owningThreadId;
                 uint ownerChanged = 0;
+
                 uint localSpinLimit = _spinLimit;
                 // inner loop where we try acquiring the lock or registering as a waiter
                 while (true)
@@ -252,15 +268,15 @@ namespace System.Threading
                             // now we can estimate how busy the lock is and adjust spinning accordingly
                             if (ownerChanged != 0)
                             {
-                                // seeing collisions is a signal that the lock may be crowded
-                                // spinning on a crowded lock is very expensive due to cache misses,
-                                // thus we want to reduce spin limit
+                                // The lock has changed ownership while we were trying to acquire it.
+                                // It is a signal that we might want to spin less next time.
+                                // Trying to acquire the lock by multiple threads makes spinning expensive due
+                                // to cache misses while reducing every thread's chances of acquiring it.
                                 _spinLimit = Math.Max((ushort)(_spinLimit - 1), MinSpinLimit);
                             }
                             else if (oldState < WaiterCountIncrement && _spinLimit < MaxSpinLimit)
                             {
-                                // we do not see collisions or waiters that have already failed to spin
-                                // we can allow a bit more spinning
+                                // the lock does not look very contested, we can allow a bit more spinning.
                                 _spinLimit += 1;
                             }
 
@@ -274,23 +290,24 @@ namespace System.Threading
 
                     if (iteration++ < localSpinLimit)
                     {
+                        int newOwner = _owningThreadId;
+                        if (newOwner != oldOwner)
+                        {
+                            ownerChanged++;
+                            oldOwner = newOwner;
+                        }
+
                         if (canAcquire)
                         {
                             collisions++;
                         }
 
-                        int newOwner = _owningThreadId;
-                        if (newOwner != oldOwner)
-                        {
-                            ownerChanged++;
-                        }
-
-                        oldOwner = newOwner;
-
-                        // ideally we will retry right after the lock becomes free, but we cannot know when that will happen.
-                        // a retry that doubles up on every iteration will not be more than 2x worse than the ideal guess,
-                        // but will do a lot fewer retries than a simple loop.
-                        ExponentialBackoff(Math.Min(iteration, 5) + collisions);
+                        // We failed to acquire the lock and want to retry after a pause.
+                        // Ideally we will retry right when the lock becomes free, but we cannot know when that will happen.
+                        // We will use a pause that doubles up on every iteration. It will not be more than 2x worse
+                        // than the ideal guess, while minimizing the number of retries.
+                        // We will allow pauses up to 2^6 spins (1-3 microseconds), unless there are collisions.
+                        ExponentialBackoff(Math.Min(iteration, 6) + collisions);
                         continue;
                     }
                     else if (!canAcquire)
