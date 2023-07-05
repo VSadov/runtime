@@ -19,14 +19,14 @@ namespace System.Threading
         // We use doubling-up delays with a cap while spinning  (1,2,4,8,16,32,64,64,64,64, ...)
         // With one spinwait being 20-50 nanoseconds. Thus 16 retries is about 10-30 microseconds.
         // That is the max CPU time that we will allow to burn while spinning.
-        // Assuming that context switch cost is a few microseconds. At 10-30 usec the cost of being blocked/awaken
+        // Assuming that context switch cost is a few microseconds. At 20-50 usec the cost of being blocked/awaken
         // may not be more than 2x of what we have already spent, so it is prudent to block even if
         // we are the only thread that is trying to acquire the lock.
         //
         // NB: this may not be always optimal, but should be close enough.
         //     I.E. in a system consisting of exactly 2 threads, unlimited spinning may work better, but we
         //     will not optimize specifically for that.
-        private const ushort MaxSpinLimit = 16;
+        private const ushort MaxSpinLimit = 20;
         private const ushort MinSpinLimit = 3;
         private const ushort SpinningNotInitialized = MaxSpinLimit + 1;
         private const ushort SpinningDisabled = 0;
@@ -274,10 +274,14 @@ namespace System.Threading
                                 // to cache misses while reducing every thread's chances of acquiring it.
                                 _spinLimit = Math.Max((ushort)(_spinLimit - 1), MinSpinLimit);
                             }
-                            else if (oldState < WaiterCountIncrement && _spinLimit < MaxSpinLimit)
+                            else
                             {
-                                // the lock does not look very contested, we can allow a bit more spinning.
-                                _spinLimit += 1;
+                                var spinLimit = _spinLimit;
+                                if (spinLimit < MaxSpinLimit && iteration > spinLimit / 2)
+                                {
+                                    // the lock does not look very contested, we can allow a bit more spinning.
+                                    _spinLimit += 1;
+                                }
                             }
 
                             Debug.Assert((_state | Locked) != 0);
