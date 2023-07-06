@@ -295,7 +295,7 @@ namespace System.Threading
                     if (iteration++ < localSpinLimit)
                     {
                         int newOwner = _owningThreadId;
-                        if (newOwner != oldOwner)
+                        if (newOwner != 0 && newOwner != oldOwner)
                         {
                             ownerChanged++;
                             oldOwner = newOwner;
