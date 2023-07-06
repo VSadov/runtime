@@ -77,9 +77,9 @@ namespace System.Threading
 
         // state of the lock
         private AutoResetEvent? _lazyEvent;
+        private int _state;
         private int _owningThreadId;
         private uint _recursionCount;
-        private int _state;
         private ushort _spinLimit = SpinningNotInitialized;
         private short _wakeWatchDog;
 
@@ -223,7 +223,7 @@ namespace System.Threading
                 if (s_processorCount == 0)
                     s_processorCount = RuntimeImports.RhGetProcessCpuCount();
 
-                _spinLimit = (s_processorCount > 1) ? MaxSpinLimit : SpinningDisabled;
+                _spinLimit = (s_processorCount > 1) ? MinSpinLimit : SpinningDisabled;
             }
 
             bool hasWaited = false;
@@ -236,7 +236,7 @@ namespace System.Threading
                 // so that bursts of activity are better tolerated. This should not happen often.
                 uint collisions = 0;
 
-                // We will track the cahnges of ownership while we try acquiring the lock.
+                // We will track the changes of ownership while we try acquiring the lock.
                 int oldOwner = _owningThreadId;
                 uint ownerChanged = 0;
 
@@ -258,30 +258,30 @@ namespace System.Threading
                     {
                         int newState = oldState | Locked;
                         if (hasWaited)
-                            newState = (newState - WaiterCountIncrement) & ~WaiterWoken & ~YieldToWaiters;
+                            newState = (newState - WaiterCountIncrement) & ~(WaiterWoken | YieldToWaiters);
 
                         if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                         {
                             // GOT THE LOCK!!
 
                             // now we can estimate how busy the lock is and adjust spinning accordingly
+                            ushort spinLimit = _spinLimit;
                             if (ownerChanged != 0)
                             {
                                 // The lock has changed ownership while we were trying to acquire it.
                                 // It is a signal that we might want to spin less next time.
                                 // Trying to acquire the lock by multiple threads makes spinning expensive due
                                 // to cache misses while reducing every thread's chances of acquiring it.
-                                _spinLimit = Math.Max((ushort)(_spinLimit - 1), MinSpinLimit);
-                            }
-                            else
-                            {
-                                var spinLimit = _spinLimit;
-                                if (spinLimit < MaxSpinLimit && iteration > spinLimit / 2)
+                                if (spinLimit > MinSpinLimit)
                                 {
-                                    // we spinned beyond50% of allowed, but the lock does not look very contested,
-                                    // we can allow a bit more spinning.
-                                    _spinLimit += 1;
+                                    _spinLimit -= 1;
                                 }
+                            }
+                            else if (spinLimit < MaxSpinLimit && iteration > spinLimit / 2)
+                            {
+                                // we spinned beyond 50% of allowed, but the lock does not look very contested,
+                                // we can allow a bit more spinning.
+                                _spinLimit += 1;
                             }
 
                             Debug.Assert((_state | Locked) != 0);
