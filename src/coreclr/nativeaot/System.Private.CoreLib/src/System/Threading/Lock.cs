@@ -17,11 +17,10 @@ namespace System.Threading
         // history of the lock and will stay in the following range.
         //
         // We use doubling-up delays with a cap while spinning  (1,2,4,8,16,32,64,64,64,64, ...)
-        // With one spinwait being 20-50 nanoseconds. Thus 16 retries is about 10-30 microseconds.
-        // That is the max CPU time that we will allow to burn while spinning.
-        // Assuming that context switch cost is a few microseconds. At 20-50 usec the cost of being blocked/awaken
-        // may not be more than 2x of what we have already spent, so it is prudent to block even if
-        // we are the only thread that is trying to acquire the lock.
+        // One spinwait is about 20-50 nanoseconds. Thus 20 iterations is about 1000 speenwaits (20-50 ns each)
+        // Context switch costs may vary and typically in 2-20 usec range.
+        // At 20-50 usec the cost of being blocked+awaken may not be more than 2x of what we have already spent,
+        // so that is the max CPU time that we will allow to burn while spinning.
         //
         // NB: this may not be always optimal, but should be close enough.
         //     I.E. in a system consisting of exactly 2 threads, unlimited spinning may work better, but we
@@ -279,7 +278,8 @@ namespace System.Threading
                                 var spinLimit = _spinLimit;
                                 if (spinLimit < MaxSpinLimit && iteration > spinLimit / 2)
                                 {
-                                    // the lock does not look very contested, we can allow a bit more spinning.
+                                    // we spinned beyond50% of allowed, but the lock does not look very contested,
+                                    // we can allow a bit more spinning.
                                     _spinLimit += 1;
                                 }
                             }
@@ -310,7 +310,7 @@ namespace System.Threading
                         // Ideally we will retry right when the lock becomes free, but we cannot know when that will happen.
                         // We will use a pause that doubles up on every iteration. It will not be more than 2x worse
                         // than the ideal guess, while minimizing the number of retries.
-                        // We will allow pauses up to 2^6 spins (1-3 microseconds), unless there are collisions.
+                        // We will allow pauses up to 64~128 spinwaits, more if there are collisions.
                         ExponentialBackoff(Math.Min(iteration, 6) + collisions);
                         continue;
                     }
@@ -478,7 +478,7 @@ namespace System.Threading
                     newState |= WaiterWoken;
 
                     short lastWakeTicks = _wakeWatchDog;
-                    if (lastWakeTicks != 0 && (short)Environment.TickCount - lastWakeTicks > 100)
+                    if (lastWakeTicks != 0 && (short)Environment.TickCount - lastWakeTicks > WaiterWatchdogTicks)
                     {
                         newState |= YieldToWaiters;
                     }
