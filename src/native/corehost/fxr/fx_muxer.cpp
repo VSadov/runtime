@@ -315,12 +315,12 @@ namespace
             // Detect between standalone apphost or legacy split mode (specifying --depsfile and --runtimeconfig)
 
             pal::string_t deps_in_dotnet_root = host_info.dotnet_root;
-            pal::string_t deps_filename = host_info.get_app_name() + _X(".deps.json");
-            append_path(&deps_in_dotnet_root, deps_filename.c_str());
+            append_path(&deps_in_dotnet_root, host_info.get_app_name().c_str());
+            deps_in_dotnet_root.append(_X(".deps.json"));
             bool deps_exists = pal::file_exists(deps_in_dotnet_root);
 
             trace::info(_X("Detecting mode... CoreCLR present in dotnet root [%s] and checking if [%s] file present=[%d]"),
-                host_info.dotnet_root.c_str(), deps_filename.c_str(), deps_exists);
+                host_info.dotnet_root.c_str(), deps_in_dotnet_root.c_str(), deps_exists);
 
             // Name of runtimeconfig file; since no path is included here the check is in the current working directory
             pal::string_t config_in_cwd = host_info.get_app_name() + _X(".runtimeconfig.json");
