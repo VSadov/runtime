@@ -159,5 +159,45 @@ namespace System
                 return defaultValue;
             }
         }
+
+        internal static short GetInt16Config(string configName, string envVariable, short defaultValue, bool allowNegative = true)
+        {
+            string? str = Environment.GetEnvironmentVariable(envVariable);
+            if (str != null)
+            {
+                try
+                {
+                    short result;
+                    if (str.StartsWith('0'))
+                    {
+                        if (str.Length >= 2 && str[1] == 'x')
+                        {
+                            result = Convert.ToInt16(str, 16);
+                        }
+                        else
+                        {
+                            result = Convert.ToInt16(str, 8);
+                        }
+                    }
+                    else
+                    {
+                        result = short.Parse(str, NumberStyles.AllowLeadingSign, NumberFormatInfo.InvariantInfo);
+                    }
+
+                    if (allowNegative || result >= 0)
+                    {
+                        return result;
+                    }
+                }
+                catch (FormatException)
+                {
+                }
+                catch (OverflowException)
+                {
+                }
+            }
+
+            return GetInt16Config(configName, defaultValue, allowNegative);
+        }
     }
 }
