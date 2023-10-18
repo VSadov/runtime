@@ -9,8 +9,6 @@ namespace System.Threading
 {
     public sealed partial class Lock
     {
-        private const short SpinCountNotInitialized = short.MinValue;
-
         // NOTE: Lock must not have a static (class) constructor, as Lock itself is used to synchronize
         // class construction.  If Lock has its own class constructor, this can lead to infinite recursion.
         // All static data in Lock must be lazy-initialized.
@@ -18,11 +16,6 @@ namespace System.Threading
         private static bool s_isSingleProcessor;
         private static short s_maxSpinCount;
         private static short s_minSpinCount;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="Lock"/> class.
-        /// </summary>
-        public Lock() => _spinCount = SpinCountNotInitialized;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal bool TryEnterOneShot(int currentManagedThreadId)
@@ -43,14 +36,16 @@ namespace System.Threading
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void Exit(int currentManagedThreadId)
         {
-            Debug.Assert(currentManagedThreadId != 0);
+            if (currentManagedThreadId != _owningThreadId)
+                throw new SynchronizationLockException();
 
-            if (_owningThreadId != (uint)currentManagedThreadId)
+            if (_recursionCount == 0)
             {
-                ThrowHelper.ThrowSynchronizationLockException_LockExit();
+                ReleaseCore();
+                return;
             }
 
-            ExitImpl();
+            _recursionCount--;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -76,14 +71,9 @@ namespace System.Threading
             Debug.Assert(IsHeldByCurrentThread);
 
             uint recursionCount = _recursionCount;
-            _owningThreadId = 0;
             _recursionCount = 0;
 
-            State state = State.Unlock(this);
-            if (state.HasAnyWaiters)
-            {
-                SignalWaiterIfNecessary(state);
-            }
+            ReleaseCore();
 
             return recursionCount;
         }
@@ -103,10 +93,6 @@ namespace System.Threading
             switch (stage)
             {
                 case StaticsInitializationStage.Complete:
-                    if (_spinCount == SpinCountNotInitialized)
-                    {
-                        _spinCount = s_maxSpinCount;
-                    }
                     return TryLockResult.Spin;
 
                 case StaticsInitializationStage.Started:

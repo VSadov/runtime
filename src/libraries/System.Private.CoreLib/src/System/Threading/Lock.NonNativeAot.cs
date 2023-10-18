@@ -11,11 +11,6 @@ namespace System.Threading
         private static readonly short s_maxSpinCount = DetermineMaxSpinCount();
         private static readonly short s_minSpinCount = DetermineMinSpinCount();
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="Lock"/> class.
-        /// </summary>
-        public Lock() => _spinCount = s_maxSpinCount;
-
         private static TryLockResult LazyInitializeOrEnter() => TryLockResult.Spin;
         private static bool IsSingleProcessor => Environment.IsSingleProcessor;
 
