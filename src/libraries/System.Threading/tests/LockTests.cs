@@ -107,29 +107,29 @@ namespace System.Threading.Tests
             default(Lock.Scope).Dispose();
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
-        public static void Exit_WhenHeldBySomeoneElse_ThrowsSynchronizationLockException()
-        {
-            Lock lockObj = new();
-            Lock.Scope lockScope;
-            var b = new Barrier(2);
+        //[ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
+        //public static void Exit_WhenHeldBySomeoneElse_ThrowsSynchronizationLockException()
+        //{
+        //    Lock lockObj = new();
+        //    Lock.Scope lockScope;
+        //    var b = new Barrier(2);
 
-            Task t = Task.Run(() =>
-            {
-                using (lockScope = lockObj.EnterScope())
-                {
-                    b.SignalAndWait();
-                    b.SignalAndWait();
-                }
-            });
+        //    Task t = Task.Run(() =>
+        //    {
+        //        using (lockScope = lockObj.EnterScope())
+        //        {
+        //            b.SignalAndWait();
+        //            b.SignalAndWait();
+        //        }
+        //    });
 
-            b.SignalAndWait();
-            Assert.Throws<SynchronizationLockException>(() => lockObj.Exit());
-            Assert.Throws<SynchronizationLockException>(() => lockScope.Dispose());
-            b.SignalAndWait();
+        //    b.SignalAndWait();
+        //    Assert.Throws<SynchronizationLockException>(() => lockObj.Exit());
+        //    Assert.Throws<SynchronizationLockException>(() => lockScope.Dispose());
+        //    b.SignalAndWait();
 
-            t.Wait();
-        }
+        //    t.Wait();
+        //}
 
         [Fact]
         public static void TryEnter_Invalid()

@@ -54,12 +54,12 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private ThreadId TryEnterSlow(int timeoutMs, ThreadId currentThreadId) =>
+        private bool TryEnterSlow(int timeoutMs, ThreadId currentThreadId) =>
             TryEnterSlow(timeoutMs, currentThreadId, this);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal bool TryEnterSlow(int timeoutMs, int currentManagedThreadId, object associatedObject) =>
-            TryEnterSlow(timeoutMs, new ThreadId((uint)currentManagedThreadId), associatedObject).IsInitialized;
+            TryEnterSlow(timeoutMs, new ThreadId((uint)currentManagedThreadId), associatedObject);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal bool GetIsHeldByCurrentThread(int currentManagedThreadId)
