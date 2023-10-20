@@ -11,7 +11,7 @@ namespace System.Threading
         private static readonly short s_maxSpinCount = DetermineMaxSpinCount();
         private static readonly short s_minSpinCount = DetermineMinSpinCount();
 
-        private static TryLockResult LazyInitializeOrEnter() => TryLockResult.Spin;
+        private static bool LazyInitializeTryEnter() => false;
         private static bool IsSingleProcessor => Environment.IsSingleProcessor;
 
         internal partial struct ThreadId

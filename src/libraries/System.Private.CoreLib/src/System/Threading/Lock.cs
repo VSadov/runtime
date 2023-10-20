@@ -23,7 +23,7 @@ namespace System.Threading
         private const short SpinningDisabled = 0;
 
         private const short DefaultMaxSpinCount = 22;
-        private const short DefaultAdaptiveSpinPeriod = 100;
+        private const short DefaultMinSpinCount = 3;
 
         private static long s_contentionCount;
 
@@ -68,12 +68,13 @@ namespace System.Threading
         //
         // everything else: A count of the number of threads waiting on the event.
         //
+        private const uint Unlocked = 0;
         private const uint Locked = 1;
         private const uint WaiterWoken = 2;
         private const uint YieldToWaiters = 4;
         private const uint WaiterCountIncrement = 8;
 
-        private uint _state; // see State for layout
+        private uint _state;
         private uint _recursionCount;
         private short _spinCount;
         private short _wakeWatchDog;
@@ -253,7 +254,7 @@ namespace System.Threading
             Debug.Assert(timeoutMs >= -1);
 
             ThreadId currentThreadId = ThreadId.Current_NoInitialize;
-            if (currentThreadId.IsInitialized && State.TryLock(this))
+            if (currentThreadId.IsInitialized && this.TryLock())
             {
                 Debug.Assert(!new ThreadId(_owningThreadId).IsInitialized);
                 Debug.Assert(_recursionCount == 0);
@@ -263,6 +264,24 @@ namespace System.Threading
 
             return TryEnterSlow(timeoutMs, currentThreadId);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool TryLock()
+        {
+            uint origState = _state;
+            uint expectedState = origState & ~(YieldToWaiters | Locked);
+            uint newState = origState | Locked;
+            if (Interlocked.CompareExchange(ref _state, newState, expectedState) == expectedState)
+            {
+                Debug.Assert(_owningThreadId == 0);
+                Debug.Assert(_recursionCount == 0);
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsLocked => (_state & Locked) != 0;
 
         /// <summary>
         /// Exits the lock.
@@ -322,7 +341,7 @@ namespace System.Threading
                 // initializing the thread info, try the fast path first.
                 currentThreadId.InitializeForCurrentThread();
                 Debug.Assert(_owningThreadId != currentThreadId.Id);
-                if (State.TryLock(this))
+                if (this.TryLock())
                 {
                     Debug.Assert(!new ThreadId(_owningThreadId).IsInitialized);
                     Debug.Assert(_recursionCount == 0);
@@ -332,7 +351,7 @@ namespace System.Threading
             }
             else if (_owningThreadId == currentThreadId.Id)
             {
-                Debug.Assert(new State(this).IsLocked);
+                Debug.Assert(this.IsLocked);
 
                 uint newRecursionCount = _recursionCount + 1;
                 if (newRecursionCount != 0)
@@ -349,7 +368,7 @@ namespace System.Threading
                 return false;
             }
 
-            if (LazyInitializeOrEnter() == TryLockResult.Locked)
+            if (LazyInitializeTryEnter())
             {
                 Debug.Assert(!new ThreadId(_owningThreadId).IsInitialized);
                 Debug.Assert(_recursionCount == 0);
@@ -358,8 +377,6 @@ namespace System.Threading
             }
 
             bool isSingleProcessor = IsSingleProcessor;
-            short maxSpinCount = s_maxSpinCount;
-
             // since we have just made an attempt to accuire and failed, do a small pause
             Thread.SpinWait(1);
 
@@ -393,7 +410,7 @@ namespace System.Threading
                     // waiter progress.
                     //
                     uint oldState = _state;
-                    bool canAcquire = ((oldState & Locked) == 0) &&
+                    bool canAcquire = ((oldState & Locked) == Unlocked) &&
                         (hasWaited || ((oldState & YieldToWaiters) == 0));
 
                     if (canAcquire)
@@ -653,7 +670,7 @@ namespace System.Threading
             {
                 var owningThreadId = new ThreadId(_owningThreadId);
                 bool isHeld = owningThreadId.IsInitialized && owningThreadId.Id == ThreadId.Current_NoInitialize.Id;
-                Debug.Assert(!isHeld || new State(this).IsLocked);
+                Debug.Assert(!isHeld || this.IsLocked);
                 return isHeld;
             }
         }
@@ -681,210 +698,20 @@ namespace System.Threading
 
         internal ulong OwningThreadId => _owningThreadId;
 
+        // Lock starts with MinSpinCount and may self-adjust up to the MaxSpinCount
+        // Setting MaxSpinCount <= MinSpinCount will effectively disable adaptive spin adjustment
         private static short DetermineMaxSpinCount() =>
             AppContextConfigHelper.GetInt16Config(
-                "System.Threading.Lock.SpinCount",
-                "DOTNET_Lock_SpinCount",
+                "System.Threading.Lock.MaxSpinCount",
+                "DOTNET_Lock_MaxSpinCount",
                 DefaultMaxSpinCount,
                 allowNegative: false);
 
-        private static short DetermineMinSpinCount()
-        {
-            // The config var can be set to -1 to disable adaptive spin
-            short adaptiveSpinPeriod =
-                AppContextConfigHelper.GetInt16Config(
-                    "System.Threading.Lock.AdaptiveSpinPeriod",
-                    "DOTNET_Lock_AdaptiveSpinPeriod",
-                    DefaultAdaptiveSpinPeriod,
-                    allowNegative: true);
-            if (adaptiveSpinPeriod < -1)
-            {
-                adaptiveSpinPeriod = DefaultAdaptiveSpinPeriod;
-            }
-
-            return (short)-adaptiveSpinPeriod;
-        }
-
-        private struct State : IEquatable<State>
-        {
-            // Layout constants for Lock._state
-            private const uint IsLockedMask = (uint)1 << 0; // bit 0
-            private const uint IsWaiterSignaledToWakeMask = (uint)1 << 1; // bit 1
-            private const uint ShouldNotPreemptWaitersMask = (uint)1 << 2; // bit 2
-            private const byte WaiterCountShift = 3;
-            private const uint WaiterCountIncrement = (uint)1 << WaiterCountShift; // bits 3-31
-
-            private uint _state;
-
-            public State(Lock lockObj) : this(lockObj._state) { }
-            private State(uint state) => _state = state;
-
-            public static uint InitialStateValue => 0;
-            public static uint LockedStateValue => IsLockedMask;
-            private static uint Neg(uint state) => (uint)-(int)state;
-            public bool IsInitialState => this == default;
-            public bool IsLocked => (_state & IsLockedMask) != 0;
-
-            private void SetIsLocked()
-            {
-                Debug.Assert(!IsLocked);
-                _state += IsLockedMask;
-            }
-
-            private bool ShouldNotPreemptWaiters => (_state & ShouldNotPreemptWaitersMask) != 0;
-
-            private void SetShouldNotPreemptWaiters()
-            {
-                Debug.Assert(!ShouldNotPreemptWaiters);
-                Debug.Assert(HasAnyWaiters);
-
-                _state += ShouldNotPreemptWaitersMask;
-            }
-
-            private void ClearShouldNotPreemptWaiters()
-            {
-                Debug.Assert(ShouldNotPreemptWaiters);
-                _state -= ShouldNotPreemptWaitersMask;
-            }
-
-            private bool ShouldNonWaiterAttemptToAcquireLock
-            {
-                get
-                {
-                    Debug.Assert(HasAnyWaiters || !ShouldNotPreemptWaiters);
-                    return (_state & (IsLockedMask | ShouldNotPreemptWaitersMask)) == 0;
-                }
-            }
-
-            private static bool HasAnySpinners => false;
-
-            private bool IsWaiterSignaledToWake => (_state & IsWaiterSignaledToWakeMask) != 0;
-
-            private void SetIsWaiterSignaledToWake()
-            {
-                Debug.Assert(HasAnyWaiters);
-                Debug.Assert(NeedToSignalWaiter);
-
-                _state += IsWaiterSignaledToWakeMask;
-            }
-
-            private void ClearIsWaiterSignaledToWake()
-            {
-                Debug.Assert(IsWaiterSignaledToWake);
-                _state -= IsWaiterSignaledToWakeMask;
-            }
-
-            public bool HasAnyWaiters => _state >= WaiterCountIncrement;
-
-            private bool TryIncrementWaiterCount()
-            {
-                uint newState = _state + WaiterCountIncrement;
-                if (new State(newState).HasAnyWaiters) // overflow check
-                {
-                    _state = newState;
-                    return true;
-                }
-                return false;
-            }
-
-            private void DecrementWaiterCount()
-            {
-                Debug.Assert(HasAnyWaiters);
-                _state -= WaiterCountIncrement;
-            }
-
-            public bool NeedToSignalWaiter
-            {
-                get
-                {
-                    Debug.Assert(HasAnyWaiters);
-                    return (_state & IsWaiterSignaledToWakeMask) == 0;
-                }
-            }
-
-            public static bool operator ==(State state1, State state2) => state1._state == state2._state;
-            public static bool operator !=(State state1, State state2) => !(state1 == state2);
-
-            bool IEquatable<State>.Equals(State other) => this == other;
-            public override bool Equals(object? obj) => obj is State other && this == other;
-            public override int GetHashCode() => (int)_state;
-
-            private static State CompareExchange(Lock lockObj, State toState, State fromState) =>
-                new State(Interlocked.CompareExchange(ref lockObj._state, toState._state, fromState._state));
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static bool TryLock(Lock lockObj)
-            {
-                // The lock is mostly fair to release waiters in a typically FIFO order (though the order is not guaranteed).
-                // However, it allows non-waiters to acquire the lock if it's available to avoid lock convoys.
-                //
-                // Lock convoys can be detrimental to performance in scenarios where work is being done on multiple threads and
-                // the work involves periodically taking a particular lock for a short time to access shared resources. With a
-                // lock convoy, once there is a waiter for the lock (which is not uncommon in such scenarios), a worker thread
-                // would be forced to context-switch on the subsequent attempt to acquire the lock, often long before the worker
-                // thread exhausts its time slice. This process repeats as long as the lock has a waiter, forcing every worker
-                // to context-switch on each attempt to acquire the lock, killing performance and creating a positive feedback
-                // loop that makes it more likely for the lock to have waiters. To avoid the lock convoy, each worker needs to
-                // be allowed to acquire the lock multiple times in sequence despite there being a waiter for the lock in order
-                // to have the worker continue working efficiently during its time slice as long as the lock is not contended.
-                //
-                // This scheme has the possibility to starve waiters. Waiter starvation is mitigated by other means, see
-                // TryLockBeforeSpinLoop() and references to ShouldNotPreemptWaiters.
-
-                var state = new State(lockObj);
-                if (!state.ShouldNonWaiterAttemptToAcquireLock)
-                {
-                    return false;
-                }
-
-                State newState = state;
-                newState.SetIsLocked();
-
-                return CompareExchange(lockObj, newState, state) == state;
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static State Unlock(Lock lockObj)
-            {
-                Debug.Assert(IsLockedMask == 1);
-
-                var state = new State(Interlocked.Decrement(ref lockObj._state));
-                Debug.Assert(!state.IsLocked);
-                return state;
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static TryLockResult TryLockInsideSpinLoop(Lock lockObj)
-            {
-                // This method is called from inside a spin loop, it must unregister the spinner if the lock is acquired
-
-                var state = new State(lockObj);
-                while (true)
-                {
-                    if (!state.ShouldNonWaiterAttemptToAcquireLock)
-                    {
-                        return state.ShouldNotPreemptWaiters ? TryLockResult.Wait : TryLockResult.Spin;
-                    }
-
-                    State newState = state;
-                    newState.SetIsLocked();
-
-                    State stateBeforeUpdate = CompareExchange(lockObj, newState, state);
-                    if (stateBeforeUpdate == state)
-                    {
-                        return TryLockResult.Locked;
-                    }
-
-                    state = stateBeforeUpdate;
-                }
-            }
-        }
-
-        private enum TryLockResult
-        {
-            Locked,
-            Spin,
-            Wait
-        }
+        private static short DetermineMinSpinCount() =>
+            AppContextConfigHelper.GetInt16Config(
+                "System.Threading.Lock.MinSpinCount",
+                "DOTNET_Lock_MinSpinCount",
+                DefaultMinSpinCount,
+                allowNegative: false);
     }
 }

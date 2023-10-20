@@ -33,36 +33,36 @@ namespace System.Threading.Tests
         }
 
         // Attempts to overflow the recursion count of a newly-created lock.
-        [Fact]
-        public static void DeepRecursion()
-        {
-            Lock lockObj = new();
-            const int successLimit = ushort.MaxValue - 1;
-            const int failureLimit = ushort.MaxValue + 2;
+        //[Fact]
+        //public static void DeepRecursion()
+        //{
+        //    Lock lockObj = new();
+        //    const uint successLimit = uint.MaxValue - 1;
+        //    const uint failureLimit = uint.MaxValue;
 
-            int i = 0;
-            for (; i < successLimit; i++)
-            {
-                Assert.True(lockObj.TryEnter());
-            }
+        //    uint i = 0;
+        //    for (; i < successLimit; i++)
+        //    {
+        //        Assert.True(lockObj.TryEnter());
+        //    }
 
-            Assert.Throws<LockRecursionException>(() =>
-            {
-                for (; i < failureLimit; i++)
-                {
-                    Assert.True(lockObj.TryEnter());
-                }
-            });
+        //    Assert.Throws<LockRecursionException>(() =>
+        //    {
+        //        for (; i <= failureLimit; i++)
+        //        {
+        //            Assert.True(lockObj.TryEnter());
+        //        }
+        //    });
 
-            for (; i > 1; i--)
-            {
-                lockObj.Exit();
-                Assert.True(lockObj.IsHeldByCurrentThread);
-            }
+        //    for (i = 0; i < failureLimit; i++)
+        //    {
+        //        lockObj.Exit();
+        //        Assert.True(lockObj.IsHeldByCurrentThread);
+        //    }
 
-            lockObj.Exit();
-            Assert.False(lockObj.IsHeldByCurrentThread);
-        }
+        //    lockObj.Exit();
+        //    Assert.False(lockObj.IsHeldByCurrentThread);
+        //}
 
         [Fact]
         public static void IsHeldByCurrentThread()

@@ -22,7 +22,7 @@ namespace System.Threading
         {
             Debug.Assert(currentManagedThreadId != 0);
 
-            if (State.TryLock(this))
+            if (this.TryLock())
             {
                 Debug.Assert(_owningThreadId == 0);
                 Debug.Assert(_recursionCount == 0);
@@ -62,7 +62,7 @@ namespace System.Threading
             Debug.Assert(currentManagedThreadId != 0);
 
             bool isHeld = _owningThreadId == (uint)currentManagedThreadId;
-            Debug.Assert(!isHeld || new State(this).IsLocked);
+            Debug.Assert(!isHeld || this.IsLocked);
             return isHeld;
         }
 
@@ -87,13 +87,13 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TryLockResult LazyInitializeOrEnter()
+        private bool LazyInitializeTryEnter()
         {
             StaticsInitializationStage stage = (StaticsInitializationStage)Volatile.Read(ref s_staticsInitializationStage);
             switch (stage)
             {
                 case StaticsInitializationStage.Complete:
-                    return TryLockResult.Spin;
+                    return false;
 
                 case StaticsInitializationStage.Started:
                     // Spin-wait until initialization is complete or the lock is acquired to prevent class construction cycles
@@ -120,9 +120,9 @@ namespace System.Threading
                             goto default;
                         }
 
-                        if (State.TryLock(this))
+                        if (this.TryLock())
                         {
-                            return TryLockResult.Locked;
+                            return true;
                         }
 
                         sleep = !sleep;
@@ -183,7 +183,7 @@ namespace System.Threading
         {
             Debug.Assert(recursionCount == 0 || managedThreadId != 0);
 
-            _state = managedThreadId == 0 ? State.InitialStateValue : State.LockedStateValue;
+            _state = managedThreadId == 0 ? Unlocked : Locked;
             _owningThreadId = (uint)managedThreadId;
             _recursionCount = recursionCount;
         }
