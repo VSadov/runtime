@@ -36,16 +36,14 @@ namespace System.Threading
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void Exit(int currentManagedThreadId)
         {
-            if (currentManagedThreadId != _owningThreadId)
-                throw new SynchronizationLockException();
+            Debug.Assert(currentManagedThreadId != 0);
 
-            if (_recursionCount == 0)
+            if (_owningThreadId != (uint)currentManagedThreadId)
             {
-                ReleaseCore();
-                return;
+                ThrowHelper.ThrowSynchronizationLockException_LockExit();
             }
 
-            _recursionCount--;
+            ExitImpl();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

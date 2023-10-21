@@ -127,7 +127,7 @@ namespace System.Threading
         public Scope EnterScope()
         {
             Enter();
-            return new Scope(this);
+            return new Scope(this, new ThreadId(this._owningThreadId));
         }
 
         /// <summary>
@@ -136,11 +136,15 @@ namespace System.Threading
         public ref struct Scope
         {
             private Lock? _lockObj;
+            // TODO: we are relying on "thread affinity" of ref structs, which is not technically guaranteed.
+            //       are there enough perf differences to be worth it?
+            private ThreadId _currentThreadId;
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            internal Scope(Lock lockObj)
+            internal Scope(Lock lockObj, ThreadId currentThreadId)
             {
                 _lockObj = lockObj;
+                _currentThreadId = currentThreadId;
             }
 
             /// <summary>
@@ -160,7 +164,7 @@ namespace System.Threading
                 if (lockObj != null)
                 {
                     _lockObj = null;
-                    lockObj.Exit();
+                    lockObj.Exit(_currentThreadId);
                 }
             }
         }
@@ -301,6 +305,30 @@ namespace System.Threading
             {
                 ThrowHelper.ThrowSynchronizationLockException_LockExit();
             }
+
+            ExitImpl();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void Exit(ThreadId currentThreadId)
+        {
+            Debug.Assert(currentThreadId.IsInitialized);
+            Debug.Assert(currentThreadId.Id == ThreadId.Current_NoInitialize.Id);
+
+            if (_owningThreadId != currentThreadId.Id)
+            {
+                ThrowHelper.ThrowSynchronizationLockException_LockExit();
+            }
+
+            ExitImpl();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ExitImpl()
+        {
+            Debug.Assert(new ThreadId(_owningThreadId).IsInitialized);
+            Debug.Assert(_owningThreadId == ThreadId.Current_NoInitialize.Id);
+            Debug.Assert(this.IsLocked);
 
             if (_recursionCount == 0)
             {
