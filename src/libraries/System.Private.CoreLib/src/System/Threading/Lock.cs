@@ -505,68 +505,77 @@ namespace System.Threading
                 // Now we wait.
                 //
 
-                Interlocked.Increment(ref s_contentionCount);
                 TimeoutTracker timeoutTracker = TimeoutTracker.Start(timeoutMs);
 
+                // Lock was not acquired and a waiter was registered. All following paths need to unregister the waiter, including
+                // exceptional paths.
                 try
                 {
+#if NATIVEAOT
+                    using var debugBlockingScope =
+                        new Monitor.DebugBlockingScope(
+                            associatedObject,
+                            Monitor.DebugBlockingItemType.MonitorCriticalSection,
+                            timeoutMs,
+                            out _);
+#endif
+                    Interlocked.Increment(ref s_contentionCount);
+
                     if (contentionTrackingStartedTicks == 0)
                         contentionTrackingStartedTicks = LogContentionStart();
 
                     AutoResetEvent waitEvent = _waitEvent ?? CreateWaitEvent();
 
-                    {
-#if NATIVEAOT
-                        using var debugBlockingScope =
-                            new Monitor.DebugBlockingScope(
-                                associatedObject,
-                                Monitor.DebugBlockingItemType.MonitorCriticalSection,
-                                timeoutMs,
-                                out _);
-#endif
-                        Debug.Assert(_state >= WaiterCountIncrement);
-                        bool waitSucceeded = waitEvent.WaitOne(timeoutMs);
-                        Debug.Assert(_state >= WaiterCountIncrement);
+                    Debug.Assert(_state >= WaiterCountIncrement);
+                    bool waitSucceeded = waitEvent.WaitOne(timeoutMs);
+                    Debug.Assert(_state >= WaiterCountIncrement);
 
-                        if (!waitSucceeded)
-                            break;
-                    }
+                    if (!waitSucceeded)
+                        break;
                 }
                 catch
                 {
+                    // waiting failed
+                    UnregisterWaiter(contentionTrackingStartedTicks);
+                    throw;
                 }
 
-                // we did not time out and will try acquiring the lock
+                // we did not time out and will try acquiring the lock again.
                 timeoutMs = timeoutTracker.Remaining;
                 hasWaited = true;
             }
 
             // We timed out.  We're not going to wait again.
+            UnregisterWaiter(contentionTrackingStartedTicks);
+            return false;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void UnregisterWaiter(long contentionTrackingStartedTicks)
+        {
+            uint iteration = 0;
+            while (true)
             {
-                uint iteration = 0;
-                while (true)
+                uint oldState = _state;
+                Debug.Assert(oldState >= WaiterCountIncrement);
+
+                uint newState = oldState - WaiterCountIncrement;
+
+                // We could not have consumed a wake, or the wait would've succeeded.
+                // If we are the last waiter though, we will clear WaiterWoken and YieldToWaiters
+                // just so that lock would not look like contended.
+                if (newState < WaiterCountIncrement)
+                    newState = newState & ~WaiterWoken & ~YieldToWaiters;
+
+                if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                 {
-                    uint oldState = _state;
-                    Debug.Assert(oldState >= WaiterCountIncrement);
+                    if (contentionTrackingStartedTicks != 0)
+                        LogContentionEnd(contentionTrackingStartedTicks);
 
-                    uint newState = oldState - WaiterCountIncrement;
-
-                    // We could not have consumed a wake, or the wait would've succeeded.
-                    // If we are the last waiter though, we will clear WaiterWoken and YieldToWaiters
-                    // just so that lock would not look like contended.
-                    if (newState < WaiterCountIncrement)
-                        newState = newState & ~WaiterWoken & ~YieldToWaiters;
-
-                    if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
-                    {
-                        if (contentionTrackingStartedTicks != 0)
-                            LogContentionEnd(contentionTrackingStartedTicks);
-
-                        return false;
-                    }
-
-                    ExponentialBackoff(iteration++);
+                    return;
                 }
+
+                ExponentialBackoff(iteration++);
             }
         }
 
