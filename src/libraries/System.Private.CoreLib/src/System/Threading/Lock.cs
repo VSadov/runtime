@@ -386,6 +386,7 @@ namespace System.Threading
             }
 
             bool hasWaited = false;
+            long contentionTrackingStartedTicks = 0;
             // we will retry after waking up
             while (true)
             {
@@ -449,6 +450,10 @@ namespace System.Threading
                             Debug.Assert(_owningThreadId == 0);
                             Debug.Assert(_recursionCount == 0);
                             _owningThreadId = currentThreadId.Id;
+
+                            if (contentionTrackingStartedTicks != 0)
+                                LogContentionEnd(contentionTrackingStartedTicks);
+
                             return true;
                         }
                     }
@@ -499,38 +504,42 @@ namespace System.Threading
                 //
                 // Now we wait.
                 //
-#if NATIVEAOT
-                using var debugBlockingScope =
-                    new Monitor.DebugBlockingScope(
-                        associatedObject,
-                        Monitor.DebugBlockingItemType.MonitorCriticalSection,
-                        timeoutMs,
-                        out _);
-#endif
 
                 Interlocked.Increment(ref s_contentionCount);
-
-                bool areContentionEventsEnabled =
-                NativeRuntimeEventSource.Log.IsEnabled(
-                    EventLevel.Informational,
-                    NativeRuntimeEventSource.Keywords.ContentionKeyword);
-                AutoResetEvent waitEvent = _waitEvent ?? CreateWaitEvent(areContentionEventsEnabled);
-
                 TimeoutTracker timeoutTracker = TimeoutTracker.Start(timeoutMs);
-                Debug.Assert(_state >= WaiterCountIncrement);
-                bool waitSucceeded = waitEvent.WaitOne(timeoutMs);
-                Debug.Assert(_state >= WaiterCountIncrement);
 
-                if (!waitSucceeded)
-                    break;
+                try
+                {
+                    if (contentionTrackingStartedTicks == 0)
+                        contentionTrackingStartedTicks = LogContentionStart();
+
+                    AutoResetEvent waitEvent = _waitEvent ?? CreateWaitEvent();
+
+                    {
+#if NATIVEAOT
+                        using var debugBlockingScope =
+                            new Monitor.DebugBlockingScope(
+                                associatedObject,
+                                Monitor.DebugBlockingItemType.MonitorCriticalSection,
+                                timeoutMs,
+                                out _);
+#endif
+                        Debug.Assert(_state >= WaiterCountIncrement);
+                        bool waitSucceeded = waitEvent.WaitOne(timeoutMs);
+                        Debug.Assert(_state >= WaiterCountIncrement);
+
+                        if (!waitSucceeded)
+                            break;
+                    }
+                }
+                catch
+                {
+                }
 
                 // we did not time out and will try acquiring the lock
-                hasWaited = true;
                 timeoutMs = timeoutTracker.Remaining;
+                hasWaited = true;
             }
-
-            // TODO: VS events
-            // TODO: VS catch
 
             // We timed out.  We're not going to wait again.
             {
@@ -549,7 +558,12 @@ namespace System.Threading
                         newState = newState & ~WaiterWoken & ~YieldToWaiters;
 
                     if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
+                    {
+                        if (contentionTrackingStartedTicks != 0)
+                            LogContentionEnd(contentionTrackingStartedTicks);
+
                         return false;
+                    }
 
                     ExponentialBackoff(iteration++);
                 }
@@ -585,16 +599,22 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private unsafe AutoResetEvent CreateWaitEvent(bool areContentionEventsEnabled)
+        private unsafe AutoResetEvent CreateWaitEvent()
         {
             var newWaitEvent = new AutoResetEvent(false);
             AutoResetEvent? waitEventBeforeUpdate = Interlocked.CompareExchange(ref _waitEvent, newWaitEvent, null);
+
             if (waitEventBeforeUpdate == null)
             {
                 // Also check NativeRuntimeEventSource.Log.IsEnabled() to enable trimming
-                if (areContentionEventsEnabled && NativeRuntimeEventSource.Log.IsEnabled())
+                if (NativeRuntimeEventSource.Log.IsEnabled())
                 {
-                    NativeRuntimeEventSource.Log.ContentionLockCreated(this);
+                    if (NativeRuntimeEventSource.Log.IsEnabled(
+                                EventLevel.Informational,
+                                NativeRuntimeEventSource.Keywords.ContentionKeyword))
+                    {
+                        NativeRuntimeEventSource.Log.ContentionLockCreated(this);
+                    }
                 }
 
                 return newWaitEvent;
@@ -602,6 +622,37 @@ namespace System.Threading
 
             newWaitEvent.Dispose();
             return waitEventBeforeUpdate;
+        }
+
+        private long LogContentionStart()
+        {
+            // Also check NativeRuntimeEventSource.Log.IsEnabled() to enable trimming
+            if (NativeRuntimeEventSource.Log.IsEnabled())
+            {
+                if (NativeRuntimeEventSource.Log.IsEnabled(
+                            EventLevel.Informational,
+                            NativeRuntimeEventSource.Keywords.ContentionKeyword))
+                {
+                    NativeRuntimeEventSource.Log.ContentionStart(this);
+
+                    return Stopwatch.GetTimestamp();
+                }
+            }
+
+            return 0;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void LogContentionEnd(long contentionTrackingStartedTicks)
+        {
+            double waitDurationNs =
+                (Stopwatch.GetTimestamp() - contentionTrackingStartedTicks) * 1_000_000_000.0 / Stopwatch.Frequency;
+
+            // Also check NativeRuntimeEventSource.Log.IsEnabled() to enable trimming
+            if (NativeRuntimeEventSource.Log.IsEnabled())
+            {
+                NativeRuntimeEventSource.Log.ContentionStop(waitDurationNs);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -641,13 +692,15 @@ namespace System.Threading
 
                     if (Interlocked.CompareExchange(ref _state, newState, oldState) == oldState)
                     {
+                        AutoResetEvent waitEvent = _waitEvent ?? CreateWaitEvent();
+                        waitEvent.Set();
+
                         if (lastWakeTicks == 0)
                         {
                             // nonzero timestamp of the last wake
                             _wakeWatchDog = (short)(Environment.TickCount | 1);
                         }
 
-                        _waitEvent!.Set();
                         return;
                     }
                 }
