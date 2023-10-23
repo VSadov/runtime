@@ -23,7 +23,7 @@ namespace System.Threading
         private const short SpinningDisabled = 0;
 
         private const short DefaultMaxSpinCount = 22;
-        private const short DefaultMinSpinCount = 3;
+        private const short DefaultMinSpinCount = 1;
 
         private static long s_contentionCount;
 
@@ -273,13 +273,15 @@ namespace System.Threading
         private bool TryLock()
         {
             uint origState = _state;
-            uint expectedState = origState & ~(YieldToWaiters | Locked);
-            uint newState = origState | Locked;
-            if (Interlocked.CompareExchange(ref _state, newState, expectedState) == expectedState)
+            if ((origState & (YieldToWaiters | Locked)) == 0)
             {
-                Debug.Assert(_owningThreadId == 0);
-                Debug.Assert(_recursionCount == 0);
-                return true;
+                uint newState = origState | Locked;
+                if (Interlocked.CompareExchange(ref _state, newState, origState) == origState)
+                {
+                    Debug.Assert(_owningThreadId == 0);
+                    Debug.Assert(_recursionCount == 0);
+                    return true;
+                }
             }
 
             return false;
@@ -404,13 +406,9 @@ namespace System.Threading
                 return true;
             }
 
-            bool isSingleProcessor = IsSingleProcessor;
-            // since we have just made an attempt to accuire and failed, do a small pause
-            Thread.SpinWait(1);
-
             if (_spinCount == SpinCountNotInitialized)
             {
-                _spinCount = (IsSingleProcessor) ? s_minSpinCount : SpinningDisabled;
+                _spinCount = IsSingleProcessor ? SpinningDisabled : s_minSpinCount;
             }
 
             bool hasWaited = false;
@@ -418,7 +416,7 @@ namespace System.Threading
             // we will retry after waking up
             while (true)
             {
-                uint iteration = 0;
+                uint iteration = 1;
 
                 // We will count when we failed to change the state of the lock and increase pauses
                 // so that bursts of activity are better tolerated. This should not happen often.
@@ -467,9 +465,9 @@ namespace System.Threading
                                     _spinCount = (short)(spinLimit - 1);
                                 }
                             }
-                            else if (spinLimit < s_maxSpinCount && iteration > spinLimit / 2)
+                            else if (spinLimit < s_maxSpinCount && iteration >= spinLimit)
                             {
-                                // we used more than 50% of allowed iterations, but the lock does not look very contested,
+                                // we used all of allowed iterations, but the lock does not look very contested,
                                 // we can allow a bit more spinning.
                                 _spinCount = (short)(spinLimit + 1);
                             }
@@ -484,21 +482,22 @@ namespace System.Threading
 
                             return true;
                         }
+
+                        collisions++;
                     }
 
-                    if (iteration++ < localSpinLimit)
+                    var newOwner = _owningThreadId;
+                    if (newOwner != 0 && newOwner != oldOwner)
                     {
-                        uint newOwner = _owningThreadId;
-                        if (newOwner != 0 && newOwner != oldOwner)
-                        {
+                        if (oldOwner != 0)
                             ownerChanged++;
-                            oldOwner = newOwner;
-                        }
 
-                        if (canAcquire)
-                        {
-                            collisions++;
-                        }
+                        oldOwner = newOwner;
+                    }
+
+                    if (iteration < localSpinLimit)
+                    {
+                        iteration++;
 
                         // We failed to acquire the lock and want to retry after a pause.
                         // Ideally we will retry right when the lock becomes free, but we cannot know when that will happen.
