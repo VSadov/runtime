@@ -136,8 +136,6 @@ namespace System.Threading
         public ref struct Scope
         {
             private Lock? _lockObj;
-            // TODO: we are relying on "thread affinity" of ref structs, which is not technically guaranteed.
-            //       are there enough perf differences to be worth it?
             private ThreadId _currentThreadId;
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
