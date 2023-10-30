@@ -90,9 +90,8 @@ namespace System.Threading
 
         internal static void LazyInit()
         {
-            s_maxSpinCount = DefaultMaxSpinCount;
-            s_minSpinCount = DefaultMinSpinCount;
-            s_processorCount = RuntimeImports.RhGetProcessCpuCount();
+            s_maxSpinCount = DefaultMaxSpinCount << SpinCountScaleShift;
+            s_minSpinCount = DefaultMinSpinCount << SpinCountScaleShift;
 
             // the rest is optional, but let's try once
             if (s_staticsInitializationStage != (int)StaticsInitializationStage.Complete)
@@ -110,8 +109,18 @@ namespace System.Threading
                 s_staticsInitializationStage = (int)StaticsInitializationStage.Started;
                 try
                 {
-                    s_minSpinCount = DetermineMinSpinCount();
-                    s_maxSpinCount = DetermineMaxSpinCount();
+                    s_processorCount = RuntimeImports.RhGetProcessCpuCount();
+                    if (s_processorCount > 1)
+                    {
+                        s_minSpinCount = (short)(DetermineMinSpinCount() << SpinCountScaleShift);
+                        s_maxSpinCount = (short)(DetermineMaxSpinCount() << SpinCountScaleShift);
+                    }
+                    else
+                    {
+                        s_maxSpinCount = 0;
+                        s_minSpinCount = 0;
+                    }
+
                     NativeRuntimeEventSource.Log.IsEnabled();
 
                     Volatile.Write(ref s_staticsInitializationStage, (int)StaticsInitializationStage.Complete);
