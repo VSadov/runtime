@@ -74,8 +74,9 @@ namespace System.Threading
         //
         private const uint Unlocked = 0;
         private const uint Locked = 1;
-        private const uint YieldToWaiters = 2;
-        private const uint WaiterCountIncrement = 4;
+        private const uint YieldToWaiters = 256; // lowermost byte is all for Locked/Unlocked
+        private const uint WaiterCountIncrement = 512; // we allow up to 4 mln waiting threads, enough for now?
+
         private const uint WaiterWoken = 1u << 31;
 
         private uint _state;
@@ -692,8 +693,10 @@ namespace System.Threading
         {
             Debug.Assert(_recursionCount == 0);
             _owningThreadId = 0;
-            uint origState = Interlocked.Decrement(ref _state);
-            if ((int)origState < (int)WaiterCountIncrement) // true if have no waiters or WaiterWoken is set
+            Volatile.Write(ref Unsafe.As<uint, byte>(ref _state), 0);
+            //var state = Interlocked.Decrement(ref _state);
+
+            if (_state < (int)WaiterCountIncrement) // true if have no waiters or WaiterWoken is set
             {
                 return;
             }
