@@ -694,7 +694,7 @@ void GCToEEInterface::SyncBlockCachePromotionsGranted(int max_gen)
         if (currentAge == max_gen)
             continue;
 
-        pThread->SetStackGeneration(currentAge++);
+        pThread->SetStackGeneration(currentAge + 1);
     }
     END_FOREACH_THREAD
 }
