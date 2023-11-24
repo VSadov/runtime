@@ -283,6 +283,7 @@ public:
     void SetGCSpecial();
     bool IsGCSpecial();
     bool CatchAtSafePoint();
+    int  GetStackAge();
 
     //
     // Managed/unmanaged interop transitions support APIs

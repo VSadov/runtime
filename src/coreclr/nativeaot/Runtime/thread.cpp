@@ -422,6 +422,11 @@ bool Thread::CatchAtSafePoint()
     return true;
 }
 
+int Thread::GetStackAge()
+{
+    return m_stackAge;
+}
+
 uint64_t Thread::GetPalThreadIdForLogging()
 {
     return *(uint64_t*)&m_threadId;
