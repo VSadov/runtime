@@ -659,10 +659,44 @@ void GCToEEInterface::SyncBlockCacheWeakPtrScan(HANDLESCANPROC /*scanProc*/, uin
 
 void GCToEEInterface::SyncBlockCacheDemote(int /*max_gen*/)
 {
+    int condemned = GCHeapUtilities::GetGCHeap()->GetCondemnedGeneration();
+
+    FOREACH_THREAD(pThread)
+    {
+        int currentAge = pThread->GetStackAge();
+
+        // the stack is too old to be interesing in this GC
+        if (currentAge > condemned)
+            continue;
+
+        // the stack is as young as it can be
+        if (currentAge == 0)
+            continue;
+
+        pThread->SetStackAge(0);
+    }
+    END_FOREACH_THREAD
 }
 
-void GCToEEInterface::SyncBlockCachePromotionsGranted(int /*max_gen*/)
+void GCToEEInterface::SyncBlockCachePromotionsGranted(int max_gen)
 {
+    int condemned = GCHeapUtilities::GetGCHeap()->GetCondemnedGeneration();
+
+    FOREACH_THREAD(pThread)
+    {
+        int currentAge = pThread->GetStackAge();
+
+        // the stack is too old to be interesing in this GC
+        if (currentAge > condemned)
+            continue;
+
+        // the stack is as old as it can be
+        if (currentAge == max_gen)
+            continue;
+
+        pThread->SetStackAge(currentAge++);
+    }
+    END_FOREACH_THREAD
 }
 
 uint32_t GCToEEInterface::GetActiveSyncBlockCount()

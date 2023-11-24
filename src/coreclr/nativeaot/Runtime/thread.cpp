@@ -427,6 +427,11 @@ int Thread::GetStackAge()
     return m_stackAge;
 }
 
+void Thread::SetStackAge(int age)
+{
+    m_stackAge = age;
+}
+
 uint64_t Thread::GetPalThreadIdForLogging()
 {
     return *(uint64_t*)&m_threadId;

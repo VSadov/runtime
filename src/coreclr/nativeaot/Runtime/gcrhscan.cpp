@@ -44,6 +44,9 @@ void GCToEEInterface::GcScanRoots(EnumGcRefCallbackFunc * fn,  int condemned, in
         if (pThread->IsGCSpecial())
             continue;
 
+        if (pThread->GetStackAge() > condemned)
+            continue;
+
 #if !defined (ISOLATED_HEAPS)
         if (!GCHeapUtilities::GetGCHeap()->IsThreadUsingAllocationContextHeap(pThread->GetAllocContext(),
                                                                      sc->thread_number))
