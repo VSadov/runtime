@@ -97,6 +97,7 @@ struct ThreadBuffer
     uintptr_t               m_uHijackedReturnValueFlags;
     PTR_ExInfo              m_pExInfoStackHead;
     Object*                 m_threadAbortException;                 // ThreadAbortException instance -set only during thread abort
+    int                     m_stackAge;
     Object*                 m_pThreadLocalStatics;
     InlinedThreadStaticRoot* m_pInlinedThreadLocalStatics;
     GCFrameRegistration*    m_pGCFrameRegistrations;

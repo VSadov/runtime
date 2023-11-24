@@ -93,6 +93,8 @@ void Thread::WaitForGC(PInvokeTransitionFrame* pTransitionFrame)
     }
     while (ThreadStore::IsTrapThreadsRequested());
 
+    m_stackAge = 0;
+
     // Restore the saved error
     PalSetLastError(lastErrorOnEntry);
 }
@@ -163,6 +165,8 @@ void Thread::DisablePreemptiveMode()
     {
         WaitForGC(m_pDeferredTransitionFrame);
     }
+
+    m_stackAge = 0;
 }
 #endif // !DACCESS_COMPILE
 
@@ -1301,6 +1305,8 @@ void Thread::ReversePInvokeAttachOrTrapThread(ReversePInvokeFrame * pFrame)
     {
         WaitForGC(pFrame->m_savedPInvokeTransitionFrame);
     }
+
+    m_stackAge = 0;
 }
 
 void Thread::EnsureRuntimeInitialized()
@@ -1343,6 +1349,8 @@ FORCEINLINE void Thread::InlinePInvokeReturn(PInvokeTransitionFrame * pFrame)
     {
         RhpWaitForGC2(pFrame);
     }
+
+    m_stackAge = 0;
 }
 
 Object * Thread::GetThreadAbortException()
