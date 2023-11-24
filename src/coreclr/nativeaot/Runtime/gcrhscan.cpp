@@ -44,7 +44,7 @@ void GCToEEInterface::GcScanRoots(EnumGcRefCallbackFunc * fn,  int condemned, in
         if (pThread->IsGCSpecial())
             continue;
 
-        if (pThread->GetStackAge() > condemned)
+        if (pThread->GetStackGeneration() > condemned)
             continue;
 
 #if !defined (ISOLATED_HEAPS)
