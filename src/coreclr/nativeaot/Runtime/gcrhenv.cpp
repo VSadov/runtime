@@ -663,17 +663,17 @@ void GCToEEInterface::SyncBlockCacheDemote(int /*max_gen*/)
 
     FOREACH_THREAD(pThread)
     {
-        int currentAge = pThread->GetStackGeneration();
+        int generation = pThread->GetGeneration();
 
         // the stack is too old to be interesing in this GC
-        if (currentAge > condemned)
+        if (generation > condemned)
             continue;
 
         // the stack is as young as it can be
-        if (currentAge == 0)
+        if (generation == 0)
             continue;
 
-        pThread->SetStackGeneration(0);
+        pThread->SetGeneration(0);
     }
     END_FOREACH_THREAD
 }
@@ -684,17 +684,17 @@ void GCToEEInterface::SyncBlockCachePromotionsGranted(int max_gen)
 
     FOREACH_THREAD(pThread)
     {
-        int currentAge = pThread->GetStackGeneration();
+        int generation = pThread->GetGeneration();
 
         // the stack is too old to be interesing in this GC
-        if (currentAge > condemned)
+        if (generation > condemned)
             continue;
 
         // the stack is as old as it can be
-        if (currentAge == max_gen)
+        if (generation == max_gen)
             continue;
 
-        pThread->SetStackGeneration(currentAge + 1);
+        pThread->SetGeneration(generation + 1);
     }
     END_FOREACH_THREAD
 }

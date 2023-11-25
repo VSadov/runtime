@@ -52,7 +52,7 @@ NESTED_END RhpPInvoke, _TEXT
 
 LEAF_ENTRY RhpPInvokeReturn, _TEXT
         ldr         x9, [x0, #OFFSETOF__PInvokeTransitionFrame__m_pThread]
-        str         xzr, [x9, #OFFSETOF__Thread__m_stackGeneration]
+        str         xzr, [x9, #OFFSETOF__Thread__m_generation]
         str         xzr, [x9, #OFFSETOF__Thread__m_pTransitionFrame]
 
         PREPARE_EXTERNAL_VAR_INDIRECT_W RhpTrapThreads, 9

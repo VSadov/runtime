@@ -45,7 +45,7 @@ LEAF_END RhpPInvoke, _TEXT
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 LEAF_ENTRY RhpPInvokeReturn, _TEXT
         mov         rdx, [rcx + OFFSETOF__PInvokeTransitionFrame__m_pThread]
-        mov         qword ptr [rdx + OFFSETOF__Thread__m_stackGeneration], 0
+        mov         qword ptr [rdx + OFFSETOF__Thread__m_generation], 0
         mov         qword ptr [rdx + OFFSETOF__Thread__m_pTransitionFrame], 0
         cmp         [RhpTrapThreads], TrapThreadsFlags_None
         jne         @F                  ; forward branch - predicted not taken

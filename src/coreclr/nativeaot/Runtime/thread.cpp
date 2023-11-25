@@ -93,7 +93,7 @@ void Thread::WaitForGC(PInvokeTransitionFrame* pTransitionFrame)
     }
     while (ThreadStore::IsTrapThreadsRequested());
 
-    m_stackGeneration = 0;
+    m_generation = 0;
 
     // Restore the saved error
     PalSetLastError(lastErrorOnEntry);
@@ -166,7 +166,7 @@ void Thread::DisablePreemptiveMode()
         WaitForGC(m_pDeferredTransitionFrame);
     }
 
-    m_stackGeneration = 0;
+    m_generation = 0;
 }
 #endif // !DACCESS_COMPILE
 
@@ -422,14 +422,14 @@ bool Thread::CatchAtSafePoint()
     return true;
 }
 
-int Thread::GetStackGeneration()
+int Thread::GetGeneration()
 {
-    return m_stackGeneration;
+    return m_generation;
 }
 
-void Thread::SetStackGeneration(int age)
+void Thread::SetGeneration(int generation)
 {
-    m_stackGeneration = age;
+    m_generation = generation;
 }
 
 uint64_t Thread::GetPalThreadIdForLogging()
@@ -1316,7 +1316,7 @@ void Thread::ReversePInvokeAttachOrTrapThread(ReversePInvokeFrame * pFrame)
         WaitForGC(pFrame->m_savedPInvokeTransitionFrame);
     }
 
-    m_stackGeneration = 0;
+    m_generation = 0;
 }
 
 void Thread::EnsureRuntimeInitialized()
@@ -1360,7 +1360,7 @@ FORCEINLINE void Thread::InlinePInvokeReturn(PInvokeTransitionFrame * pFrame)
         RhpWaitForGC2(pFrame);
     }
 
-    m_stackGeneration = 0;
+    m_generation = 0;
 }
 
 Object * Thread::GetThreadAbortException()

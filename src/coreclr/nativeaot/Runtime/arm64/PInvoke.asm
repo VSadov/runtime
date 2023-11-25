@@ -46,7 +46,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     LEAF_ENTRY RhpPInvokeReturn, _TEXT
         ldr     x9, [x0, #OFFSETOF__PInvokeTransitionFrame__m_pThread]
-        str     xzr, [x9, #OFFSETOF__Thread__m_stackGeneration]
+        str     xzr, [x9, #OFFSETOF__Thread__m_generation]
         str     xzr, [x9, #OFFSETOF__Thread__m_pTransitionFrame]
 
         ldr     x9, =RhpTrapThreads
