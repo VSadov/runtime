@@ -103,21 +103,6 @@ enum GcSlotState
     GC_SLOT_LIVE = 0x1,
 };
 
-struct GcStackSlot
-{
-    INT32 SpOffset;
-    GcStackSlotBase Base;
-
-    bool operator==(const GcStackSlot& other)
-    {
-        return ((SpOffset == other.SpOffset) && (Base == other.Base));
-    }
-    bool operator!=(const GcStackSlot& other)
-    {
-        return ((SpOffset != other.SpOffset) || (Base != other.Base));
-    }
-};
-
 //--------------------------------------------------------------------------------
 // ReturnKind -- encoding return type information in GcInfo
 //

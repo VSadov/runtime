@@ -155,6 +155,21 @@ struct GcInfoSize
 };
 #endif
 
+struct GcStackSlot
+{
+    INT32 SpOffset;
+    GcStackSlotBase Base;
+
+    bool operator==(const GcStackSlot& other)
+    {
+        return ((SpOffset == other.SpOffset) && (Base == other.Base));
+    }
+    bool operator!=(const GcStackSlot& other)
+    {
+        return ((SpOffset != other.SpOffset) || (Base != other.Base));
+    }
+};
+
 struct GcSlotDesc
 {
     union

@@ -1083,8 +1083,8 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
         UINT32 regNum = DENORMALIZE_REGISTER(normRegNum);
         GcSlotFlags flags = (GcSlotFlags) reader.Read(2);
 
-        m_SlotArray[0].Slot.RegisterNumber = regNum;
-        m_SlotArray[0].Flags = flags;
+        m_SlotArray[0].SetRegisterNumber(regNum);
+        m_SlotArray[0].SetFlags(flags);
 
         UINT32 loopEnd = _min(m_NumRegisters, MAX_PREDECODED_SLOTS);
         for(i++; i < loopEnd; i++)
@@ -1102,8 +1102,8 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
                 regNum = DENORMALIZE_REGISTER(normRegNum);
             }
 
-            m_SlotArray[i].Slot.RegisterNumber = regNum;
-            m_SlotArray[i].Flags = flags;
+            m_SlotArray[i].SetRegisterNumber(regNum);
+            m_SlotArray[i].SetFlags(flags);
         }
     }
 
@@ -1116,9 +1116,9 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
         INT32 spOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
         GcSlotFlags flags = (GcSlotFlags) reader.Read(2);
 
-        m_SlotArray[i].Slot.Stack.SpOffset = spOffset;
-        m_SlotArray[i].Slot.Stack.Base = spBase;
-        m_SlotArray[i].Flags = flags;
+        m_SlotArray[i].SetSpOffset(spOffset);
+        m_SlotArray[i].SetStackSlotBase(spBase);
+        m_SlotArray[i].SetFlags(flags);
 
         UINT32 loopEnd = _min(m_NumRegisters + numStackSlots, MAX_PREDECODED_SLOTS);
         for(i++; i < loopEnd; i++)
@@ -1138,9 +1138,9 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
                 spOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
             }
 
-            m_SlotArray[i].Slot.Stack.SpOffset = spOffset;
-            m_SlotArray[i].Slot.Stack.Base = spBase;
-            m_SlotArray[i].Flags = flags;
+            m_SlotArray[i].SetSpOffset(spOffset);
+            m_SlotArray[i].SetStackSlotBase(spBase);
+            m_SlotArray[i].SetFlags(flags);
         }
     }
 
@@ -1153,9 +1153,9 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
         INT32 spOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
         GcSlotFlags flags = (GcSlotFlags) reader.Read(2);
 
-        m_SlotArray[i].Slot.Stack.SpOffset = spOffset;
-        m_SlotArray[i].Slot.Stack.Base = spBase;
-        m_SlotArray[i].Flags = flags;
+        m_SlotArray[i].SetSpOffset(spOffset);
+        m_SlotArray[i].SetStackSlotBase(spBase);
+        m_SlotArray[i].SetFlags(flags);
 
         UINT32 loopEnd = _min(m_NumSlots, MAX_PREDECODED_SLOTS);
         for(i++; i < loopEnd; i++)
@@ -1175,9 +1175,9 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
                 spOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
             }
 
-            m_SlotArray[i].Slot.Stack.SpOffset = spOffset;
-            m_SlotArray[i].Slot.Stack.Base = spBase;
-            m_SlotArray[i].Flags = flags;
+            m_SlotArray[i].SetSpOffset(spOffset);
+            m_SlotArray[i].SetStackSlotBase(spBase);
+            m_SlotArray[i].SetFlags(flags);
         }
     }
 
@@ -1195,7 +1195,7 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
 
         // Move the argument reader past the end of the table
 
-        GcSlotFlags flags = m_pLastSlot->Flags;
+        GcSlotFlags flags = m_pLastSlot->GetFlags();
 
         // Skip any remaining registers
 
@@ -1299,22 +1299,22 @@ const GcSlotDesc* GcSlotDecoder::GetSlotDesc(UINT32 slotIndex)
             {
                 // Decode the first register
                 UINT32 normRegNum = (UINT32) m_SlotReader.DecodeVarLengthUnsigned(REGISTER_ENCBASE);
-                m_pLastSlot->Slot.RegisterNumber = DENORMALIZE_REGISTER(normRegNum);
-                m_pLastSlot->Flags = (GcSlotFlags) m_SlotReader.Read(2);
+                m_pLastSlot->SetRegisterNumber(DENORMALIZE_REGISTER(normRegNum));
+                m_pLastSlot->SetFlags((GcSlotFlags) m_SlotReader.Read(2));
             }
             else
             {
-                if(m_pLastSlot->Flags)
+                if(m_pLastSlot->GetFlags())
                 {
                     UINT32 normRegNum = (UINT32) m_SlotReader.DecodeVarLengthUnsigned(REGISTER_ENCBASE);
-                    m_pLastSlot->Slot.RegisterNumber = DENORMALIZE_REGISTER(normRegNum);
-                    m_pLastSlot->Flags = (GcSlotFlags) m_SlotReader.Read(2);
+                    m_pLastSlot->SetRegisterNumber(DENORMALIZE_REGISTER(normRegNum));
+                    m_pLastSlot->SetFlags((GcSlotFlags) m_SlotReader.Read(2));
                 }
                 else
                 {
                     UINT32 normRegDelta = (UINT32) m_SlotReader.DecodeVarLengthUnsigned(REGISTER_DELTA_ENCBASE) + 1;
-                    UINT32 normRegNum = normRegDelta + NORMALIZE_REGISTER(m_pLastSlot->Slot.RegisterNumber);
-                    m_pLastSlot->Slot.RegisterNumber = DENORMALIZE_REGISTER(normRegNum);
+                    UINT32 normRegNum = normRegDelta + NORMALIZE_REGISTER(m_pLastSlot->GetRegisterNumber());
+                    m_pLastSlot->SetRegisterNumber(DENORMALIZE_REGISTER(normRegNum));
                 }
             }
         }
@@ -1327,26 +1327,26 @@ const GcSlotDesc* GcSlotDecoder::GetSlotDesc(UINT32 slotIndex)
             if((m_NumDecodedSlots == m_NumRegisters) || (m_NumDecodedSlots == GetNumTracked()))
             {
                 // Decode the first stack slot or first untracked slot
-                m_pLastSlot->Slot.Stack.Base = (GcStackSlotBase) m_SlotReader.Read(2);
+                m_pLastSlot->SetStackSlotBase((GcStackSlotBase) m_SlotReader.Read(2));
                 UINT32 normSpOffset = (INT32) m_SlotReader.DecodeVarLengthSigned(STACK_SLOT_ENCBASE);
-                m_pLastSlot->Slot.Stack.SpOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
-                m_pLastSlot->Flags = (GcSlotFlags) m_SlotReader.Read(2);
+                m_pLastSlot->SetSpOffset(DENORMALIZE_STACK_SLOT(normSpOffset));
+                m_pLastSlot->SetFlags((GcSlotFlags) m_SlotReader.Read(2));
             }
             else
             {
-                m_pLastSlot->Slot.Stack.Base = (GcStackSlotBase) m_SlotReader.Read(2);
+                m_pLastSlot->SetStackSlotBase((GcStackSlotBase) m_SlotReader.Read(2));
 
-                if(m_pLastSlot->Flags)
+                if(m_pLastSlot->GetFlags())
                 {
                     INT32 normSpOffset = (INT32) m_SlotReader.DecodeVarLengthSigned(STACK_SLOT_ENCBASE);
-                    m_pLastSlot->Slot.Stack.SpOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
-                    m_pLastSlot->Flags = (GcSlotFlags) m_SlotReader.Read(2);
+                    m_pLastSlot->SetSpOffset(DENORMALIZE_STACK_SLOT(normSpOffset));
+                    m_pLastSlot->SetFlags((GcSlotFlags) m_SlotReader.Read(2));
                 }
                 else
                 {
                     INT32 normSpOffsetDelta = (INT32) m_SlotReader.DecodeVarLengthUnsigned(STACK_SLOT_DELTA_ENCBASE);
-                    INT32 normSpOffset = normSpOffsetDelta + NORMALIZE_STACK_SLOT(m_pLastSlot->Slot.Stack.SpOffset);
-                    m_pLastSlot->Slot.Stack.SpOffset = DENORMALIZE_STACK_SLOT(normSpOffset);
+                    INT32 normSpOffset = normSpOffsetDelta + NORMALIZE_STACK_SLOT(m_pLastSlot->GetSpOffset());
+                    m_pLastSlot->SetSpOffset(DENORMALIZE_STACK_SLOT(normSpOffset));
                 }
             }
         }

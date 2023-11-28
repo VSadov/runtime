@@ -426,12 +426,53 @@ private:
 
 struct GcSlotDesc
 {
-    union
+private:
+    // [25 bits SpOffset/4 OR RegisterNumber ][2 bits StackSlotBase] [5 bits GcSlotFlags]
+    UINT32 m_data;
+
+public:
+    GcSlotFlags GetFlags() const
     {
-        UINT32 RegisterNumber;
-        GcStackSlot Stack;
-    } Slot;
-    GcSlotFlags Flags;
+        return (GcSlotFlags)(m_data & 0b00000000000000000000000000011111);
+    }
+    void SetFlags(GcSlotFlags flags)
+    {
+        m_data &= ~0b00000000000000000000000000011111;
+        m_data |= flags;
+    }
+
+    GcStackSlotBase GetStackSlotBase() const
+    {
+        return (GcStackSlotBase)((m_data >> 5) & 0b11);
+    }
+    void SetStackSlotBase(GcStackSlotBase base)
+    {
+        m_data &= ~0b00000000000000000000000001100000;
+        m_data |= (base << 5);
+    }
+
+    INT32 GetSpOffset() const
+    {
+        return ((INT32)m_data >> 5) & ~0b11;
+    }
+    void SetSpOffset(INT32 offset)
+    {
+        // assume that abs stack offset is 4-aligned and < (1 << 27)
+        _ASSERT(abs(offset) < (1 << 27));
+        _ASSERT((offset & 0b11) == 0);
+
+        m_data &= ~0b11111111111111111111111110000000;
+        m_data |= offset << 5;
+    }
+
+    UINT32 GetRegisterNumber() const
+    {
+        return GetSpOffset() >> 2;
+    }
+    void SetRegisterNumber(UINT32 regNum)
+    {
+        SetSpOffset(regNum << 2);
+    }
 };
 
 class GcSlotDecoder
@@ -674,12 +715,12 @@ private:
 
         if(slotIndex < slotDecoder.GetNumRegisters())
         {
-            UINT32 regNum = pSlot->Slot.RegisterNumber;
+            UINT32 regNum = pSlot->GetRegisterNumber();
             if( reportScratchSlots || !IsScratchRegister( regNum, pRD ) )
             {
                 ReportRegisterToGC(
                             regNum,
-                            pSlot->Flags,
+                            pSlot->GetFlags(),
                             pRD,
                             inputFlags,
                             pCallBack,
@@ -693,14 +734,14 @@ private:
         }
         else
         {
-            INT32 spOffset = pSlot->Slot.Stack.SpOffset;
-            GcStackSlotBase spBase = pSlot->Slot.Stack.Base;
+            INT32 spOffset = pSlot->GetSpOffset();
+            GcStackSlotBase spBase = pSlot->GetStackSlotBase();
             if( reportScratchSlots || !IsScratchStackSlot(spOffset, spBase, pRD) )
             {
                 ReportStackSlotToGC(
                             spOffset,
                             spBase,
-                            pSlot->Flags,
+                            pSlot->GetFlags(),
                             pRD,
                             inputFlags,
                             pCallBack,
