@@ -304,7 +304,7 @@ public:
             if(newRelPos > 0)
             {
                 size_t extraBits = (*m_pCurrent) << (numBits - newRelPos);
-                result ^= extraBits;
+                result |= extraBits;
             }
         }
         m_RelPos = newRelPos;
