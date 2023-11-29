@@ -503,7 +503,7 @@ public:
         return m_NumRegisters;
     }
 
-    const GcSlotDesc* GetSlotDesc(UINT32 slotIndex);
+    GcSlotDesc GetSlotDesc(UINT32 slotIndex);
 
 private:
     GcSlotDesc m_SlotArray[MAX_PREDECODED_SLOTS];
@@ -711,16 +711,16 @@ private:
                     )
     {
         _ASSERTE(slotIndex < slotDecoder.GetNumSlots());
-        const GcSlotDesc* pSlot = slotDecoder.GetSlotDesc(slotIndex);
+        GcSlotDesc slot = slotDecoder.GetSlotDesc(slotIndex);
 
         if(slotIndex < slotDecoder.GetNumRegisters())
         {
-            UINT32 regNum = pSlot->GetRegisterNumber();
+            UINT32 regNum = slot.GetRegisterNumber();
             if( reportScratchSlots || !IsScratchRegister( regNum, pRD ) )
             {
                 ReportRegisterToGC(
                             regNum,
-                            pSlot->GetFlags(),
+                            slot.GetFlags(),
                             pRD,
                             inputFlags,
                             pCallBack,
@@ -734,14 +734,15 @@ private:
         }
         else
         {
-            INT32 spOffset = pSlot->GetSpOffset();
-            GcStackSlotBase spBase = pSlot->GetStackSlotBase();
+            INT32 spOffset = slot.GetSpOffset();
+            _ASSERTE(spOffset < (1 << 15));
+            GcStackSlotBase spBase = slot.GetStackSlotBase();
             if( reportScratchSlots || !IsScratchStackSlot(spOffset, spBase, pRD) )
             {
                 ReportStackSlotToGC(
                             spOffset,
                             spBase,
-                            pSlot->GetFlags(),
+                            slot.GetFlags(),
                             pRD,
                             inputFlags,
                             pCallBack,

@@ -1275,13 +1275,13 @@ void GcSlotDecoder::DecodeSlotTable(BitStreamReader& reader)
     }
 }
 
-const GcSlotDesc* GcSlotDecoder::GetSlotDesc(UINT32 slotIndex)
+GcSlotDesc GcSlotDecoder::GetSlotDesc(UINT32 slotIndex)
 {
     _ASSERTE(slotIndex < m_NumSlots);
 
     if(slotIndex < MAX_PREDECODED_SLOTS)
     {
-        return &m_SlotArray[slotIndex];
+        return m_SlotArray[slotIndex];
     }
 
     _ASSERTE(m_NumDecodedSlots >= MAX_PREDECODED_SLOTS && m_NumDecodedSlots < m_NumSlots);
@@ -1354,7 +1354,7 @@ const GcSlotDesc* GcSlotDecoder::GetSlotDesc(UINT32 slotIndex)
         m_NumDecodedSlots++;
     }
 
-    return m_pLastSlot;
+    return *m_pLastSlot;
 }
 
 
