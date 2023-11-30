@@ -262,29 +262,26 @@ public:
         SUPPORTS_DAC;
 
         _ASSERTE( pBuffer != NULL );
+        size_t wordIndex = (size_t)dac_cast<TADDR>(pBuffer) & ~((size_t)sizeof(size_t) - 1);
+        size_t bitPos = (size_t)dac_cast<TADDR>(pBuffer) % sizeof(size_t) * 8/*BITS_PER_BYTE*/;
 
-        m_pCurrent = m_pBuffer = dac_cast<PTR_size_t>((size_t)dac_cast<TADDR>(pBuffer) & ~((size_t)sizeof(size_t)-1));
-        m_RelPos = m_InitialRelPos = (int)((size_t)dac_cast<TADDR>(pBuffer) % sizeof(size_t)) * 8/*BITS_PER_BYTE*/;
+        m_initialBitPtr = m_currentBitPtr = wordIndex * sizeof(size_t) + bitPos;
     }
 
     BitStreamReader(const BitStreamReader& other)
     {
         SUPPORTS_DAC;
 
-        m_pBuffer = other.m_pBuffer;
-        m_InitialRelPos = other.m_InitialRelPos;
-        m_pCurrent = other.m_pCurrent;
-        m_RelPos = other.m_RelPos;
+        m_initialBitPtr = other.m_initialBitPtr;
+        m_currentBitPtr = other.m_currentBitPtr;
     }
 
     const BitStreamReader& operator=(const BitStreamReader& other)
     {
         SUPPORTS_DAC;
 
-        m_pBuffer = other.m_pBuffer;
-        m_InitialRelPos = other.m_InitialRelPos;
-        m_pCurrent = other.m_pCurrent;
-        m_RelPos = other.m_RelPos;
+        m_initialBitPtr = other.m_initialBitPtr;
+        m_currentBitPtr = other.m_currentBitPtr;
         return *this;
     }
 
@@ -295,20 +292,17 @@ public:
 
         _ASSERTE(numBits > 0 && numBits <= BITS_PER_SIZE_T);
 
-        size_t result = (*m_pCurrent) >> m_RelPos;
-        int newRelPos = m_RelPos + numBits;
-        if(newRelPos >= BITS_PER_SIZE_T)
+        int shift = (m_currentBitPtr & (BITS_PER_SIZE_T - 1));
+        size_t result = ((size_t*)0)[m_currentBitPtr / BITS_PER_SIZE_T] >> shift;
+        m_currentBitPtr += numBits;
+
+        int bitsShifted = BITS_PER_SIZE_T - shift;
+        if (bitsShifted < numBits)
         {
-            m_pCurrent++;
-            newRelPos -= BITS_PER_SIZE_T;
-            if(newRelPos > 0)
-            {
-                size_t extraBits = (*m_pCurrent) << (numBits - newRelPos);
-                result |= extraBits;
-            }
+            result |= ((size_t*)0)[m_currentBitPtr / BITS_PER_SIZE_T] << bitsShifted;
         }
-        m_RelPos = newRelPos;
-        result &= SAFE_SHIFT_LEFT(1, numBits) - 1;
+
+        result &= (size_t)-1 >> (BITS_PER_SIZE_T - numBits);
         return result;
     }
 
@@ -318,27 +312,20 @@ public:
     {
         SUPPORTS_DAC;
 
-        size_t result = (*m_pCurrent) & (((size_t)1) << m_RelPos);
-        if(++m_RelPos == BITS_PER_SIZE_T)
-        {
-            m_pCurrent++;
-            m_RelPos = 0;
-        }
-        return result;
+        size_t mask = (size_t)1 << (m_currentBitPtr & (BITS_PER_SIZE_T - 1));
+        return ((size_t*)0)[m_currentBitPtr++ / BITS_PER_SIZE_T] & mask;
     }
-
 
     __forceinline size_t GetCurrentPos()
     {
         SUPPORTS_DAC;
-        return (size_t) ((m_pCurrent - m_pBuffer) * BITS_PER_SIZE_T + m_RelPos - m_InitialRelPos);
+
+        return m_currentBitPtr - m_initialBitPtr;
     }
 
     __forceinline void SetCurrentPos( size_t pos )
     {
-        size_t adjPos = pos + m_InitialRelPos;
-        m_pCurrent = m_pBuffer + adjPos / BITS_PER_SIZE_T;
-        m_RelPos = (int)(adjPos % BITS_PER_SIZE_T);
+        m_currentBitPtr = m_initialBitPtr + pos;
         _ASSERTE(GetCurrentPos() == pos);
     }
 
@@ -346,28 +333,19 @@ public:
     {
         SUPPORTS_DAC;
 
-        SetCurrentPos(GetCurrentPos() + numBitsToSkip);
+        m_currentBitPtr += numBitsToSkip;
     }
 
     __forceinline void AlignUpToByte()
     {
-        if(m_RelPos <= BITS_PER_SIZE_T - 8)
-        {
-            m_RelPos = (m_RelPos + 7) & ~7;
-        }
-        else
-        {
-            m_RelPos = 0;
-            m_pCurrent++;
-        }
+        m_currentBitPtr = (m_currentBitPtr + 7) & ~7;
     }
 
     __forceinline size_t ReadBitAtPos( size_t pos )
     {
-        size_t adjPos = pos + m_InitialRelPos;
-        size_t* ptr = m_pBuffer + adjPos / BITS_PER_SIZE_T;
-        int relPos = (int)(adjPos % BITS_PER_SIZE_T);
-        return (*ptr) & (((size_t)1) << relPos);
+        size_t adjPos = m_initialBitPtr + pos;
+        size_t mask = (size_t)1 << (adjPos & (BITS_PER_SIZE_T - 1));
+        return ((size_t*)0)[adjPos / BITS_PER_SIZE_T] & mask;
     }
 
 
@@ -418,10 +396,8 @@ public:
     }
 
 private:
-    PTR_size_t m_pBuffer;
-    int m_InitialRelPos;
-    PTR_size_t m_pCurrent;
-    int m_RelPos;
+    size_t m_initialBitPtr;
+    size_t m_currentBitPtr;
 };
 
 struct GcSlotDesc
