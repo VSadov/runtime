@@ -122,7 +122,8 @@ public:
                            REGDISPLAY * pRegisterSet,
                            void * pfnEnumCallback,
                            void * pvCallbackData,
-                           bool   isActiveStackFrame);
+                           bool   isActiveStackFrame,
+                           bool   isActiveOnReturnLocation);
 
     static void EnumGcRefsInRegionConservatively(PTR_RtuObjectRef pLowerBound,
                                                  PTR_RtuObjectRef pUpperBound,

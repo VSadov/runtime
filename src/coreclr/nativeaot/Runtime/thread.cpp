@@ -429,6 +429,7 @@ void Thread::GcScanRootsWorker(void * pfnEnumCallback, void * pvCallbackData, St
     PTR_RtuObjectRef pHijackedReturnValue = NULL;
     GCRefKind        returnValueKind      = GCRK_Unknown;
 
+
     if (frameIterator.GetHijackedReturnValueLocation(&pHijackedReturnValue, &returnValueKind))
     {
         GCRefKind reg0Kind = ExtractReg0ReturnKind(returnValueKind);
@@ -493,13 +494,17 @@ void Thread::GcScanRootsWorker(void * pfnEnumCallback, void * pvCallbackData, St
 
             if (!frameIterator.ShouldSkipRegularGcReporting())
             {
+                bool isActiveStackFrame = frameIterator.IsActiveStackFrame();
+                bool isActiveOnReturnLocation = isActiveStackFrame && IsStateSet(TSF_AtiveOnReturnLocation);
+
                 RedhawkGCInterface::EnumGcRefs(frameIterator.GetCodeManager(),
                                                frameIterator.GetMethodInfo(),
                                                frameIterator.GetEffectiveSafePointAddress(),
                                                frameIterator.GetRegisterSet(),
                                                pfnEnumCallback,
                                                pvCallbackData,
-                                               frameIterator.IsActiveStackFrame());
+                                               isActiveStackFrame,
+                                               isActiveOnReturnLocation);
             }
 
             // Each enumerated frame (including the first one) may have an associated stack range we need to
@@ -658,14 +663,24 @@ void Thread::HijackCallback(NATIVE_CONTEXT* pThreadContext, void* pThreadToHijac
 
     // we may be able to do GC stack walk right where the threads is now,
     // as long as the location is a GC safe point.
+    bool onReturnLocation = false;
     ICodeManager* codeManager = runtime->GetCodeManagerForAddress(pvAddress);
     if (runtime->IsConservativeStackReportingEnabled() ||
-        codeManager->IsSafePoint(pvAddress))
+        codeManager->IsSafePoint(pvAddress, &onReturnLocation))
     {
         // we may not be able to unwind in some locations, such as epilogs.
         // such locations should not contain safe points.
         // when scanning conservatively we do not need to unwind
         ASSERT(codeManager->IsUnwindable(pvAddress) || runtime->IsConservativeStackReportingEnabled());
+
+        if (onReturnLocation)
+        {
+            pThread->SetState(TSF_AtiveOnReturnLocation);
+        }
+        else
+        {
+            pThread->ClearState(TSF_AtiveOnReturnLocation);
+        }
 
         // if we are not given a thread to hijack
         // perform in-line wait on the current thread

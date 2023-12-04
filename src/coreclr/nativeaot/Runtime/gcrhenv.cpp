@@ -314,7 +314,8 @@ void RedhawkGCInterface::EnumGcRefs(ICodeManager * pCodeManager,
                                     REGDISPLAY * pRegisterSet,
                                     void * pfnEnumCallback,
                                     void * pvCallbackData,
-                                    bool   isActiveStackFrame)
+                                    bool   isActiveStackFrame,
+                                    bool   isActiveOnReturnLocation)
 {
     EnumGcRefContext ctx;
     ctx.pCallback = EnumGcRefsCallback;
@@ -326,7 +327,8 @@ void RedhawkGCInterface::EnumGcRefs(ICodeManager * pCodeManager,
                              safePointAddress,
                              pRegisterSet,
                              &ctx,
-                             isActiveStackFrame);
+                             isActiveStackFrame,
+                             isActiveOnReturnLocation);
 }
 
 // static

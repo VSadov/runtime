@@ -155,6 +155,8 @@ public:
                                                     // 
                                                     // On Unix this is an optimization to not queue up more signals when one is
                                                     // still being processed.
+
+        TSF_AtiveOnReturnLocation = 0x00000200,     // Thread is interrupted on a return location.
     };
 private:
 

@@ -346,7 +346,7 @@ uint32_t CoffNativeCodeManager::GetCodeOffset(MethodInfo* pMethodInfo, PTR_VOID 
     return (uint32_t)(dac_cast<TADDR>(address) - methodStartAddress);
 }
 
-bool CoffNativeCodeManager::IsSafePoint(PTR_VOID pvAddress)
+bool CoffNativeCodeManager::IsSafePoint(PTR_VOID pvAddress, bool* onReturnLocation)
 {
     MethodInfo pMethodInfo;
     if (!FindMethodInfo(pvAddress, &pMethodInfo))
@@ -367,7 +367,10 @@ bool CoffNativeCodeManager::IsSafePoint(PTR_VOID pvAddress)
         return true;
 
     if (decoder.IsSafePoint())
+    {
+        *onReturnLocation = true;
         return true;
+    }
 
     return false;
 }
@@ -376,19 +379,16 @@ void CoffNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
                                        PTR_VOID        safePointAddress,
                                        REGDISPLAY *    pRegisterSet,
                                        GCEnumContext * hCallback,
-                                       bool            isActiveStackFrame)
+                                       bool            isActiveStackFrame,
+                                       bool            isActiveOnReturnLocation)
 {
     PTR_UInt8 gcInfo;
     uint32_t codeOffset = GetCodeOffset(pMethodInfo, safePointAddress, &gcInfo);
 
-    if (!isActiveStackFrame)
+    if (!isActiveStackFrame || isActiveOnReturnLocation)
     {
-        // If we are not in the active method, we are currently pointing
-        // to the return address. That may not be reachable after a call (if call does not return)
-        // or reachable via a jump and thus have a different live set.
-        // Therefore we simply adjust the offset to inside of call instruction.
-        // NOTE: The GcInfoDecoder depends on this; if you change it, you must
-        // revisit the GcInfoEncoder/Decoder
+        // For historical reasons GC decoder expects offsets with -1 skew when
+        // queried about return locations, so we must adjust accordingly.
         codeOffset--;
     }
 
@@ -397,21 +397,6 @@ void CoffNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
         GcInfoDecoderFlags(DECODE_GC_LIFETIMES | DECODE_SECURITY_OBJECT | DECODE_VARARG),
         codeOffset
         );
-
-    if (isActiveStackFrame)
-    {
-        // TODO: VS find a way to pass the need to adjust from IsSafePoint to here
-        if (decoder.IsSafePoint())
-        {
-            codeOffset--;
-        }
-
-        decoder = GcInfoDecoder(
-            GCInfoToken(gcInfo),
-            GcInfoDecoderFlags(DECODE_GC_LIFETIMES | DECODE_SECURITY_OBJECT | DECODE_VARARG),
-            codeOffset
-        );
-    }
 
     ICodeManagerFlags flags = (ICodeManagerFlags)0;
     if (((CoffNativeMethodInfo *)pMethodInfo)->executionAborted)

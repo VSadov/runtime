@@ -67,13 +67,14 @@ public:
 
     uint32_t GetCodeOffset(MethodInfo * pMethodInfo, PTR_VOID address, /*out*/ PTR_UInt8* gcInfo);
 
-    bool IsSafePoint(PTR_VOID pvAddress);
+    bool IsSafePoint(PTR_VOID pvAddress, bool* onReturnLocation);
 
     void EnumGcRefs(MethodInfo *    pMethodInfo,
                     PTR_VOID        safePointAddress,
                     REGDISPLAY *    pRegisterSet,
                     GCEnumContext * hCallback,
-                    bool            isActiveStackFrame);
+                    bool            isActiveStackFrame,
+                    bool            isActiveOnReturnLocation);
 
     bool UnwindStackFrame(MethodInfo *    pMethodInfo,
                           uint32_t        flags,

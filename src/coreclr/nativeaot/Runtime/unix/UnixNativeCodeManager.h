@@ -51,7 +51,8 @@ public:
                     PTR_VOID        safePointAddress,
                     REGDISPLAY *    pRegisterSet,
                     GCEnumContext * hCallback,
-                    bool            isActiveStackFrame);
+                    bool            isActiveStackFrame,
+                    bool            isActiveOnReturnLocation);
 
     bool UnwindStackFrame(MethodInfo *    pMethodInfo,
                           uint32_t        flags,
