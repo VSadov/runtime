@@ -361,6 +361,12 @@ bool GcInfoDecoder::IsInterruptible()
     return m_IsInterruptible;
 }
 
+bool GcInfoDecoder::IsSafePoint()
+{
+    _ASSERTE(m_Flags & (DECODE_INTERRUPTIBILITY | DECODE_GC_LIFETIMES));
+    return m_SafePointIndex != m_NumSafePoints;
+}
+
 bool GcInfoDecoder::HasMethodDescGenericsInstContext()
 {
     _ASSERTE( m_Flags & DECODE_GENERICS_INST_CONTEXT );

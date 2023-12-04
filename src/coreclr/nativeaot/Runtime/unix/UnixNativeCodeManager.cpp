@@ -197,7 +197,13 @@ bool UnixNativeCodeManager::IsSafePoint(PTR_VOID pvAddress)
         codeOffset
     );
 
-    return decoder.IsInterruptible();
+    if (decoder.IsInterruptible())
+        return true;
+
+    if (decoder.IsSafePoint())
+        return true;
+
+    return false;
 }
 
 void UnixNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
@@ -225,6 +231,21 @@ void UnixNativeCodeManager::EnumGcRefs(MethodInfo *    pMethodInfo,
         GcInfoDecoderFlags(DECODE_GC_LIFETIMES | DECODE_SECURITY_OBJECT | DECODE_VARARG),
         codeOffset
     );
+
+    if (isActiveStackFrame)
+    {
+        // TODO: VS find a way to pass the need to adjust the offset from IsSafePoint to here
+        if (decoder.IsSafePoint())
+        {
+            codeOffset--;
+        }
+
+        decoder = GcInfoDecoder(
+            GCInfoToken(gcInfo),
+            GcInfoDecoderFlags(DECODE_GC_LIFETIMES | DECODE_SECURITY_OBJECT | DECODE_VARARG),
+            codeOffset
+        );
+    }
 
     ICodeManagerFlags flags = (ICodeManagerFlags)0;
     if (((UnixNativeMethodInfo*)pMethodInfo)->executionAborted)
