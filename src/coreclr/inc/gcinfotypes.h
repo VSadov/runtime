@@ -58,7 +58,7 @@ inline UINT32 CeilOfLog2(size_t x)
     _BitScanReverse64(&result, (unsigned long)x);
     return (UINT32)result;
 #else // _MSC_VER
-    return BITS_PER_SIZE_T - (UINT32)__builtin_clzl((unsigned long)x);
+    return BITS_PER_SIZE_T - 1 - (UINT32)__builtin_clzl((unsigned long)x);
 #endif // _MSC_VER
 #else // TARGET_64BIT
 #ifdef _MSC_VER
@@ -66,7 +66,7 @@ inline UINT32 CeilOfLog2(size_t x)
     _BitScanReverse(&result, (unsigned int)x);
     return (UINT32)result;
 #else // _MSC_VER
-    return BITS_PER_SIZE_T - (UINT32)__builtin_clz((unsigned int)x);
+    return BITS_PER_SIZE_T - 1 - (UINT32)__builtin_clz((unsigned int)x);
 #endif // _MSC_VER
 #endif
 }
