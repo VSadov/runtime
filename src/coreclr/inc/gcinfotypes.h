@@ -58,7 +58,10 @@ inline UINT32 CeilOfLog2(size_t x)
     _BitScanReverse64(&result, (unsigned long)x);
     return (UINT32)result;
 #else // _MSC_VER
-    return BITS_PER_SIZE_T - 1 - (UINT32)__builtin_clzl((unsigned long)x);
+    // LZCNT returns index starting from MSB, whereas BSR gives the index from LSB.
+    // 63 ^ BSR here is equivalent to 63 - BSR since the BSR result is always between 0 and 63.
+    // This saves an instruction, as subtraction from constant requires either MOV/SUB or NEG/ADD.
+    return (UINT32)63 ^ (UINT32)__builtin_clzl((unsigned long)x);
 #endif // _MSC_VER
 #else // TARGET_64BIT
 #ifdef _MSC_VER
@@ -66,7 +69,7 @@ inline UINT32 CeilOfLog2(size_t x)
     _BitScanReverse(&result, (unsigned int)x);
     return (UINT32)result;
 #else // _MSC_VER
-    return BITS_PER_SIZE_T - 1 - (UINT32)__builtin_clz((unsigned int)x);
+    return (UINT32)31 ^ (UINT32)__builtin_clz((unsigned int)x);
 #endif // _MSC_VER
 #endif
 }
