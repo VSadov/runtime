@@ -180,14 +180,21 @@ public:
 
         unsigned short rpdIsThis : 1;                       // is it the 'this' pointer
         unsigned short rpdCall : 1;                         // is this a true call site?
-        unsigned short : 1;                                 // Padding bit, so next two start on a byte boundary
+        unsigned short rpdTailCall : 1;                     // is this a tail-call?
         unsigned short rpdCallGCrefRegs : CNT_CALL_GC_REGS; // Callee-saved and return registers containing GC pointers.
         unsigned short rpdCallByrefRegs : CNT_CALL_GC_REGS; // Callee-saved and return registers containing byrefs.
 
 #ifndef JIT32_GCENCODER
         bool rpdIsCallInstr()
         {
-            return rpdCall && rpdCallInstrSize != 0;
+            assert(!rpdCall || rpdCallInstrSize != 0);
+            return rpdCall;
+        }
+
+        bool rpdIsTailCallInstr()
+        {
+            return false;
+            // return rpdTailCall != 0;
         }
 #endif
     };

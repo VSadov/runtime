@@ -517,12 +517,15 @@ void GCCoverageInfo::SprinkleBreakpoints(
         AFTERCALL:
     */
 
+    volatile InstructionType prevInstructionType = InstructionType::Unknown;
+    InstructionType instructionType = InstructionType::Unknown;
+
     while (cur < codeEnd)
     {
         _ASSERTE(*cur != INTERRUPT_INSTR && *cur != INTERRUPT_INSTR_CALL);
 
         MethodDesc* targetMD = NULL;
-        InstructionType instructionType;
+        prevInstructionType = instructionType;
         size_t len = disassembler.DisassembleInstruction(cur, codeEnd - cur, &instructionType);
 
 #ifdef TARGET_AMD64
@@ -538,6 +541,7 @@ void GCCoverageInfo::SprinkleBreakpoints(
             LOG((LF_JIT, LL_WARNING, "invalid instruction at %p (possibly start of switch table)\n", cur));
             cur = rangeEnum.SkipToNextRange();
             prevDirectCallTargetMD = NULL;
+            prevInstructionType = InstructionType::Unknown;
             fSawPossibleSwitch = false;
             continue;
         }
@@ -601,6 +605,25 @@ void GCCoverageInfo::SprinkleBreakpoints(
         {
             *(cur + writeableOffset) = INTERRUPT_INSTR;
         }
+        //else if (safePointDecoder.IsSafePoint((UINT32)dwRelOffset))
+        //{
+        //    _ASSERTE((prevInstructionType == InstructionType::Call_IndirectUnconditional) ||
+        //        (prevInstructionType == InstructionType::Call_DirectUnconditional));
+
+        //    if (prevInstructionType == InstructionType::Call_IndirectUnconditional)
+        //    {
+        //        // *(cur + writeableOffset) = INTERRUPT_INSTR;
+        //    }
+        //    else if (prevInstructionType == InstructionType::Call_DirectUnconditional)
+        //    {
+        //        // *(cur + writeableOffset) = INTERRUPT_INSTR;
+        //    }
+        //    else
+        //    {
+        //        printf(".");
+        //    }
+        //    //      *(cur + writeableOffset) = INTERRUPT_INSTR;
+        //}
 
 #ifdef TARGET_X86
         // we will whack every instruction in the prolog and epilog to make certain

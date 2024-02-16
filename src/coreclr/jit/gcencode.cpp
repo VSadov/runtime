@@ -4544,7 +4544,7 @@ void GCInfo::gcMakeRegPtrTable(
             for (regPtrDsc* genRegPtrTemp = gcRegPtrList; genRegPtrTemp != nullptr;
                  genRegPtrTemp            = genRegPtrTemp->rpdNext)
             {
-                if (genRegPtrTemp->rpdArg && genRegPtrTemp->rpdIsCallInstr())
+                if (genRegPtrTemp->rpdIsCallInstr() && !genRegPtrTemp->rpdIsTailCallInstr())
                 {
                     numCallSites++;
                 }
@@ -4584,8 +4584,8 @@ void GCInfo::gcMakeRegPtrTable(
                 gcInfoRecordGCRegStateChange(gcInfoEncoder, mode, genRegPtrTemp->rpdOffs, regMask, GC_SLOT_DEAD,
                                              byrefRegMask, nullptr);
 
-                // Also remember the call site.
-                if (mode == MAKE_REG_PTR_MODE_DO_WORK)
+                // Also remember the call site if it is an actual, non tail-calling call.
+                if (mode == MAKE_REG_PTR_MODE_DO_WORK && !genRegPtrTemp->rpdIsTailCallInstr())
                 {
                     assert(pCallSites != nullptr && pCallSiteSizes != nullptr);
                     pCallSites[callSiteNum]     = callOffset;

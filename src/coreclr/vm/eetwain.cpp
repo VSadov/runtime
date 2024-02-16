@@ -1499,8 +1499,8 @@ bool EECodeManager::IsGcSafe( EECodeInfo     *pCodeInfo,
     if (gcInfoDecoder.IsInterruptible())
         return true;
 
-    if (gcInfoDecoder.IsSafePoint())
-        return true;
+    //if (gcInfoDecoder.IsSafePoint())
+    //    return true;
 
     return false;
 }

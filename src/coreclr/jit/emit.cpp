@@ -8998,6 +8998,7 @@ void emitter::emitGCregLiveSet(GCtype gcType, regMaskTP regMask, BYTE* addr, boo
     regPtrNext->rpdOffs            = emitCurCodeOffs(addr);
     regPtrNext->rpdArg             = false;
     regPtrNext->rpdCall            = false;
+    regPtrNext->rpdTailCall        = false;
     regPtrNext->rpdIsThis          = isThis;
     regPtrNext->rpdCompiler.rpdAdd = (regMaskSmall)regMask;
     regPtrNext->rpdCompiler.rpdDel = 0;
@@ -9027,6 +9028,7 @@ void emitter::emitGCregDeadSet(GCtype gcType, regMaskTP regMask, BYTE* addr)
 
     regPtrNext->rpdOffs            = emitCurCodeOffs(addr);
     regPtrNext->rpdCall            = false;
+    regPtrNext->rpdTailCall        = false;
     regPtrNext->rpdIsThis          = false;
     regPtrNext->rpdArg             = false;
     regPtrNext->rpdCompiler.rpdAdd = 0;
@@ -9398,6 +9400,7 @@ void emitter::emitGCvarLiveUpd(int offs, int varNum, GCtype gcType, BYTE* addr D
             regPtrNext->rpdOffs   = emitCurCodeOffs(addr);
             regPtrNext->rpdArg    = true;
             regPtrNext->rpdCall   = false;
+            regPtrNext->rpdTailCall = false;
             noway_assert(FitsIn<unsigned short>(offs));
             regPtrNext->rpdPtrArg  = (unsigned short)offs;
             regPtrNext->rpdArgType = (unsigned short)GCInfo::rpdARG_PUSH;
@@ -9887,7 +9890,7 @@ void emitter::emitStackPushN(BYTE* addr, unsigned count)
  *  Record a pop of the given number of dwords from the stack.
  */
 
-void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count)
+void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count, bool isTailCall)
 {
     assert(emitCurStackLvl / sizeof(int) >= count);
     assert(!isCall || callInstrSize > 0);
@@ -9908,15 +9911,13 @@ void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize,
         }
         else
         {
-            emitStackPopLargeStk(addr, isCall, callInstrSize, count);
+            emitStackPopLargeStk(addr, isCall, isTailCall, callInstrSize, count);
         }
 
         emitCurStackLvl -= count * sizeof(int);
     }
     else
     {
-        assert(isCall);
-
         // For the general encoder we do the call below always when it's a call, to ensure that the call is
         // recorded (when we're doing the ptr reg map for a non-fully-interruptible method).
         if (emitFullGCinfo
@@ -9925,7 +9926,7 @@ void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize,
 #endif // JIT32_GCENCODER
                 )
         {
-            emitStackPopLargeStk(addr, isCall, callInstrSize, 0);
+            emitStackPopLargeStk(addr, isCall, isTailCall, callInstrSize, 0);
         }
     }
 }
@@ -9966,6 +9967,7 @@ void emitter::emitStackPushLargeStk(BYTE* addr, GCtype gcType, unsigned count)
                 regPtrNext->rpdOffs = emitCurCodeOffs(addr);
                 regPtrNext->rpdArg  = true;
                 regPtrNext->rpdCall = false;
+                regPtrNext->rpdTailCall = false;
                 if (level.IsOverflow() || !FitsIn<unsigned short>(level.Value()))
                 {
                     IMPL_LIMITATION("Too many/too big arguments to encode GC information");
@@ -9990,7 +9992,7 @@ void emitter::emitStackPushLargeStk(BYTE* addr, GCtype gcType, unsigned count)
  *  map.
  */
 
-void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count)
+void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, bool isTailCall, unsigned char callInstrSize, unsigned count)
 {
     assert(emitIssuing);
 
@@ -10080,11 +10082,12 @@ void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callIn
     // More detail:
     // _cdecl calls accomplish this popping via a post-call-instruction SP adjustment.
     // The "rpdCall" field below should be interpreted as "the instruction accomplishes
-    // call-related popping, even if it's not itself a call".  Therefore, we don't just
-    // use the "isCall" input argument, which means that the instruction actually is a call --
-    // we use the OR of "isCall" or the "pops more than one value."
-
+    // call-related popping, even if it's not itself a call".
+    // 
+    // tail calls may effectively pop multiple values as well, but do not need to be recorded as call sites.
+    
     bool isCallRelatedPop = (argRecCnt.Value() > 1);
+    assert(!isCallRelatedPop || isCall);
 
     /* Allocate a new ptr arg entry and fill it in */
 
@@ -10092,13 +10095,12 @@ void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callIn
     regPtrNext->rpdGCtype = GCT_GCREF; // Pops need a non-0 value (??)
 
     regPtrNext->rpdOffs = emitCurCodeOffs(addr);
-    regPtrNext->rpdCall = (isCall || isCallRelatedPop);
+    regPtrNext->rpdCall = isCall;
+    regPtrNext->rpdTailCall = isTailCall;
 #ifndef JIT32_GCENCODER
-    if (regPtrNext->rpdCall)
-    {
-        assert(isCall || callInstrSize == 0);
-        regPtrNext->rpdCallInstrSize = callInstrSize;
-    }
+    // calls and only calls record instruction size
+    assert(isCall == (callInstrSize != 0));
+    regPtrNext->rpdCallInstrSize = callInstrSize;
 #endif
     regPtrNext->rpdCallGCrefRegs = gcrefRegs;
     regPtrNext->rpdCallByrefRegs = byrefRegs;
@@ -10108,7 +10110,7 @@ void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callIn
 }
 
 /*****************************************************************************
- *  For caller-pop arguments, we report the arguments as pending arguments.
+ *  For callee-pop arguments, we report the arguments as pending arguments.
  *  However, any GC arguments are now dead, so we need to report them
  *  as non-GC.
  */
@@ -10190,7 +10192,8 @@ void emitter::emitStackKillArgs(BYTE* addr, unsigned count, unsigned char callIn
         /* Now that ptr args have been marked as non-ptrs, we need to record
            the call itself as one that has no arguments. */
 
-        emitStackPopLargeStk(addr, true, callInstrSize, 0);
+        // this is a call, but not a tail call.
+        emitStackPopLargeStk(addr, true, false, callInstrSize, 0);
     }
 }
 
