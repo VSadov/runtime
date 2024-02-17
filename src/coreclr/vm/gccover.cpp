@@ -267,6 +267,14 @@ void ReplaceInstrAfterCall(PBYTE instrToReplace, MethodDesc* callMD)
     _ASSERTE(IsValidReturnKind(returnKind));
 
     bool ispointerKind = IsPointerReturnKind(returnKind);
+
+    // if (ispointerKind)
+    {
+        *instrToReplace = INTERRUPT_INSTR;
+    }
+
+    return;
+
 #ifdef TARGET_ARM
     size_t instrLen = GetARMInstructionLength(instrToReplace);
     bool protectReturn = ispointerKind;
@@ -539,7 +547,7 @@ void GCCoverageInfo::SprinkleBreakpoints(
         {
         case InstructionType::Call_IndirectUnconditional:
 #ifdef TARGET_AMD64
-            if(!safePointDecoder.AreSafePointsInterruptible() && 
+            if(/* !safePointDecoder.AreSafePointsInterruptible() && */
                 safePointDecoder.IsSafePoint((UINT32)(cur + len - codeStart + regionOffsetAdj)))
 #endif
             {
@@ -547,11 +555,15 @@ void GCCoverageInfo::SprinkleBreakpoints(
             }
             break;
 
+          //case InstructionType::Call_IndirectUnconditional:
+          //     targetMD = (MethodDesc*)1;
+          //  break;
+
         case InstructionType::Call_DirectUnconditional:
             if(fGcStressOnDirectCalls.val(CLRConfig::INTERNAL_GcStressOnDirectCalls))
             {
 #ifdef TARGET_AMD64
-                if(!safePointDecoder.AreSafePointsInterruptible() &&
+                if(/* !safePointDecoder.AreSafePointsInterruptible() && */
                    safePointDecoder.IsSafePoint((UINT32)(cur + len - codeStart + regionOffsetAdj)))
 #endif
                 {
@@ -590,12 +602,12 @@ void GCCoverageInfo::SprinkleBreakpoints(
         _ASSERTE(FitsIn<DWORD>(dwRelOffset));
         if (codeMan->IsGcSafe(&codeInfo, static_cast<DWORD>(dwRelOffset)))
         {
-            *(cur + writeableOffset) = INTERRUPT_INSTR;
+            // *(cur + writeableOffset) = INTERRUPT_INSTR;
         }
         else if (safePointDecoder.AreSafePointsInterruptible() &&
             safePointDecoder.IsSafePoint((UINT32)dwRelOffset))
         {
-            *(cur + writeableOffset) = INTERRUPT_INSTR;
+            // *(cur + writeableOffset) = INTERRUPT_INSTR;
         }
 
 #ifdef TARGET_X86
