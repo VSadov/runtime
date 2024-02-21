@@ -2859,6 +2859,9 @@ bool emitter::emitNoGChelper(CorInfoHelpFunc helpFunc)
         case CORINFO_HELP_VALIDATE_INDIRECT_CALL:
             return true;
 
+        case CORINFO_HELP_FAIL_FAST:
+            return true;
+
         default:
             return false;
     }
@@ -9887,7 +9890,7 @@ void emitter::emitStackPushN(BYTE* addr, unsigned count)
  *  Record a pop of the given number of dwords from the stack.
  */
 
-void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count)
+void emitter::emitStackPop(BYTE* addr, bool isCall, bool isSafepoint, unsigned char callInstrSize, unsigned count)
 {
     assert(emitCurStackLvl / sizeof(int) >= count);
     assert(!isCall || callInstrSize > 0);
@@ -9908,7 +9911,7 @@ void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize,
         }
         else
         {
-            emitStackPopLargeStk(addr, isCall, callInstrSize, count);
+            emitStackPopLargeStk(addr, isCall, isSafepoint, callInstrSize, count);
         }
 
         emitCurStackLvl -= count * sizeof(int);
@@ -9925,7 +9928,7 @@ void emitter::emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize,
 #endif // JIT32_GCENCODER
                 )
         {
-            emitStackPopLargeStk(addr, isCall, callInstrSize, 0);
+            emitStackPopLargeStk(addr, isCall, isSafepoint, callInstrSize, 0);
         }
     }
 }
@@ -9990,7 +9993,7 @@ void emitter::emitStackPushLargeStk(BYTE* addr, GCtype gcType, unsigned count)
  *  map.
  */
 
-void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count)
+void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, bool isSafepoint, unsigned char callInstrSize, unsigned count)
 {
     assert(emitIssuing);
 
@@ -10096,6 +10099,7 @@ void emitter::emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callIn
 #ifndef JIT32_GCENCODER
     if (regPtrNext->rpdCall)
     {
+        regPtrNext->rpdSp = isSafepoint;
         assert(isCall || callInstrSize == 0);
         regPtrNext->rpdCallInstrSize = callInstrSize;
     }
@@ -10190,7 +10194,7 @@ void emitter::emitStackKillArgs(BYTE* addr, unsigned count, unsigned char callIn
         /* Now that ptr args have been marked as non-ptrs, we need to record
            the call itself as one that has no arguments. */
 
-        emitStackPopLargeStk(addr, true, callInstrSize, 0);
+        emitStackPopLargeStk(addr, true, /*isSafepoint*/ false, callInstrSize, 0);
     }
 }
 

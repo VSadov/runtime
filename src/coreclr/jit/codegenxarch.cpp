@@ -6270,22 +6270,36 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
     emitAttr              retSize       = EA_PTRSIZE;
     emitAttr              secondRetSize = EA_UNKNOWN;
 
-    if (call->HasMultiRegRetVal())
-    {
-        retSize       = emitTypeSize(retTypeDesc->GetReturnRegType(0));
-        secondRetSize = emitTypeSize(retTypeDesc->GetReturnRegType(1));
-    }
-    else
-    {
-        assert(!varTypeIsStruct(call));
+    //bool isSafePoint = !call->IsUnmanaged();
+    //isSafePoint &= !call->IsVirtualStub();
 
-        if (call->gtType == TYP_REF)
+    //if (call->IsVirtualStub())
+    //{
+    //    printf("#");
+    //}
+
+    bool isSafePoint = true;
+
+    // unused values are of no interest to GC.
+    if (!call->IsUnusedValue())
+    {
+        if (call->HasMultiRegRetVal())
         {
-            retSize = EA_GCREF;
+            retSize       = emitTypeSize(retTypeDesc->GetReturnRegType(0));
+            secondRetSize = emitTypeSize(retTypeDesc->GetReturnRegType(1));
         }
-        else if (call->gtType == TYP_BYREF)
+        else
         {
-            retSize = EA_BYREF;
+            assert(!varTypeIsStruct(call));
+
+            if (call->gtType == TYP_REF)
+            {
+                retSize = EA_GCREF;
+            }
+            else if (call->gtType == TYP_BYREF)
+            {
+                retSize = EA_BYREF;
+            }
         }
     }
 
@@ -6378,7 +6392,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                             MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(secondRetSize),
                             di,
                             REG_NA,
-                            call->IsFastTailCall());
+                            call->IsFastTailCall(),
+                            isSafePoint);
                 // clang-format on
             }
             else
@@ -6399,7 +6414,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                                  retSize
                                  MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(secondRetSize),
                                  di,
-                                 call->IsFastTailCall());
+                                 call->IsFastTailCall(),
+                                 isSafePoint);
                 // clang-format on
             }
         }
@@ -6428,7 +6444,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                             MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(secondRetSize),
                             di,
                             target->GetRegNum(),
-                            call->IsFastTailCall());
+                            call->IsFastTailCall(),
+                            isSafePoint);
                 // clang-format on
             }
             else
@@ -6450,7 +6467,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                             MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(secondRetSize),
                             di,
                             target->GetRegNum(),
-                            call->IsFastTailCall());
+                            call->IsFastTailCall(),
+                            isSafePoint);
                 // clang-format on
             }
         }
@@ -6480,7 +6498,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                 gcInfo.gcRegGCrefSetCur,
                 gcInfo.gcRegByrefSetCur,
                 di, indirCellReg, REG_NA, 0, 0,
-                call->IsFastTailCall());
+                call->IsFastTailCall(),
+                isSafePoint);
             // clang-format on
         }
 #ifdef FEATURE_READYTORUN
@@ -6498,7 +6517,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                         MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(secondRetSize),
                         di,
                         REG_NA,
-                        call->IsFastTailCall());
+                        call->IsFastTailCall(),
+                        isSafePoint);
             // clang-format on
         }
 #endif
@@ -6538,7 +6558,8 @@ void CodeGen::genCallInstruction(GenTreeCall* call X86_ARG(target_ssize_t stackA
                         MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(secondRetSize),
                         di,
                         REG_NA,
-                        call->IsFastTailCall());
+                        call->IsFastTailCall(),
+                        isSafePoint);
             // clang-format on
         }
     }

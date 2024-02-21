@@ -507,7 +507,8 @@ protected:
                      MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr secondRetSize),
                      const DebugInfo&      di,
                      regNumber             base,
-                     bool                  isJump);
+                     bool                  isJump,
+                     bool                  isSafePoint = true);
     // clang-format on
 
     // clang-format off
@@ -519,7 +520,8 @@ protected:
                           emitAttr              retSize
                           MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr secondRetSize),
                           const DebugInfo&      di,
-                          bool                  isJump);
+                          bool                  isJump,
+                          bool                  isSafePoint = true);
     // clang-format on
 
     //

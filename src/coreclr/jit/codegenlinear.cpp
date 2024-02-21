@@ -2313,7 +2313,8 @@ void CodeGen::genEmitCall(int                   callType,
                           MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr secondRetSize),
                           const DebugInfo& di,
                           regNumber             base,
-                          bool                  isJump)
+                          bool                  isJump,
+                          bool                  isSafePoint)
 {
 #if !defined(TARGET_X86)
     int argSize = 0;
@@ -2333,7 +2334,12 @@ void CodeGen::genEmitCall(int                   callType,
                                gcInfo.gcVarPtrSetCur,
                                gcInfo.gcRegGCrefSetCur,
                                gcInfo.gcRegByrefSetCur,
-                               di, base, REG_NA, 0, 0, isJump);
+                               di, base, REG_NA, 0, 0, isJump
+#ifdef TARGET_AMD64
+        ,
+                               isSafePoint
+#endif
+    );
 }
 // clang-format on
 
@@ -2350,7 +2356,8 @@ void CodeGen::genEmitCallIndir(int                   callType,
                                emitAttr              retSize
                                MULTIREG_HAS_SECOND_GC_RET_ONLY_ARG(emitAttr secondRetSize),
                                const DebugInfo&      di,
-                               bool                  isJump)
+                               bool                  isJump,
+                               bool                  isSafePoint)
 {
 #if !defined(TARGET_X86)
     int argSize = 0;
@@ -2379,7 +2386,12 @@ void CodeGen::genEmitCallIndir(int                   callType,
                                xReg,
                                indir->Scale(),
                                indir->Offset(),
-                               isJump);
+                               isJump
+#ifdef TARGET_AMD64
+        ,
+                               isSafePoint
+#endif
+    );
 }
 // clang-format on
 

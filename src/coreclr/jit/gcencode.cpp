@@ -4544,7 +4544,7 @@ void GCInfo::gcMakeRegPtrTable(
             for (regPtrDsc* genRegPtrTemp = gcRegPtrList; genRegPtrTemp != nullptr;
                  genRegPtrTemp            = genRegPtrTemp->rpdNext)
             {
-                if (genRegPtrTemp->rpdArg && genRegPtrTemp->rpdIsCallInstr())
+                if (genRegPtrTemp->rpdArg && genRegPtrTemp->rpdIsSafepoint())
                 {
                     numCallSites++;
                 }
@@ -4585,7 +4585,7 @@ void GCInfo::gcMakeRegPtrTable(
                                              byrefRegMask, nullptr);
 
                 // Also remember the call site.
-                if (mode == MAKE_REG_PTR_MODE_DO_WORK)
+                if (mode == MAKE_REG_PTR_MODE_DO_WORK && genRegPtrTemp->rpdIsSafepoint())
                 {
                     assert(pCallSites != nullptr && pCallSiteSizes != nullptr);
                     pCallSites[callSiteNum]     = callOffset;

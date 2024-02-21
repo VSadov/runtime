@@ -180,7 +180,7 @@ public:
 
         unsigned short rpdIsThis : 1;                       // is it the 'this' pointer
         unsigned short rpdCall : 1;                         // is this a true call site?
-        unsigned short : 1;                                 // Padding bit, so next two start on a byte boundary
+        unsigned short rpdSp : 1;                           // SafePoint
         unsigned short rpdCallGCrefRegs : CNT_CALL_GC_REGS; // Callee-saved and return registers containing GC pointers.
         unsigned short rpdCallByrefRegs : CNT_CALL_GC_REGS; // Callee-saved and return registers containing byrefs.
 
@@ -188,6 +188,11 @@ public:
         bool rpdIsCallInstr()
         {
             return rpdCall && rpdCallInstrSize != 0;
+        }
+
+        bool rpdIsSafepoint()
+        {
+            return rpdCall && rpdSp;
         }
 #endif
     };

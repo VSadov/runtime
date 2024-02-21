@@ -10,7 +10,7 @@
    fully interruptible code.  We basically do a GC everywhere we can in
    jitted code
  */
-/****************************************************************************/
+ /****************************************************************************/
 
 
 #include "common.h"
@@ -32,13 +32,24 @@
 
 #include "disassembler.h"
 
+#include "marshalnative.h"
+
+extern void JIT_CountProfile32(volatile LONG*);
+extern void JIT_ClassProfile32(Object *, ICorJitInfo::HandleHistogram32 *);
+extern void JIT_RngChkFail();
+extern void IL_Throw(Object *);
+extern Object* JIT_StrCns(unsigned int, CORINFO_MODULE_STRUCT_ *);
+extern void JIT_GetRuntimeType(CORINFO_CLASS_STRUCT_ *);
+extern void* JIT_GetGenericsGCStaticBase(MethodTable *);
+extern Object* JIT_NewArr1MaybeFrozen(CORINFO_CLASS_STRUCT_ *, __int64);
+
 /****************************************************************************/
 
 MethodDesc* AsMethodDesc(size_t addr);
-static PBYTE getTargetOfCall(PBYTE instrPtr, PCONTEXT regs, PBYTE*nextInstr);
+static PBYTE getTargetOfCall(PBYTE instrPtr, PCONTEXT regs, PBYTE* nextInstr);
 #if defined(TARGET_ARM) || defined(TARGET_ARM64) || defined(TARGET_LOONGARCH64) || defined(TARGET_RISCV64)
 static void replaceSafePointInstructionWithGcStressInstr(UINT32 safePointOffset, LPVOID codeStart);
-static bool replaceInterruptibleRangesWithGcStressInstr (UINT32 startOffset, UINT32 stopOffset, LPVOID codeStart);
+static bool replaceInterruptibleRangesWithGcStressInstr(UINT32 startOffset, UINT32 stopOffset, LPVOID codeStart);
 #endif
 
 // There is a call target instruction, try to find the MethodDesc for where target points to.
@@ -53,52 +64,81 @@ static MethodDesc* getTargetMethodDesc(PCODE target)
     }
 
     auto stubKind = RangeSectionStubManager::GetStubKind(target);
+    if (stubKind != STUB_CODE_BLOCK_UNKNOWN)
+        return (MethodDesc*)target;
 
-    if ((stubKind == STUB_CODE_BLOCK_VSD_DISPATCH_STUB) ||
-        (stubKind == STUB_CODE_BLOCK_VSD_RESOLVE_STUB) ||
-        (stubKind == STUB_CODE_BLOCK_VSD_LOOKUP_STUB) ||
-        (stubKind == STUB_CODE_BLOCK_VSD_VTABLE_STUB))
+    //if ((stubKind == STUB_CODE_BLOCK_VSD_DISPATCH_STUB) ||
+    //    (stubKind == STUB_CODE_BLOCK_VSD_RESOLVE_STUB) ||
+    //    (stubKind == STUB_CODE_BLOCK_VSD_LOOKUP_STUB) ||
+    //    (stubKind == STUB_CODE_BLOCK_VSD_VTABLE_STUB))
+    //{
+    //    VirtualCallStubManager *pVSDStubManager = VirtualCallStubManager::FindStubManager(target, &stubKind);
+    //    if (pVSDStubManager != NULL)
+    //    {
+    //        // It is a VSD stub manager.
+    //        DispatchToken token(VirtualCallStubManager::GetTokenFromStubQuick(pVSDStubManager, target, stubKind));
+    //        _ASSERTE(token.IsValid());
+    //        return VirtualCallStubManager::GetInterfaceMethodDescFromToken(token);
+    //    }
+    //}
+
+    //if (stubKind == STUB_CODE_BLOCK_PRECODE)
+    //{
+    //    // The address looks like a value stub, try to get the method descriptor.
+    //    return MethodDesc::GetMethodDescFromStubAddr(target, TRUE);
+    //}
+
+    //if (stubKind == STUB_CODE_BLOCK_STUBPRECODE)
+    //{
+    //    return (MethodDesc*)((StubPrecode*)PCODEToPINSTR(target))->GetMethodDesc();
+    //}
+
+    //if (stubKind == STUB_CODE_BLOCK_FIXUPPRECODE)
+    //{
+    //    if (!FixupPrecode::IsFixupPrecodeByASM(target))
+    //    {
+    //        // If the target slot points to the fixup part of the stub, the actual
+    //        // stub starts FixupPrecode::FixupCodeOffset bytes below the target,
+    //        // so we need to compensate for it.
+    //        target -= FixupPrecode::FixupCodeOffset;
+    //        if (!FixupPrecode::IsFixupPrecodeByASM(target))
+    //        {
+    //            _ASSERTE(!"Invalid FixupPrecode address"); // We should never get other precode type here
+    //            return nullptr;
+    //        }
+    //    }
+
+    //    return (MethodDesc*)((FixupPrecode*)PCODEToPINSTR(target))->GetMethodDesc();
+    //}
+
+    if ((void*)target == JIT_CountProfile32
+        ||(void*)target == JIT_ClassProfile32
+        ||(void*)target == JIT_RngChkFail
+        ||(void*)target == JIT_TrialAllocSFastMP_InlineGetThread
+        ||(void*)target == JIT_NewArr1OBJ_MP_InlineGetThread
+        ||(void*)target == COMInterlocked::CompareExchangeObject
+        ||(void*)target == JIT_GetSharedGCStaticBase_SingleAppDomain
+        ||(void*)target == IL_Throw
+        ||(void*)target == JIT_Box
+        ||(void*)target == JIT_BoxFastMP_InlineGetThread
+        ||(void*)target == JIT_GetGenericsGCStaticBase
+        ||(void*)target == JIT_NewArr1MaybeFrozen
+        ||(void*)target == MarshalNative::GCHandleInternalGet
+        ||(void*)target == MarshalNative::GCHandleInternalAlloc
+        ||(void*)target == MarshalNative::GCHandleInternalCompareExchange
+        ||(void*)target == MarshalNative::GCHandleInternalSet
+        ||(void*)target == MarshalNative::GetLastPInvokeError
+        ||(void*)target == MarshalNative::SetLastPInvokeError
+        ||(void*)target == JIT_StrCns
+        ||(void*)target == JIT_NewArr1VC_MP_InlineGetThread
+//        ||(void*)target == JIT_FailFast
+        )
     {
-        VirtualCallStubManager *pVSDStubManager = VirtualCallStubManager::FindStubManager(target, &stubKind);
-        if (pVSDStubManager != NULL)
-        {
-            // It is a VSD stub manager.
-            DispatchToken token(VirtualCallStubManager::GetTokenFromStubQuick(pVSDStubManager, target, stubKind));
-            _ASSERTE(token.IsValid());
-            return VirtualCallStubManager::GetInterfaceMethodDescFromToken(token);
-        }
+        return (MethodDesc*)target;
     }
 
-    if (stubKind == STUB_CODE_BLOCK_PRECODE)
-    {
-        // The address looks like a value stub, try to get the method descriptor.
-        return MethodDesc::GetMethodDescFromStubAddr(target, TRUE);
-    }
 
-    if (stubKind == STUB_CODE_BLOCK_STUBPRECODE)
-    {
-        return (MethodDesc*)((StubPrecode*)PCODEToPINSTR(target))->GetMethodDesc();
-    }
-
-    if (stubKind == STUB_CODE_BLOCK_FIXUPPRECODE)
-    {
-        if (!FixupPrecode::IsFixupPrecodeByASM(target))
-        {
-            // If the target slot points to the fixup part of the stub, the actual
-            // stub starts FixupPrecode::FixupCodeOffset bytes below the target,
-            // so we need to compensate for it.
-            target -= FixupPrecode::FixupCodeOffset;
-            if (!FixupPrecode::IsFixupPrecodeByASM(target))
-            {
-                _ASSERTE(!"Invalid FixupPrecode address"); // We should never get other precode type here
-                return nullptr;
-            }
-        }
-
-        return (MethodDesc*)((FixupPrecode*)PCODEToPINSTR(target))->GetMethodDesc();
-    }
-
-    return nullptr;
+    return (MethodDesc*)nullptr;
 }
 
 bool IsGcCoverageInterruptInstruction(PBYTE instrPtr)
@@ -267,13 +307,6 @@ void ReplaceInstrAfterCall(PBYTE instrToReplace, MethodDesc* callMD)
     _ASSERTE(IsValidReturnKind(returnKind));
 
     bool ispointerKind = IsPointerReturnKind(returnKind);
-
-    // if (ispointerKind)
-    {
-        *instrToReplace = INTERRUPT_INSTR;
-    }
-
-    return;
 
 #ifdef TARGET_ARM
     size_t instrLen = GetARMInstructionLength(instrToReplace);
@@ -514,6 +547,8 @@ void GCCoverageInfo::SprinkleBreakpoints(
         AFTERCALL:
     */
 
+    InstructionType prevInstructionType = InstructionType::Unknown;
+
     while (cur < codeEnd)
     {
         _ASSERTE(*cur != INTERRUPT_INSTR && *cur != INTERRUPT_INSTR_CALL);
@@ -547,7 +582,7 @@ void GCCoverageInfo::SprinkleBreakpoints(
         {
         case InstructionType::Call_IndirectUnconditional:
 #ifdef TARGET_AMD64
-            if(/* !safePointDecoder.AreSafePointsInterruptible() && */
+            if(!safePointDecoder.AreSafePointsInterruptible() &&
                 safePointDecoder.IsSafePoint((UINT32)(cur + len - codeStart + regionOffsetAdj)))
 #endif
             {
@@ -555,24 +590,23 @@ void GCCoverageInfo::SprinkleBreakpoints(
             }
             break;
 
-          //case InstructionType::Call_IndirectUnconditional:
-          //     targetMD = (MethodDesc*)1;
-          //  break;
-
         case InstructionType::Call_DirectUnconditional:
             if(fGcStressOnDirectCalls.val(CLRConfig::INTERNAL_GcStressOnDirectCalls))
             {
 #ifdef TARGET_AMD64
-                if(/* !safePointDecoder.AreSafePointsInterruptible() && */
+                if(/*!safePointDecoder.AreSafePointsInterruptible() && */
                    safePointDecoder.IsSafePoint((UINT32)(cur + len - codeStart + regionOffsetAdj)))
 #endif
                 {
                     PBYTE nextInstr;
                     PBYTE target = getTargetOfCall(cur, NULL, &nextInstr);
 
-                    if (target != 0)
+                    _ASSERTE(target != 0);
+
                     {
                         targetMD = getTargetMethodDesc((PCODE)target);
+                        if (targetMD == nullptr)
+                            printf("@");
                     }
                 }
             }
@@ -589,10 +623,10 @@ void GCCoverageInfo::SprinkleBreakpoints(
             break;
         }
 
-        if (prevDirectCallTargetMD != 0)
-        {
-            ReplaceInstrAfterCall(cur + writeableOffset, prevDirectCallTargetMD);
-        }
+        //if (prevDirectCallTargetMD != 0)
+        //{
+        //    ReplaceInstrAfterCall(cur + writeableOffset, prevDirectCallTargetMD);
+        //}
 
         // For fully interruptible code, we end up whacking every instruction
         // to INTERRUPT_INSTR.  For non-fully interruptible code, we end
@@ -602,12 +636,23 @@ void GCCoverageInfo::SprinkleBreakpoints(
         _ASSERTE(FitsIn<DWORD>(dwRelOffset));
         if (codeMan->IsGcSafe(&codeInfo, static_cast<DWORD>(dwRelOffset)))
         {
-            // *(cur + writeableOffset) = INTERRUPT_INSTR;
+            *(cur + writeableOffset) = INTERRUPT_INSTR;
         }
         else if (safePointDecoder.AreSafePointsInterruptible() &&
             safePointDecoder.IsSafePoint((UINT32)dwRelOffset))
         {
-            // *(cur + writeableOffset) = INTERRUPT_INSTR;
+            if (prevInstructionType == InstructionType::Call_IndirectUnconditional)
+            {
+               // *(cur + writeableOffset) = INTERRUPT_INSTR;
+            }
+
+            if (prevInstructionType == InstructionType::Call_DirectUnconditional)
+            {
+                // if (prevDirectCallTargetMD != NULL)
+                {
+                   *(cur + writeableOffset) = INTERRUPT_INSTR;
+                }
+            }
         }
 
 #ifdef TARGET_X86
@@ -621,6 +666,7 @@ void GCCoverageInfo::SprinkleBreakpoints(
 
         // If we couldn't find the method desc targetMD is zero
         prevDirectCallTargetMD = targetMD;
+        prevInstructionType = instructionType;
 
         cur += len;
 
@@ -629,6 +675,7 @@ void GCCoverageInfo::SprinkleBreakpoints(
         if(newCur != cur)
         {
             prevDirectCallTargetMD = NULL;
+            prevInstructionType = InstructionType::Unknown;
             cur = newCur;
             fSawPossibleSwitch = false;
         }
@@ -1410,7 +1457,7 @@ BOOL OnGcCoverageInterrupt(PCONTEXT regs)
     // trigger GC here. But a reverse PInvoke stub may over-report
     // leading to spurious failures, as we would not normally report
     // anything for this method at this point.
-    if (!pThread->PreemptiveGCDisabled() && pMD->HasUnmanagedCallersOnlyAttribute())
+    if (!pThread->PreemptiveGCDisabled() /* && pMD->HasUnmanagedCallersOnlyAttribute()*/)
     {
         RemoveGcCoverageInterrupt(instrPtr, savedInstrPtr, gcCover, offset);
         return TRUE;

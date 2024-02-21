@@ -3178,7 +3178,7 @@ public:
 
     void emitStackPushN(BYTE* addr, unsigned count);
 
-    void emitStackPop(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count = 1);
+    void emitStackPop(BYTE* addr, bool isCall, bool isSafepoint, unsigned char callInstrSize, unsigned count = 1);
 
     void emitStackKillArgs(BYTE* addr, unsigned count, unsigned char callInstrSize);
 
@@ -3187,7 +3187,7 @@ public:
     // Helpers for the above
 
     void emitStackPushLargeStk(BYTE* addr, GCtype gcType, unsigned count = 1);
-    void emitStackPopLargeStk(BYTE* addr, bool isCall, unsigned char callInstrSize, unsigned count = 1);
+    void emitStackPopLargeStk(BYTE* addr, bool isCall, bool isSafepoint, unsigned char callInstrSize, unsigned count = 1);
 #endif // EMIT_TRACK_STACK_DEPTH
 
     /* Liveness of stack variables, and registers */
