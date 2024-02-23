@@ -535,11 +535,18 @@ void GCCoverageInfo::SprinkleBreakpoints(
         _ASSERTE(len > 0);
         _ASSERTE(len <= (size_t)(codeEnd-cur));
 
+        // 1) We will end up whacking every interruptible instruction to INTERRUPT_INSTR.
+        // 2) Otherwise we will patch up safe points after the call instructions.
+        // (specially so that we can verify stack-walking through the call sites).
+        size_t dwRelOffset = (cur - codeStart) + regionOffsetAdj;
+        _ASSERTE(FitsIn<DWORD>(dwRelOffset));
+        bool isInterruptible = codeMan->IsGcSafe(&codeInfo, static_cast<DWORD>(dwRelOffset));
+
         switch(instructionType)
         {
         case InstructionType::Call_IndirectUnconditional:
 #ifdef TARGET_AMD64
-            if(!safePointDecoder.AreSafePointsInterruptible() && 
+            if(!isInterruptible && 
                 safePointDecoder.IsSafePoint((UINT32)(cur + len - codeStart + regionOffsetAdj)))
 #endif
             {
@@ -551,7 +558,7 @@ void GCCoverageInfo::SprinkleBreakpoints(
             if(fGcStressOnDirectCalls.val(CLRConfig::INTERNAL_GcStressOnDirectCalls))
             {
 #ifdef TARGET_AMD64
-                if(!safePointDecoder.AreSafePointsInterruptible() &&
+                if(!isInterruptible &&
                    safePointDecoder.IsSafePoint((UINT32)(cur + len - codeStart + regionOffsetAdj)))
 #endif
                 {
@@ -577,28 +584,15 @@ void GCCoverageInfo::SprinkleBreakpoints(
             break;
         }
 
-        if (prevDirectCallTargetMD != 0)
+        if (isInterruptible)
+        {
+            _ASSERTE(prevDirectCallTargetMD == NULL);
+            *(cur + writeableOffset) = INTERRUPT_INSTR;
+        }
+        else if (prevDirectCallTargetMD != 0)
         {
             ReplaceInstrAfterCall(cur + writeableOffset, prevDirectCallTargetMD);
         }
-
-        // For fully interruptible code, we end up whacking every instruction
-        // to INTERRUPT_INSTR.  For non-fully interruptible code, we end
-        // up only touching the call instructions (specially so that we
-        // can really do the GC on the instruction just after the call).
-        size_t dwRelOffset = (cur - codeStart) + regionOffsetAdj;
-        _ASSERTE(FitsIn<DWORD>(dwRelOffset));
-        if (codeMan->IsGcSafe(&codeInfo, static_cast<DWORD>(dwRelOffset)))
-        {
-            *(cur + writeableOffset) = INTERRUPT_INSTR;
-        }
-#ifdef TARGET_AMD64
-        else if (safePointDecoder.AreSafePointsInterruptible() &&
-            safePointDecoder.IsSafePoint((UINT32)dwRelOffset))
-        {
-            *(cur + writeableOffset) = INTERRUPT_INSTR;
-        }
-#endif
 
 #ifdef TARGET_X86
         // we will whack every instruction in the prolog and epilog to make certain
