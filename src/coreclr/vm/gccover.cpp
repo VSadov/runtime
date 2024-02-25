@@ -718,13 +718,13 @@ void replaceSafePointInstructionWithGcStressInstr(GcInfoDecoder* decoder, UINT32
         size_t instrLen = GetARMInstructionLength(instrPtr);
 
         if (instrLen == 2)
-            *((WORD*)instrPtr)  = INTERRUPT_INSTR;
+            *((WORD*)instrPtrWriterHolder.GetRW())  = INTERRUPT_INSTR;
         else
         {
-            *((DWORD*)instrPtr) = INTERRUPT_INSTR_32;
+            *((DWORD*)instrPtrWriterHolder.GetRW()) = INTERRUPT_INSTR_32;
         }
 #elif defined(TARGET_ARM64) || defined(TARGET_LOONGARCH64) || defined(TARGET_RISCV64)
-        *((DWORD*)instrPtr) = INTERRUPT_INSTR;
+        *((DWORD*)instrPtrWriterHolder.GetRW()) = INTERRUPT_INSTR;
 #endif // TARGET_XXXX_
         return;
     }
