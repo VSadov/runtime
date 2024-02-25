@@ -712,6 +712,8 @@ void replaceSafePointInstructionWithGcStressInstr(GcInfoDecoder* decoder, UINT32
     {
         // The instruction about to be replaced cannot already be a gcstress instruction
         _ASSERTE(!IsGcCoverageInterruptInstruction(instrPtr));
+
+        ExecutableWriterHolder<BYTE> instrPtrWriterHolder(instrPtr, sizeof(DWORD));
 #if defined(TARGET_ARM)
         size_t instrLen = GetARMInstructionLength(instrPtr);
 
