@@ -2859,6 +2859,8 @@ bool emitter::emitNoGChelper(CorInfoHelpFunc helpFunc)
         case CORINFO_HELP_FAIL_FAST:
         case CORINFO_HELP_STACK_PROBE:
 
+        case CORINFO_HELP_CHECK_OBJ:
+
         case CORINFO_HELP_VALIDATE_INDIRECT_CALL:
             return true;
 
