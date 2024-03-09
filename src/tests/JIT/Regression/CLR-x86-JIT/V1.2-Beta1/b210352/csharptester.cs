@@ -2738,5 +2738,10 @@ public class M
             return 99;
         }
     }
+
+    public static void Main()
+    {
+
+    }
 }
 
