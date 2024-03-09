@@ -2738,10 +2738,13 @@ public class M
             return 99;
         }
     }
+}
 
+
+public class Prog
+{
     public static void Main()
     {
 
     }
 }
-
