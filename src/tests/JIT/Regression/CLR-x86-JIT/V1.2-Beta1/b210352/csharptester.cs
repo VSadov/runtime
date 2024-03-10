@@ -677,25 +677,25 @@ public class M
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    static void StaticCall()
+    static void StaticCall0()
     {
         System.Console.Write(scen++ + " # ");
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    static void StaticCall()
+    static void StaticCall1()
     {
         System.Console.Write(scen++ + " ## ");
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    static void StaticCall()
+    static void StaticCall2()
     {
         System.Console.Write(scen++ + " ### ");
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    static void StaticCall()
+    static void StaticCall3()
     {
         System.Console.Write(scen++ + " #### ");
     }
