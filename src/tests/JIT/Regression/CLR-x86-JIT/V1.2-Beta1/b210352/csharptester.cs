@@ -2664,41 +2664,41 @@ public class M
     [Fact]
     public static int TestEntryPoint()
     {
-        //try
-        //{
-        //    GenericClassStaticMethod();
-        //}
-        //catch (Exception E)
-        //{
-        //    Utils.Fail("GenericClassStaticMethod failed due to unknown exception: " + E);
-        //}
+        try
+        {
+            GenericClassStaticMethod();
+        }
+        catch (Exception E)
+        {
+            Utils.Fail("GenericClassStaticMethod failed due to unknown exception: " + E);
+        }
 
-        //try
-        //{
-        //    GenericClassInstanceMethod();
-        //}
-        //catch (Exception E)
-        //{
-        //    Utils.Fail("GenericClassInstanceMethod failed due to unknown exception: " + E);
-        //}
+        try
+        {
+            GenericClassInstanceMethod();
+        }
+        catch (Exception E)
+        {
+            Utils.Fail("GenericClassInstanceMethod failed due to unknown exception: " + E);
+        }
 
-        //try
-        //{
-        //    GenericClassVirtualMethod();
-        //}
-        //catch (Exception E)
-        //{
-        //    Utils.Fail("GenericClassVirtualMethod failed due to unknown exception: " + E);
-        //}
+        try
+        {
+            GenericClassVirtualMethod();
+        }
+        catch (Exception E)
+        {
+            Utils.Fail("GenericClassVirtualMethod failed due to unknown exception: " + E);
+        }
 
-        //try
-        //{
-        //    GenericClassField();
-        //}
-        //catch (Exception E)
-        //{
-        //    Utils.Fail("GenericClassField failed due to unknown exception: " + E);
-        //}
+        try
+        {
+            GenericClassField();
+        }
+        catch (Exception E)
+        {
+            Utils.Fail("GenericClassField failed due to unknown exception: " + E);
+        }
 
         //try
         //{
