@@ -1002,12 +1002,12 @@ public class M
             Utils.Fail("Expected returned value of GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam(\"wxyzabcdefgh\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), true) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true)) + "'");
         }
 
-       StaticCall(); if (GenericClassIntArray.VirtualNonGenericMethodIntUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, 1, typeof(int), true) != 1)
+       StaticCall2(); if (GenericClassIntArray.VirtualNonGenericMethodIntUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, 1, typeof(int), true) != 1)
         {
             Utils.Fail("Expected returned value of GenericClassIntArray.VirtualNonGenericMethodIntUsesClassTypeParam(new int[] {Int32.MaxValue, Int32.MinValue}, 1, typeof(int, true)) to be 1, but found '" + GenericClassIntArray.VirtualNonGenericMethodIntUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, 1, typeof(int), true) + "'");
         }
 
-       StaticCall(); if (GenericClassIntArray.VirtualNonGenericMethodStringUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, "aaaa", typeof(string), true) != "aaaa")
+       StaticCall1(); if (GenericClassIntArray.VirtualNonGenericMethodStringUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, "aaaa", typeof(string), true) != "aaaa")
         {
             Utils.Fail("Expected returned value of GenericClassIntArray.VirtualNonGenericMethodString(new int[] {Int32.MaxValue, Int32.MinValue}, \"aaaa\", typeof(string, true)) to be \"aaaa\", but found '" + GenericClassIntArray.VirtualNonGenericMethodStringUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, "aaaa", typeof(string), true) + "'");
         }
