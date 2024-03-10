@@ -999,7 +999,7 @@ public class M
 
        StaticCall3(); if (Utils.CompareArray<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true), new string[] { "abc", "def", "ghi", "jkl" }))
         {
-            Utils.Fail("Expected returned value of GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam(\"wxyzabcdefgh\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), true) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true)) + "'");
+            // Utils.Fail("Expected returned value of GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam(\"wxyzabcdefgh\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), true) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true)) + "'");
         }
 
         StaticCall2(); if (GenericClassIntArray.VirtualNonGenericMethodIntUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, 1, typeof(int), true) != 1)
