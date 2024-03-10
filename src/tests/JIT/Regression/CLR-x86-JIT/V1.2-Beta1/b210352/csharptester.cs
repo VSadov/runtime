@@ -1012,6 +1012,7 @@ public class M
         var result = GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
         var compRes = Utils.CompareArray<string>(result, new string[] { "abc", "def", "ghi", "jkl" });
 
+        System.Console.WriteLine("col3");
         // System.GC.Collect();
 
         if (compRes)
@@ -1019,6 +1020,7 @@ public class M
             Utils.Fail("Expected returned value of GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam(\"wxyzabcdefgh\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), true) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true)) + "'");
         }
 
+        System.Console.WriteLine("col4");
         System.GC.Collect();
 
         StaticCall2(); if (GenericClassIntArray.VirtualNonGenericMethodIntUsesClassTypeParam(new int[] { Int32.MaxValue, Int32.MinValue }, 1, typeof(int), true) != 1)
