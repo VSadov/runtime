@@ -999,6 +999,7 @@ public class M
 
        StaticCall3(); if (Utils.CompareArray<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true), new string[] { "abc", "def", "ghi", "jkl" }))
         {
+            StaticCall3();
             Utils.Fail("Expected returned value of GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam(\"wxyzabcdefgh\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), true) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true)) + "'");
         }
 
