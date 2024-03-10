@@ -998,6 +998,9 @@ public class M
         }
 
        StaticCall3();
+
+        System.GC.Collect();
+
         GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
 
         System.GC.Collect();
