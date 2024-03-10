@@ -999,10 +999,12 @@ public class M
 
        StaticCall3();
 
+        System.Console.WriteLine("col1");
         System.GC.Collect();
 
         GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
 
+        System.Console.WriteLine("col2");
         System.GC.Collect();
 
         StaticCall2();
