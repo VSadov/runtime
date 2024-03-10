@@ -30,6 +30,7 @@ public class Utils
 
     public static bool CompareArray<U>(U[] arrayOne, U[] arrayTwo)
     {
+        System.Console.Write(".");
         for (int i = arrayOne.GetUpperBound(0); i >= 0; i--)
         {
             if (arrayOne[i].Equals(arrayTwo[i]))
