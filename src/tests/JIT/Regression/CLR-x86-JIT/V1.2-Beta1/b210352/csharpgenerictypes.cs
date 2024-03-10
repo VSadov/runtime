@@ -28,6 +28,7 @@ public class Utils
         }
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public static bool CompareArray<U>(U[] arrayOne, U[] arrayTwo)
     {
         System.Console.Write(".");
