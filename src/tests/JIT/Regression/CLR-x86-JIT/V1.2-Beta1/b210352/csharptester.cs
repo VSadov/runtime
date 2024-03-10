@@ -1011,6 +1011,7 @@ public class M
         var compRes = Utils.CompareArray<string>(result, new string[] { "abc", "def", "ghi", "jkl" });
 
         // System.GC.Collect();
+        StaticCall();
 
         if (compRes)
         {
