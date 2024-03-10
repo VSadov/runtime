@@ -1014,7 +1014,7 @@ public class M
 
         // System.Console.WriteLine("col3");
         // System.GC.Collect();
-        StaticCall1();
+        // StaticCall1();
 
         if (compRes)
         {
