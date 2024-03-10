@@ -1192,95 +1192,95 @@ public class M
             Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodString(\"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodString("aaaa", typeof(string), false) + "'");
         }
 
-        //StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodIntArray(new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodIntArray(new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodIntArray(new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodIntArray(new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodIntArray(new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodIntArray(new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodStringArray(new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodStringArray(new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodStringArray(new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodStringArray(new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodStringArray(new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassStringArray.VirtualNonGenericMethodStringArray(new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int>(27, 1, typeof(int), false) != 1)
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int>(27, 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int>(27, 1, typeof(int), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int>(27, 1, typeof(int), false) != 1)
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int>(27, 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int>(27, 1, typeof(int), false) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string>(27, "aaaa", typeof(string), false) != "aaaa")
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string>(27, \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string>(27, "aaaa", typeof(string), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string>(27, "aaaa", typeof(string), false) != "aaaa")
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string>(27, \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string>(27, "aaaa", typeof(string), false) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int[]>(27, new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int[]>(27, new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int[]>(27, new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int[]>(27, new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int[]>(27, new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<int[]>(27, new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string[]>(27, new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string[]>(27, new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string[]>(27, new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string[]>(27, new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string[]>(27, new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassInt.VirtualGenericMethodUsesClassTypeParam<string[]>(27, new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int>("", 1, typeof(int), false) != 1)
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int>(\"\", 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int>("", 1, typeof(int), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int>("", 1, typeof(int), false) != 1)
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int>(\"\", 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int>("", 1, typeof(int), false) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string>("", "aaaa", typeof(string), false) != "aaaa")
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string>(\"\", \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string>("", "aaaa", typeof(string), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string>("", "aaaa", typeof(string), false) != "aaaa")
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string>(\"\", \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string>("", "aaaa", typeof(string), false) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int[]>("", new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int[]>(\"\", new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int[]>("", new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int[]>("", new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int[]>(\"\", new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<int[]>("", new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string[]>("", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string[]>(\"\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string[]>("", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string[]>("", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string[]>(\"\", new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassString.VirtualGenericMethodUsesClassTypeParam<string[]>("", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int>(new int[0], 1, typeof(int), false) != 1)
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int>(new int[0], 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int>(new int[0], 1, typeof(int), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int>(new int[0], 1, typeof(int), false) != 1)
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int>(new int[0], 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int>(new int[0], 1, typeof(int), false) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string>(new int[0], "aaaa", typeof(string), false) != "aaaa")
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string>(new int[0], \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string>(new int[0], "aaaa", typeof(string), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string>(new int[0], "aaaa", typeof(string), false) != "aaaa")
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string>(new int[0], \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string>(new int[0], "aaaa", typeof(string), false) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new int[0], new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new int[0], new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new int[0], new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new int[0], new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new int[0], new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new int[0], new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new int[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new int[0], new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new int[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new int[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new int[0], new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassIntArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new int[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int>(new string[0], 1, typeof(int), false) != 1)
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int>(new string[0], 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int>(new string[0], 1, typeof(int), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int>(new string[0], 1, typeof(int), false) != 1)
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int>(new string[0], 1, typeof(int, false)) to be 1, but found '" + GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int>(new string[0], 1, typeof(int), false) + "'");
+        }
 
-        //StaticCall(); if (GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string>(new string[0], "aaaa", typeof(string), false) != "aaaa")
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string>(new string[0], \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string>(new string[0], "aaaa", typeof(string), false) + "'");
-        // }
+        StaticCall(); if (GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string>(new string[0], "aaaa", typeof(string), false) != "aaaa")
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string>(new string[0], \"aaaa\", typeof(string, false)) to be \"aaaa\", but found '" + GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string>(new string[0], "aaaa", typeof(string), false) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new string[0], new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new string[0], new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new string[0], new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<int>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new string[0], new int[] { 1, 2, 3 }, typeof(int[]), false), new int[] { 1, 2, 3 }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new string[0], new int[] {1,2,3} typeof(int[]), false) to be int[] {1,2,3}, but found '" + Utils.BuildArrayString<int>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<int[]>(new string[0], new int[] { 1, 2, 3 }, typeof(int[]), false)) + "'");
+        }
 
-        //StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new string[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
-        // {
-        //     Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new string[0], new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new string[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
-        // }
+        StaticCall(); if (Utils.CompareArray<string>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new string[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false), new string[] { "abc", "def", "ghi", "jkl" }))
+        {
+            Utils.Fail("Expected returned value of GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new string[0], new string[] {\"abc\",\"def\",\"ghi\",\"jkl\"} typeof(string[]), false) to be string[] {\"abc\",\"def\",\"ghi\",\"jkl\"}, but found '" + Utils.BuildArrayString<string>(GenericClassInheritsFromGenericClassStringArray.VirtualGenericMethodUsesClassTypeParam<string[]>(new string[0], new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), false)) + "'");
+        }
 
         //StaticCall(); if (GenericClassInheritsFromGenericClassInt.VirtualNonGenericMethodIntUsesClassTypeParam(Int32.MaxValue, 1, typeof(int), false) != 1)
         // {
