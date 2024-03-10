@@ -38,6 +38,8 @@ public class Utils
                 return false;
             }
         }
+
+        System.Console.Write("t");
         return true;
     }
 
