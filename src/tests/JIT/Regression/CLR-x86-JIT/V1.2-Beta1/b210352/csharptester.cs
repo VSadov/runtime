@@ -998,7 +998,7 @@ public class M
         }
 
        StaticCall3();
-        string result = GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
+        var result = GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
 
         if (Utils.CompareArray<string>(result, new string[] { "abc", "def", "ghi", "jkl" }))
         {
