@@ -38,6 +38,7 @@ public class Utils
             System.Console.Write(",");
             if (arrayOne[i].Equals(arrayTwo[i]))
             {
+                System.GC.Collect();
                 return false;
             }
         }
