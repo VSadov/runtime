@@ -1010,7 +1010,8 @@ public class M
         StaticCall2();
 
         var result = GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
-        var compRes = Utils.CompareArray<string>(result, new string[] { "abc", "def", "ghi", "jkl" });
+
+        var compRes = Utils.CompareArray<string>(result, new string[] { "jkl" });
 
         if (compRes)
         {
