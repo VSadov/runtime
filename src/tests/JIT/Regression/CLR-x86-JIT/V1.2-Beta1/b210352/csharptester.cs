@@ -1010,11 +1010,11 @@ public class M
         StaticCall2();
 
         var result = GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
+        System.Console.WriteLine("col4");
+        System.GC.Collect();
 
         var compRes = Utils.CompareArray<string>(result, new string[] { "abc", "def", "ghi", "jkl" });
 
-        System.Console.WriteLine("col4");
-        System.GC.Collect();
 
         if (compRes)
         {
