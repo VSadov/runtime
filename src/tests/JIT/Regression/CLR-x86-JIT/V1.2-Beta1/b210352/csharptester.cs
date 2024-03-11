@@ -1011,7 +1011,7 @@ public class M
 
         var result = GenericClassString.VirtualNonGenericMethodStringArrayUsesClassTypeParam("wxyzabcdefgh", new string[] { "abc", "def", "ghi", "jkl" }, typeof(string[]), true);
 
-        var compRes = Utils.CompareArray<string>(result, new string[] { "", "", "", "jkl" });
+        var compRes = Utils.CompareArray<string>(result, new string[] { "abc", "def", "ghi", "jkl" });
 
         if (compRes)
         {

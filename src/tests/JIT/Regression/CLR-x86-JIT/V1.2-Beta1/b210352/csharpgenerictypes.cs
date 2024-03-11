@@ -37,15 +37,15 @@ public class Utils
         for (int i = arrayOne.GetUpperBound(0); i >= 0; i--)
         {
             System.Console.Write(",");
-            if (arrayOne[i].Equals(arrayTwo[i]))
+            if (!arrayOne[i].Equals(arrayTwo[i]))
             {
                 System.GC.Collect();
-                return false;
+                return true;
             }
         }
 
         System.Console.Write("t");
-        return true;
+        return false;
     }
 
     public static string BuildArrayString<U>(U[] arrayToPrint)
