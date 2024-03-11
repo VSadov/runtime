@@ -1663,7 +1663,8 @@ void CodeGen::genEmitHelperCall(unsigned helper, int argSize, emitAttr retSize, 
                                    );
     }
 
-    regSet.verifyRegistersUsed(RBM_CALLEE_TRASH);
+    regMaskTP killMask = compiler->compHelperCallKillSet((CorInfoHelpFunc)helper);
+    regSet.verifyRegistersUsed(killMask);
 }
 
 #ifdef PROFILING_SUPPORTED

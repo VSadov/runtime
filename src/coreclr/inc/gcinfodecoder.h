@@ -196,7 +196,7 @@ enum ICodeManagerFlags
 #include "gcinfotypes.h"
 
 #ifdef _DEBUG
-    #define MAX_PREDECODED_SLOTS  4
+    #define MAX_PREDECODED_SLOTS  16
 #else
     #define MAX_PREDECODED_SLOTS 64
 #endif
