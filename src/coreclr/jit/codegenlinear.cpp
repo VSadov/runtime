@@ -803,6 +803,9 @@ void CodeGen::genCodeForBBlist()
 #ifdef TARGET_XARCH
                 // Do not remove a jump between hot and cold regions.
                 bool isRemovableJmpCandidate = !compiler->fgInDifferentRegions(block, block->GetTarget());
+                // if liveness is changing and we've just emitted a GC-capable call, the jump is not removable
+                // to ensure that GC info is not changing between
+                // "call has been made" and "call has returned" states.
                 if (isRemovableJmpCandidate && GetEmitter()->emitLastInsIsCallWithGC())
                 {
                     if (!VarSetOps::Equal(compiler, block->bbLiveOut, block->GetTarget()->bbLiveIn))
