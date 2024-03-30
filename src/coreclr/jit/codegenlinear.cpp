@@ -774,19 +774,45 @@ void CodeGen::genCodeForBBlist()
                 // If this block jumps to the next one, we might be able to skip emitting the jump
                 if (block->CanRemoveJumpToNext(compiler))
                 {
+                    removedJmp = true;
 #ifdef TARGET_AMD64
                     if (emitNopBeforeEHRegion)
                     {
                         instGen(INS_nop);
+                        break;
                     }
 #endif // TARGET_AMD64
 
-                    removedJmp = true;
+                    // if liveness is changing and the last block ended on emitting a call that can do GC,
+                    // emit a nop to ensure that GC info is not changing between
+                    // "call has been made" and "call has returned" states.
+                    if (GetEmitter()->emitLastInsIsCallWithGC())
+                    {
+                        BasicBlock* nextBlock = block->Next();
+                        if (nextBlock && !VarSetOps::Equal(compiler, block->bbLiveOut, nextBlock->bbLiveIn))
+                        {
+                            // sanity check: we can only see a reduction of live variable set.
+                            assert(VarSetOps::IsSubset(compiler, nextBlock->bbLiveIn, block->bbLiveOut));
+                            instGen(INS_nop);
+                            printf("#########\n");
+                        }
+                    }
+
                     break;
                 }
 #ifdef TARGET_XARCH
                 // Do not remove a jump between hot and cold regions.
                 bool isRemovableJmpCandidate = !compiler->fgInDifferentRegions(block, block->GetTarget());
+                if (isRemovableJmpCandidate && GetEmitter()->emitLastInsIsCallWithGC())
+                {
+                    if (!VarSetOps::Equal(compiler, block->bbLiveOut, block->GetTarget()->bbLiveIn))
+                    {
+                        // sanity check: we can only see a reduction of live variable set.
+                        assert(VarSetOps::IsSubset(compiler, block->GetTarget()->bbLiveIn, block->bbLiveOut));
+                        isRemovableJmpCandidate = false;
+                        printf("@@@@@@@@@\n");
+                    }
+                }
 
                 inst_JMP(EJ_jmp, block->GetTarget(), isRemovableJmpCandidate);
 #else
