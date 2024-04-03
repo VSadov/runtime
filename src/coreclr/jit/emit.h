@@ -772,10 +772,10 @@ protected:
         // loongarch64: 28 bits
         // risc-v:      28 bits
 
-        unsigned _idSmallDsc  : 1; // is this a "small" descriptor?
-        unsigned _idLargeCns  : 1; // does a large constant     follow?
-        unsigned _idLargeDsp  : 1; // does a large displacement follow?
-        unsigned _idLargeCall : 1; // large call descriptor used
+        unsigned _idSmallDsc : 1; // is this a "small" descriptor?
+        unsigned _idLargeCns : 1; // does a large constant     follow?
+        unsigned _idLargeDsp : 1; // does a large displacement follow?
+        unsigned _idCall : 1;     // this is a call
 
         // We have several pieces of information we need to encode but which are only applicable
         // to a subset of instrDescs. To accommodate that, we define a several _idCustom# bitfields
@@ -1595,13 +1595,18 @@ protected:
             _idLargeDsp = 0;
         }
 
+        bool idIsCall() const
+        {
+            return _idCall != 0;
+        }
+        void idSetIsCall()
+        {
+            _idCall = 1;
+        }
+
         bool idIsLargeCall() const
         {
-            return _idLargeCall != 0;
-        }
-        void idSetIsLargeCall()
-        {
-            _idLargeCall = 1;
+            return idIsCall() && idIsLargeCns();
         }
 
         bool idIsBound() const
@@ -3203,6 +3208,8 @@ public:
     void emitStackKillArgs(BYTE* addr, unsigned count, unsigned char callInstrSize);
 
     void emitRecordGCcall(BYTE* codePos, unsigned char callInstrSize);
+
+    bool emitLastInsIsCallWithGC();
 
     // Helpers for the above
 

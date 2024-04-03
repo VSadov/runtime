@@ -2899,6 +2899,19 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP    GCvars,
                             regMaskTP           gcrefRegs,
                             regMaskTP byrefRegs DEBUG_ARG(BasicBlock* block))
 {
+
+    // if GC liveness is changing and we have just emitted a call that can do GC,
+    // emit a NOP to ensure that GC info is not changing between
+    // "call has been made" and "call has returned" states.
+    if (emitLastInsIsCallWithGC())
+    {
+        if (emitThisGCrefRegs != gcrefRegs || emitThisByrefRegs != byrefRegs ||
+            !VarSetOps::Equal(emitComp, emitThisGCrefVars, GCvars))
+        {
+            emitIns(INS_nop);
+        }
+    }
+
     /* Create a new IG if the current one is non-empty */
 
     if (emitCurIGnonEmpty())
@@ -3640,8 +3653,9 @@ emitter::instrDesc* emitter::emitNewInstrCallInd(int              argCnt,
         instrDescCGCA* id;
 
         id = emitAllocInstrCGCA(retSize);
-
-        id->idSetIsLargeCall();
+        id->idSetIsLargeCns();
+        id->idSetIsCall();
+        assert(id->idIsLargeCall());
 
         VarSetOps::Assign(emitComp, id->idcGCvars, GCvars);
         id->idcGcrefRegs = gcrefRegs;
@@ -3663,6 +3677,7 @@ emitter::instrDesc* emitter::emitNewInstrCallInd(int              argCnt,
 
         /* Make sure we didn't waste space unexpectedly */
         assert(!id->idIsLargeCns());
+        id->idSetIsCall();
 
 #ifdef TARGET_XARCH
         /* Store the displacement and make sure the value fit */
@@ -3720,7 +3735,9 @@ emitter::instrDesc* emitter::emitNewInstrCallDir(int              argCnt,
 
         // printf("Direct call with GC vars / big arg cnt / explicit scope\n");
 
-        id->idSetIsLargeCall();
+        id->idSetIsLargeCns();
+        id->idSetIsCall();
+        assert(id->idIsLargeCall());
 
         VarSetOps::Assign(emitComp, id->idcGCvars, GCvars);
         id->idcGcrefRegs = gcrefRegs;
@@ -3742,6 +3759,7 @@ emitter::instrDesc* emitter::emitNewInstrCallDir(int              argCnt,
 
         /* Make sure we didn't waste space unexpectedly */
         assert(!id->idIsLargeCns());
+        id->idSetIsCall();
 
         /* Save the live GC registers in the unused register fields */
         assert((gcrefRegs & RBM_CALLEE_TRASH) == 0);
@@ -8752,6 +8770,16 @@ void emitter::emitUpdateLiveGCvars(VARSET_VALARG_TP vars, BYTE* addr)
     }
 
     emitThisGCrefVset = true;
+}
+
+/*****************************************************************************
+ *
+ *  Last emitted instruction is a call that is not a NoGC call.
+ */
+
+bool emitter::emitLastInsIsCallWithGC()
+{
+    return emitLastIns != nullptr && emitLastIns->idIsCall() && !emitLastIns->idIsNoGC();
 }
 
 /*****************************************************************************
