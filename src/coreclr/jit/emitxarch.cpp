@@ -9578,6 +9578,28 @@ void emitter::emitIns_Call(EmitCallType          callType,
 
     /* Update the emitter's live GC ref sets */
 
+    // If the method returns a GC ref, mark EAX appropriately
+    if (retSize == EA_GCREF)
+    {
+        gcrefRegs |= RBM_EAX;
+    }
+    else if (retSize == EA_BYREF)
+    {
+        byrefRegs |= RBM_EAX;
+    }
+
+#ifdef UNIX_AMD64_ABI
+    // If is a multi-register return method is called, mark RDX appropriately (for System V AMD64).
+    if (secondRetSize == EA_GCREF)
+    {
+        gcrefRegs |= RBM_RDX;
+    }
+    else if (secondRetSize == EA_BYREF)
+    {
+        byrefRegs |= RBM_RDX;
+    }
+#endif // UNIX_AMD64_ABI
+
     VarSetOps::Assign(emitComp, emitThisGCrefVars, ptrVars);
     emitThisGCrefRegs = gcrefRegs;
     emitThisByrefRegs = byrefRegs;
