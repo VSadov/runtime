@@ -775,7 +775,7 @@ protected:
         unsigned _idSmallDsc : 1; // is this a "small" descriptor?
         unsigned _idLargeCns : 1; // does a large constant     follow?
         unsigned _idLargeDsp : 1; // does a large displacement follow?
-        unsigned _idCall : 1;     // this is a call
+        unsigned _idCall     : 1; // this is a call
 
         // We have several pieces of information we need to encode but which are only applicable
         // to a subset of instrDescs. To accommodate that, we define a several _idCustom# bitfields
