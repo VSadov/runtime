@@ -894,7 +894,7 @@ void CodeGen::genDefineTempLabel(BasicBlock* label)
 {
     genLogLabel(label);
     label->bbEmitCookie = GetEmitter()->emitAddLabel(gcInfo.gcVarPtrSetCur, gcInfo.gcRegGCrefSetCur,
-                                                     gcInfo.gcRegByrefSetCur DEBUG_ARG(label));
+                                                     gcInfo.gcRegByrefSetCur);
 }
 
 // genDefineInlineTempLabel: Define an inline label that does not affect the GC

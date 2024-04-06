@@ -2895,16 +2895,19 @@ bool emitter::emitNoGChelper(CORINFO_METHOD_HANDLE methHnd)
  *  Mark the current spot as having a label.
  */
 
-void* emitter::emitAddLabel(VARSET_VALARG_TP    GCvars,
-                            regMaskTP           gcrefRegs,
-                            regMaskTP byrefRegs DEBUG_ARG(BasicBlock* block))
+void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars,
+                            regMaskTP        gcrefRegs,
+                            regMaskTP        byrefRegs,
+                            BasicBlock*      prevBlock)
 {
-
-    // if GC liveness is changing and we have just emitted a call that can do GC,
-    // emit a NOP to ensure that GC info is not changing between
-    // "call has been made" and "call has returned" states.
-    if (emitLastInsIsCallWithGC())
+    if (prevBlock != NULL && prevBlock->KindIs(BBJ_ALWAYS) && emitLastInsIsCallWithGC())
     {
+
+        // TODO: VS only do when !emitComp->IsFullPtrRegMapRequired()?
+        // GC liveness is changing in a block reachable from the previous
+        // and we have just emitted a call that can do GC,
+        // emit a NOP to ensure that GC info is not changing between
+        // "call has been made" and "call has returned" states.
         if (emitThisGCrefRegs != gcrefRegs || emitThisByrefRegs != byrefRegs ||
             !VarSetOps::Equal(emitComp, emitThisGCrefVars, GCvars))
         {
@@ -3653,9 +3656,7 @@ emitter::instrDesc* emitter::emitNewInstrCallInd(int              argCnt,
         instrDescCGCA* id;
 
         id = emitAllocInstrCGCA(retSize);
-        id->idSetIsLargeCns();
-        id->idSetIsCall();
-        assert(id->idIsLargeCall());
+        id->idSetIsLargeCall();
 
         VarSetOps::Assign(emitComp, id->idcGCvars, GCvars);
         id->idcGcrefRegs = gcrefRegs;
@@ -3732,12 +3733,9 @@ emitter::instrDesc* emitter::emitNewInstrCallDir(int              argCnt,
         MULTIREG_HAS_SECOND_GC_RET_ONLY(|| EA_IS_GCREF_OR_BYREF(secondRetSize)))
     {
         instrDescCGCA* id = emitAllocInstrCGCA(retSize);
+        id->idSetIsLargeCall();
 
         // printf("Direct call with GC vars / big arg cnt / explicit scope\n");
-
-        id->idSetIsLargeCns();
-        id->idSetIsCall();
-        assert(id->idIsLargeCall());
 
         VarSetOps::Assign(emitComp, id->idcGCvars, GCvars);
         id->idcGcrefRegs = gcrefRegs;
@@ -8774,12 +8772,17 @@ void emitter::emitUpdateLiveGCvars(VARSET_VALARG_TP vars, BYTE* addr)
 
 /*****************************************************************************
  *
- *  Last emitted instruction is a call that is not a NoGC call.
+ *  Last emitted instruction is a call and is not a NoGC call.
  */
 
 bool emitter::emitLastInsIsCallWithGC()
 {
-    return emitLastIns != nullptr && emitLastIns->idIsCall() && !emitLastIns->idIsNoGC();
+    if (emitLastIns == nullptr || (emitLastInsIG->igFlags & IGF_PLACEHOLDER))
+    {
+        return false;
+    }
+
+    return emitLastIns->idIsCall() && !emitLastIns->idIsNoGC();
 }
 
 /*****************************************************************************

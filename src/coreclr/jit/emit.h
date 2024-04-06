@@ -786,6 +786,7 @@ protected:
         unsigned _idCustom3 : 1;
 
 #define _idBound          _idCustom1 /* jump target / frame offset bound */
+#define _idLarge          _idCustom1 /* large call descriptor used */
 #define _idTlsGD          _idCustom2 /* Used to store information related to TLS GD access on linux */
 #define _idNoGC           _idCustom3 /* Some helpers don't get recorded in GC tables */
 #define _idEvexAaaContext (_idCustom3 << 2) | (_idCustom2 << 1) | _idCustom1 /* bits used for the EVEX.aaa context */
@@ -1606,17 +1607,26 @@ protected:
 
         bool idIsLargeCall() const
         {
-            return idIsCall() && idIsLargeCns();
+            assert(!IsAvx512OrPriorInstruction(_idIns));
+            return idIsCall() && _idLarge == 1;
+        }
+        void idSetIsLargeCall()
+        {
+            assert(!IsAvx512OrPriorInstruction(_idIns));
+            idSetIsCall();
+            _idLarge = 1;
         }
 
         bool idIsBound() const
         {
             assert(!IsAvx512OrPriorInstruction(_idIns));
+            assert(!idIsCall());
             return _idBound != 0;
         }
         void idSetIsBound()
         {
             assert(!IsAvx512OrPriorInstruction(_idIns));
+            assert(!idIsCall());
             _idBound = 1;
         }
 
@@ -2876,9 +2886,11 @@ private:
     // Mark this instruction group as having a label; return the new instruction group.
     // Sets the emitter's record of the currently live GC variables
     // and registers.
-    void* emitAddLabel(VARSET_VALARG_TP    GCvars,
-                       regMaskTP           gcrefRegs,
-                       regMaskTP byrefRegs DEBUG_ARG(BasicBlock* block = nullptr));
+    // prevBlock is passed when starting a new block.
+    void* emitAddLabel(VARSET_VALARG_TP GCvars,
+                       regMaskTP        gcrefRegs,
+                       regMaskTP        byrefRegs,
+                       BasicBlock*      prevBlock = nullptr);
 
     // Same as above, except the label is added and is conceptually "inline" in
     // the current block. Thus it extends the previous block and the emitter
