@@ -1515,22 +1515,6 @@ unsigned emitter::emitOutputCall(const insGroup* ig, BYTE* dst, instrDesc* id, c
         VarSetOps::AssignNoCopy(emitComp, GCvars, VarSetOps::MakeEmpty(emitComp));
     }
 
-    /* We update the GC info before the call as the variables cannot be
-        used by the call. Killing variables before the call helps with
-        boundary conditions if the call is CORINFO_HELP_THROW - see bug 50029.
-        If we ever track aliased variables (which could be used by the
-        call), we would have to keep them alive past the call. */
-
-    emitUpdateLiveGCvars(GCvars, dst);
-#ifdef DEBUG
-    // NOTEADD:
-    // Output any delta in GC variable info, corresponding to the before-call GC var updates done above.
-    if (EMIT_GC_VERBOSE || emitComp->opts.disasmWithGC)
-    {
-        emitDispGCVarDelta(); // define in emit.cpp
-    }
-#endif // DEBUG
-
     assert(id->idIns() == INS_jalr);
     if (id->idIsCallRegPtr())
     { // EC_INDIR_R
@@ -1650,6 +1634,16 @@ unsigned emitter::emitOutputCall(const insGroup* ig, BYTE* dst, instrDesc* id, c
     }
 
     dst += 4;
+
+    emitUpdateLiveGCvars(GCvars, dst);
+
+#ifdef DEBUG
+    // Output any delta in GC variable info, corresponding to the GC var updates done above.
+    if (EMIT_GC_VERBOSE || emitComp->opts.disasmWithGC)
+    {
+        emitDispGCVarDelta(); // define in emit.cpp
+    }
+#endif // DEBUG
 
     // If the method returns a GC ref, mark INTRET (A0) appropriately.
     if (id->idGCref() == GCT_GCREF)

@@ -16639,21 +16639,13 @@ size_t emitter::emitOutputInstr(insGroup* ig, instrDesc* id, BYTE** dp)
                 recCall = false;
             }
 
-            /* We update the variable (not register) GC info before the call as the variables cannot be
-               used by the call. Killing variables before the call helps with
-               boundary conditions if the call is CORINFO_HELP_THROW - see bug 50029.
-               If we ever track aliased variables (which could be used by the
-               call), we would have to keep them alive past the call.
-             */
             assert(FitsIn<unsigned char>(dst - *dp));
             callInstrSize = static_cast<unsigned char>(dst - *dp);
 
-            // Note the use of address `*dp`, the call instruction address, instead of `dst`, the post-call-instruction
-            // address.
-            emitUpdateLiveGCvars(GCvars, *dp);
+            emitUpdateLiveGCvars(GCvars, dst);
 
 #ifdef DEBUG
-            // Output any delta in GC variable info, corresponding to the before-call GC var updates done above.
+            // Output any delta in GC variable info, corresponding to the GC var updates done above.
             if (EMIT_GC_VERBOSE || emitComp->opts.disasmWithGC)
             {
                 emitDispGCVarDelta();

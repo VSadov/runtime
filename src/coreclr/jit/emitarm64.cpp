@@ -10695,11 +10695,10 @@ unsigned emitter::emitOutputCall(insGroup* ig, BYTE* dst, instrDesc* id, code_t 
         VarSetOps::AssignNoCopy(emitComp, GCvars, VarSetOps::MakeEmpty(emitComp));
     }
 
-    /* We update the GC info before the call as the variables cannot be
-        used by the call. Killing variables before the call helps with
-        boundary conditions if the call is CORINFO_HELP_THROW - see bug 50029.
-        If we ever track aliased variables (which could be used by the
-        call), we would have to keep them alive past the call. */
+    // Now output the call instruction and update the 'dst' pointer
+    //
+    unsigned outputInstrSize = emitOutput_Instr(dst, code);
+    dst += outputInstrSize;
 
     emitUpdateLiveGCvars(GCvars, dst);
 
@@ -10710,11 +10709,6 @@ unsigned emitter::emitOutputCall(insGroup* ig, BYTE* dst, instrDesc* id, code_t 
         emitDispGCVarDelta();
     }
 #endif // DEBUG
-
-    // Now output the call instruction and update the 'dst' pointer
-    //
-    unsigned outputInstrSize = emitOutput_Instr(dst, code);
-    dst += outputInstrSize;
 
     // All call instructions are 4-byte in size on ARM64
     //

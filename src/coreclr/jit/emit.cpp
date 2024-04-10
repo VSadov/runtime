@@ -2897,12 +2897,58 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
             }
             else
             {
-                // other block kinds should emit something at the end that is not a call.
+                // other block kinds should emit something that is not a call at the end of the block.
                 assert(prevBlock->KindIs(BBJ_ALWAYS));
-                // CONSIDER: We could patch up the previous call instruction with new GC info instead.
-                //           But that will need to be coordinated with how the GC info vor variables is used.
-                //           We currently apply that info to the instruction before the call. It may need to change.
-                emitIns(INS_nop);
+
+                // NB: Here we may see returns that become alive after the call,
+                //     but those are tracked via idGCref/idSecondGCref.
+                //     Otherwise we should not see any RBM_CALLEE_TRASH alive after a GC-capable call.
+                //     Only NoGC helpers may preserve RBM_CALLEE_TRASH.
+
+                instrDesc* id            = emitLastIns;
+                regMaskTP  callGcrefRegs = gcrefRegs;
+                regMaskTP callByrefRegs = byrefRegs;
+
+                assert(!!(callGcrefRegs & RBM_INTRET) == (id->idGCref() == GCT_GCREF));
+                assert(!!(callByrefRegs & RBM_INTRET) == (id->idGCref() == GCT_BYREF));
+                callGcrefRegs &= ~RBM_INTRET;
+                callByrefRegs &= ~RBM_INTRET;
+
+                if (id->idIsLargeCall())
+                {
+                    instrDescCGCA* idCall = (instrDescCGCA*)id;
+#if MULTIREG_HAS_SECOND_GC_RET
+                    assert(!!(callGcrefRegs & RBM_INTRET_1) == (idCall->idSecondGCref() == GCT_GCREF));
+                    assert(!!(callByrefRegs & RBM_INTRET_1) == (idCall->idSecondGCref() == GCT_BYREF));
+                    callGcrefRegs &= ~RBM_INTRET_1;
+                    callByrefRegs &= ~RBM_INTRET_1;
+#endif // MULTIREG_HAS_SECOND_GC_RET
+
+                    assert((callGcrefRegs & RBM_CALLEE_TRASH) == 0);
+                    assert((callByrefRegs & RBM_CALLEE_TRASH) == 0);
+
+                    // new set must be a subset of old one
+                    assert((idCall->idcGcrefRegs & callGcrefRegs) == callGcrefRegs);
+                    assert((idCall->idcByrefRegs & callByrefRegs) == callByrefRegs);
+                    assert(VarSetOps::IsSubset(emitComp, GCvars, idCall->idcGCvars));
+
+                    // Update the liveness set.
+                    VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
+                    idCall->idcGcrefRegs = callGcrefRegs;
+                    idCall->idcByrefRegs = callByrefRegs;
+                }
+                else
+                {
+                    assert(callByrefRegs == RBM_NONE);
+                    assert(VarSetOps::IsEmpty(emitComp, GCvars));
+                    assert((callGcrefRegs & RBM_CALLEE_TRASH) == 0);
+
+                    // new set must be a subset of old one
+                    assert((emitDecodeCallGCregs(id) & callGcrefRegs) == callGcrefRegs);
+
+                    // Update the liveness set.
+                    emitEncodeCallGCregs(callGcrefRegs, id);
+                }
             }
         }
     }
