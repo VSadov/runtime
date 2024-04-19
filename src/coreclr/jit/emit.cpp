@@ -2940,7 +2940,11 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                         VarSetOps::IsSubset(emitComp, GCvars, idCall->idcGCvars))
                     {
                         // Update the liveness set.
-                        VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
+                        if (!VarSetOps::Equal(emitComp, idCall->idcGCvars, GCvars))
+                        {
+                            printf("#######\n");
+                            // VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
+                        }
                         idCall->idcGcrefRegs = callGcrefRegs;
                         idCall->idcByrefRegs = callByrefRegs;
                     }
@@ -2974,7 +2978,6 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                         //           It may be unexpected and worth investigating.
                         //           For now we will insert a NOP as we cant fix the info to be larger.
                         // assert(callByrefRegs == RBM_NONE);
-
                         emitIns(INS_nop);
                     }
                 }
