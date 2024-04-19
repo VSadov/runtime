@@ -2933,16 +2933,16 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                     assert((callByrefRegs & RBM_CALLEE_TRASH) == 0);
 
                     // the new live set must be a subset of old one
-                     if ((idCall->idcGcrefRegs & callGcrefRegs) == callGcrefRegs &&
+                    if ((idCall->idcGcrefRegs & callGcrefRegs) == callGcrefRegs &&
                         (idCall->idcByrefRegs & callByrefRegs) == callByrefRegs &&
                         VarSetOps::IsSubset(emitComp, GCvars, idCall->idcGCvars))
-                     {
-                         // Update the liveness set.
-                         VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
-                         idCall->idcGcrefRegs = callGcrefRegs;
-                         idCall->idcByrefRegs = callByrefRegs;
-                     }
-                     else
+                    {
+                        // Update the liveness set.
+                        VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
+                        idCall->idcGcrefRegs = callGcrefRegs;
+                        idCall->idcByrefRegs = callByrefRegs;
+                    }
+                    else
                     {
                         // I have never seen this triggered with large calls.
                         assert(!"The live set is expanding (large call desc)  !!!!");
