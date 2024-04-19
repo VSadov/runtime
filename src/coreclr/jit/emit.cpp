@@ -2945,6 +2945,19 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                             printf("#######\n");
                             // VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
                         }
+
+                        if (idCall->idcGcrefRegs != callGcrefRegs)
+                        {
+                            printf("@@@@@@\n");
+                        }
+
+                        if (idCall->idcByrefRegs != callByrefRegs)
+                        {
+                            printf("******\n");
+                            // VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
+                        }
+
+
                         idCall->idcGcrefRegs = callGcrefRegs;
                         idCall->idcByrefRegs = callByrefRegs;
                     }
@@ -2966,6 +2979,8 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                     if ((emitDecodeCallGCregs(id) & callGcrefRegs) == callGcrefRegs && callByrefRegs == RBM_NONE &&
                         VarSetOps::IsEmpty(emitComp, GCvars))
                     {
+                        printf("&&&&&&&\n");
+
                         // Update the liveness set.
                         emitEncodeCallGCregs(callGcrefRegs, id);
                     }
