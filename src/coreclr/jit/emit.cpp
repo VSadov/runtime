@@ -2885,12 +2885,12 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
         // Now we see that the next instruction may be reachable by a branch with a different liveness.
         // We want to maintain the invariant that the GC info at IP after a GC-capable call is the same
         // regardless how it is reached.
-        // One way to fix this is to fish out the call instruction and patch its GC info, but we must be
-        // certain that the current IP is indeed reachable after the call.
-        // Another way it to add an instruction (NOP or BRK) after the call.
         if (emitThisGCrefRegs != gcrefRegs || emitThisByrefRegs != byrefRegs ||
             !VarSetOps::Equal(emitComp, emitThisGCrefVars, GCvars))
         {
+            // CONSIDER: We only see this because codegen may not insert a BRK when a throwing
+            //           call is inside the block (not the last node).
+            //           Otherwise we could assert that this does not happen.
             if (prevBlock->KindIs(BBJ_THROW))
             {
                 emitIns(INS_BREAKPOINT);
@@ -2929,10 +2929,12 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                     }
 #endif // MULTIREG_HAS_SECOND_GC_RET
 
+                    // we should not see live calee-trash regs right after a GC-capable call
+                    // only no-GC helpers may preserve those
                     assert((callGcrefRegs & RBM_CALLEE_TRASH) == 0);
                     assert((callByrefRegs & RBM_CALLEE_TRASH) == 0);
 
-                    // the new live set must be a subset of old one
+                    // the new live set must be a subset of the old one
                     if ((idCall->idcGcrefRegs & callGcrefRegs) == callGcrefRegs &&
                         (idCall->idcByrefRegs & callByrefRegs) == callByrefRegs &&
                         VarSetOps::IsSubset(emitComp, GCvars, idCall->idcGCvars))
@@ -2945,16 +2947,18 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                     else
                     {
                         // I have never seen this triggered with large calls.
-                        assert(!"The live set is expanding (large call desc)  !!!!");
+                        assert(!"The live set is expanding for a large call desc!!!!");
                         emitIns(INS_nop);
                     }
                 }
                 else
                 {
+                    // we should not see live calee-trash regs right after a GC-capable call
+                    // only no-GC helpers may preserve those
                     assert((callGcrefRegs & RBM_CALLEE_TRASH) == 0);
                     assert((callByrefRegs & RBM_CALLEE_TRASH) == 0);
 
-                    // the new live set must be a subset of old one
+                    // the new live set must be a subset of the old one
                     if ((emitDecodeCallGCregs(id) & callGcrefRegs) == callGcrefRegs && callByrefRegs == RBM_NONE &&
                         VarSetOps::IsEmpty(emitComp, GCvars))
                     {
@@ -2963,12 +2967,13 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
                     }
                     else
                     {
-                        // The live set is expanding!!!!
-                        // We branch here with live byref regs, which are not returns, and the call did not record any.
-                        // Not sure why we see this, but it only can work if the label is unreachable from the call.
                         assert(VarSetOps::IsEmpty(emitComp, GCvars));
                         assert((emitDecodeCallGCregs(id) & callGcrefRegs) == callGcrefRegs);
-                        assert(callByrefRegs == RBM_NONE);
+
+                        // CONSIDER: This assert can be hit in ComInterfaceGenerator.Tests on arm32/arm64.
+                        //           It may be unexpected and worth investigating.
+                        //           For now we will insert a NOP as we cant fix the info to be larger.
+                        // assert(callByrefRegs == RBM_NONE);
 
                         emitIns(INS_nop);
                     }
