@@ -2897,12 +2897,82 @@ void* emitter::emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMas
             }
             else
             {
-                // other block kinds should emit something at the end that is not a call.
+                // other block kinds should emit something that is not a call at the end of the block.
                 assert(prevBlock->KindIs(BBJ_ALWAYS));
-                // CONSIDER: We could patch up the previous call instruction with new GC info instead.
-                //           But that will need to be coordinated with how the GC info vor variables is used.
-                //           We currently apply that info to the instruction before the call. It may need to change.
-                emitIns(INS_nop);
+
+                instrDesc* id            = emitLastIns;
+                regMaskTP  callGcrefRegs = gcrefRegs;
+                regMaskTP  callByrefRegs = byrefRegs;
+
+                // We may see returns that become alive after the call,
+                // We do not need to track those, since they are tracked via idGCref/idSecondGCref.
+                if (id->idGCref() == GCT_GCREF)
+                {
+                    callGcrefRegs &= ~RBM_INTRET;
+                }
+                else if (id->idGCref() == GCT_BYREF)
+                {
+                    callByrefRegs &= ~RBM_INTRET;
+                }
+
+                if (id->idIsLargeCall())
+                {
+                    instrDescCGCA* idCall = (instrDescCGCA*)id;
+#if MULTIREG_HAS_SECOND_GC_RET
+                    if (idCall->idSecondGCref() == GCT_GCREF)
+                    {
+                        callGcrefRegs &= ~RBM_INTRET_1;
+                    }
+                    else if (idCall->idSecondGCref() == GCT_BYREF)
+                    {
+                        callByrefRegs &= ~RBM_INTRET_1;
+                    }
+#endif // MULTIREG_HAS_SECOND_GC_RET
+
+                    assert((callGcrefRegs & RBM_CALLEE_TRASH) == 0);
+                    assert((callByrefRegs & RBM_CALLEE_TRASH) == 0);
+
+                    // the new live set must be a subset of old one
+                     if ((idCall->idcGcrefRegs & callGcrefRegs) == callGcrefRegs &&
+                        (idCall->idcByrefRegs & callByrefRegs) == callByrefRegs &&
+                        VarSetOps::IsSubset(emitComp, GCvars, idCall->idcGCvars))
+                     {
+                         // Update the liveness set.
+                         VarSetOps::Assign(emitComp, idCall->idcGCvars, GCvars);
+                         idCall->idcGcrefRegs = callGcrefRegs;
+                         idCall->idcByrefRegs = callByrefRegs;
+                     }
+                     else
+                    {
+                        // I have never seen this triggered with large calls.
+                        assert(!"The live set is expanding (large call desc)  !!!!");
+                        emitIns(INS_nop);
+                    }
+                }
+                else
+                {
+                    assert((callGcrefRegs & RBM_CALLEE_TRASH) == 0);
+                    assert((callByrefRegs & RBM_CALLEE_TRASH) == 0);
+
+                    // the new live set must be a subset of old one
+                    if ((emitDecodeCallGCregs(id) & callGcrefRegs) == callGcrefRegs && callByrefRegs == RBM_NONE &&
+                        VarSetOps::IsEmpty(emitComp, GCvars))
+                    {
+                        // Update the liveness set.
+                        emitEncodeCallGCregs(callGcrefRegs, id);
+                    }
+                    else
+                    {
+                        // The live set is expanding!!!!
+                        // We branch here with live byref regs, which are not returns, and the call did not record any.
+                        // Not sure why we see this, but it only can work if the label is unreachable from the call.
+                        assert(VarSetOps::IsEmpty(emitComp, GCvars));
+                        assert((emitDecodeCallGCregs(id) & callGcrefRegs) == callGcrefRegs);
+                        assert(callByrefRegs == RBM_NONE);
+
+                        emitIns(INS_nop);
+                    }
+                }
             }
         }
     }
