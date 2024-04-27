@@ -287,7 +287,6 @@ public:
     //
     void SetGCSpecial();
     bool IsGCSpecial();
-    bool CatchAtSafePoint();
 
     //
     // Managed/unmanaged interop transitions support APIs
