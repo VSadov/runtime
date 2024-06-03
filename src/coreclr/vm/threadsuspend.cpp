@@ -5897,10 +5897,10 @@ bool Thread::InjectActivation(ActivationReason reason)
     // Try to avoid sending signals/APCs when another one is in progress,
     // as they may interrupt one another or queue up.
     // Just one at a time is enough. More is not better here.
-    if (m_hasPendingActivation)
-    {
-        return true;
-    }
+    //if (m_hasPendingActivation)
+    //{
+    //    return true;
+    //}
 
 #ifdef FEATURE_SPECIAL_USER_MODE_APC
     _ASSERTE(UseSpecialUserModeApc());
