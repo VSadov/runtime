@@ -124,9 +124,9 @@ void minipal_microsleep(uint32_t usecs, uint32_t* usecsSinceYield)
     }
 #endif
 
-    // start with 16 yields and then double up until we hit the limit
+    // start with 4 yields and then double up until we hit the limit
     // this way we should not overshoot by more than 2x.
-    for (int i = 4; i < 30; i++)
+    for (int i = 2; i < 30; i++)
     {
         for (int j = 0; j < (1 << i); j++)
         {
