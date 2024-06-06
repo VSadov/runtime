@@ -1,10 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-#include <time.h>
-#include <errno.h>
 #include <assert.h>
-
 #include <minipal/time.h>
 
 #ifdef HOST_WINDOWS
@@ -28,6 +25,10 @@ int64_t minipal_hires_tick_frequency()
 #else // HOST_WINDOWS
 
 #include "minipalconfig.h"
+
+#include <time.h> // nanosleep
+#include <sched.h> // sched_yield
+#include <errno.h>
 
 inline void YieldProcessor()
 {
@@ -104,11 +105,11 @@ void minipal_microsleep(uint32_t usecs, uint32_t* usecsSinceYield)
 #else
     if (usecs > 10)
     {
-        timespec requested;
+        struct timespec requested;
         requested.tv_sec = usecs / tccSecondsToNanoSeconds;
         requested.tv_nsec = (usecs - requested.tv_sec * tccSecondsToNanoSeconds) * tccSecondsToNanoSeconds;
 
-        timespec remaining;
+        struct timespec remaining;
         while (nanosleep(&requested, &remaining) == EINTR)
         {
             requested = remaining;

@@ -8,4 +8,23 @@ check_function_exists(sysctlbyname HAVE_SYSCTLBYNAME)
 check_symbol_exists(arc4random_buf "stdlib.h" HAVE_ARC4RANDOM_BUF)
 check_symbol_exists(O_CLOEXEC fcntl.h HAVE_O_CLOEXEC)
 
+check_symbol_exists(
+    clock_gettime_nsec_np
+    time.h
+    HAVE_CLOCK_GETTIME_NSEC_NP)
+
+check_cxx_source_runs("
+#include <stdlib.h>
+#include <time.h>
+#include <sys/time.h>
+
+int main()
+{
+  int ret;
+  struct timespec ts;
+  ret = clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  exit(ret);
+}" HAVE_CLOCK_MONOTONIC)
+
 configure_file(${CMAKE_CURRENT_LIST_DIR}/minipalconfig.h.in ${CMAKE_CURRENT_BINARY_DIR}/minipalconfig.h)
