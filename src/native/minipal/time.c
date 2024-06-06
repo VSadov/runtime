@@ -145,7 +145,7 @@ void minipal_microsleep(uint32_t usecs, uint32_t* usecsSinceYield)
         *usecsSinceYield += usecs;
 
         // make sure our spining is not starving other threads, but not too often,
-        // as this can cause a 1-15 msec delay, depending on OS
+        // as this can cause unpredictable delays
         if (*usecsSinceYield > 1000)
         {
             SwitchToThread();
