@@ -2189,6 +2189,8 @@ void Thread::RareDisablePreemptiveGC()
 #if defined(FEATURE_HIJACK) && !defined(TARGET_UNIX)
             ResetThreadState(Thread::TS_GCSuspendRedirected);
 #endif
+            // make sure this is cleared - in case a signal is lost or somehow we did not act on it
+            m_hasPendingActivation = false;
 
             DWORD status = GCHeapUtilities::GetGCHeap()->WaitUntilGCComplete();
             if (status != S_OK)
@@ -5902,8 +5904,9 @@ bool Thread::InjectActivation(ActivationReason reason)
         HANDLE hThread = GetThreadHandle();
         if (hThread != INVALID_HANDLE_VALUE)
         {
-            m_hasPendingActivation = true;
-            return ::PAL_InjectActivation(hThread);
+            BOOL success = ::PAL_InjectActivation(hThread);
+            m_hasPendingActivation = success;
+            return success;
         }
     }
 
