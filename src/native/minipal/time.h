@@ -17,11 +17,11 @@ extern "C"
     // Returns the frequency of high resolution timer ticks in Hz
     int64_t minipal_hires_tick_frequency();
 
-    // Delays execution of current thread by usec microseconds.
+    // Delays execution of current thread by `usecs` microseconds.
     // The delay is best-effort and may take longer than desired.
     // Some delays, depending on OS and duration, could be implemented via busy waiting.
     //
-    // If not NULL, usecsSinceYield keeps track of busy-waiting time, so that
+    // If not NULL, `usecsSinceYield` keeps track of busy-waiting time, so that
     // the containing algorithm could handle cases when busy-waiting time is too high.
     void minipal_microsleep(uint32_t usecs, uint32_t* usecsSinceYield);
 
