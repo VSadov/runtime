@@ -294,14 +294,14 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
 
         prevRemaining = remaining;
 
-        // If we see 1 msec of uninterrupted wait, it is time to panic.
-        // Since we are stopping threads, there should be free cores to run on.
-        // Perhaps we need to stop a thread that is affinitized to the same core as we are
-        // and possibly running at lower priority.
-        // Let's pause to make sure everything can run. This should hapen very rarely.
+        // If we see 1 msec of uninterrupted wait, it is a concern.
+        // Since we are stopping threads, there should be free cores to run on. Perhaps
+        // some thread that we need to stop needs to run on the same core as ours.
+        // Let's yield the timeslice to make sure such threads can run.
+        // We will not do this often though, since this can introduce arbitrary delays.
         if (usecsSinceYield > 1000)
         {
-            PalSleep(1);
+            PalSwitchToThread();
             usecsSinceYield = 0;
         }
     }
