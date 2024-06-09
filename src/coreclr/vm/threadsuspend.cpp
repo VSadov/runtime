@@ -5904,8 +5904,13 @@ bool Thread::InjectActivation(ActivationReason reason)
         HANDLE hThread = GetThreadHandle();
         if (hThread != INVALID_HANDLE_VALUE)
         {
+            m_hasPendingActivation = true;
             BOOL success = ::PAL_InjectActivation(hThread);
-            m_hasPendingActivation = success;
+            if (!success)
+            {
+                m_hasPendingActivation = false;
+            }
+
             return success;
         }
     }
