@@ -49328,15 +49328,17 @@ bool GCHeap::StressHeap(gc_alloc_context * context)
         // - the main value of this stress mode is to catch stack scanning issues at various/rare locations
         //    in the code and gen2 is not needed for that.
 
-        int rgen = StressRNG(100);
+        //int rgen = StressRNG(100);
 
-        // gen0:gen1:gen2 distribution: 90:8:2
-        if (rgen >= 98)
-            rgen = 2;
-        else if (rgen >= 90)
-            rgen = 1;
-        else
-            rgen = 0;
+        //// gen0:gen1:gen2 distribution: 90:8:2
+        //if (rgen >= 98)
+        //    rgen = 2;
+        //else if (rgen >= 90)
+        //    rgen = 1;
+        //else
+        //    rgen = 0;
+
+        int rgen = 2;
 
         GarbageCollectTry (rgen, FALSE, collection_gcstress);
     }
