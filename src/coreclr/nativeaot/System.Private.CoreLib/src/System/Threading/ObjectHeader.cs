@@ -43,9 +43,34 @@ namespace System.Threading
         private const int SBLK_LOCK_RECLEVEL_INC = 0x00010000;    // each level is this much higher than the previous one
         private const int SBLK_RECLEVEL_SHIFT = 16;               // shift right this much to get recursion level
 
+        // We are atomically replacing bits in the header of a pinned object
+        // by itself this is safe, however we must be careful to operate in pointer space.
+        // Historically object's header is not a part of the object and its location belongs to the
+        // previous object in the heap, if such exists.
+        // Seeing a managed reference to the header (as in `ref *pHeader`) would be very confusing to GC.
+        // Transient uses are ok though, as long as there is no chance to have an actual byref value
+        // that is reportable as a GC root.
+        private static unsafe int CompareExchangePtr(int* ptr, int value, int comparand)
+        {
+#if TARGET_X86 || TARGET_AMD64 || TARGET_ARM64 || TARGET_RISCV64
+            // This will be expanded as intrinsic, thus a ref to object header will not materialize.
+            return Interlocked.CompareExchange(ref *ptr, value, comparand);
+#else
+            // this API takes a pointer, so we are ok.
+            return RuntimeImports.InterlockedCompareExchange(ptr, value, comparand);
+#endif
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static unsafe int* GetHeaderPtr(MethodTable** ppMethodTable)
         {
+#if TARGET_64BIT
+            if (*((uint*)ppMethodTable - 2) == 0)
+                *((uint*)ppMethodTable - 2) = 0xBBBBBBBB;
+
+            if (*((uint*)ppMethodTable - 2) != 0xBBBBBBBB)
+                throw new InvalidOperationException();
+#endif
             // The header is 4 bytes before m_pEEType field on all architectures
             return (int*)ppMethodTable - 1;
         }
@@ -152,7 +177,7 @@ namespace System.Threading
                 // there is nothing - try set hashcode inline
                 Debug.Assert((oldBits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX) == 0);
                 int newBits = BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX | BIT_SBLK_IS_HASHCODE | oldBits | newHash;
-                if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                if (CompareExchangePtr(pHeader, newBits, oldBits) == oldBits)
                 {
                     return newHash;
                 }
@@ -247,7 +272,7 @@ namespace System.Threading
                 newBits = oldBits & ~(BIT_SBLK_IS_HASHCODE | MASK_HASHCODE_INDEX);
                 newBits |= syncIndex | BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX;
             }
-            while (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) != oldBits);
+            while (CompareExchangePtr(pHeader, newBits, oldBits) != oldBits);
         }
 
         //
@@ -312,7 +337,7 @@ namespace System.Threading
                     // N.B. hashcode, thread ID and sync index are never 0, and hashcode is largest of all
                     if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                     {
-                        if (Interlocked.CompareExchange(ref *pHeader, oldBits | currentThreadID, oldBits) == oldBits)
+                        if (CompareExchangePtr(pHeader, oldBits | currentThreadID, oldBits) == oldBits)
                         {
                             return -1;
                         }
@@ -369,7 +394,7 @@ namespace System.Threading
                         if ((oldBits & MASK_HASHCODE_INDEX) == 0)
                         {
                             int newBits = oldBits | currentThreadID;
-                            if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                            if (CompareExchangePtr(pHeader, newBits, oldBits) == oldBits)
                             {
                                 return -1;
                             }
@@ -398,7 +423,7 @@ namespace System.Threading
                             int newBits = oldBits + SBLK_LOCK_RECLEVEL_INC;
                             if ((newBits & SBLK_MASK_LOCK_RECLEVEL) != 0)
                             {
-                                if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                                if (CompareExchangePtr(pHeader, newBits, oldBits) == oldBits)
                                 {
                                     return -1;
                                 }
@@ -458,7 +483,7 @@ namespace System.Threading
                             oldBits - SBLK_LOCK_RECLEVEL_INC :
                             oldBits & ~SBLK_MASK_LOCK_THREADID;
 
-                        if (Interlocked.CompareExchange(ref *pHeader, newBits, oldBits) == oldBits)
+                        if (CompareExchangePtr(pHeader, newBits, oldBits) == oldBits)
                         {
                             return;
                         }

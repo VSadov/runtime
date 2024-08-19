@@ -757,12 +757,29 @@ namespace ILCompiler
 
         private T Get<T>(CliOption<T> option) => _command.Result.GetValue(option);
 
-        private static int Main(string[] args) =>
-            new CliConfiguration(new ILCompilerRootCommand(args)
+        private static int Main(string[] args)
+        {
+            System.Threading.Tasks.Task.Run(
+                () =>
+                {
+                    for (; ; )
+                    {
+                        object o = new object();
+                        System.Threading.Thread.SpinWait(200);
+                        o = new object();
+                        System.Threading.Thread.Sleep(0);
+                        o = new object();
+
+                        System.GC.Collect(0);
+                    }
+                });
+
+            return new CliConfiguration(new ILCompilerRootCommand(args)
                 .UseVersion()
                 .UseExtendedHelp(ILCompilerRootCommand.GetExtendedHelp))
             {
                 ResponseFileTokenReplacer = Helpers.TryReadResponseFile
             }.Invoke(args);
+        }
     }
 }

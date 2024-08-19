@@ -3394,6 +3394,7 @@ GenTree* Compiler::impIntrinsic(CORINFO_CLASS_HANDLE    clsHnd,
             case NI_Internal_Runtime_MethodTable_Of:
             case NI_System_Activator_AllocatorOf:
             case NI_System_Activator_DefaultConstructorOf:
+            case NI_System_Threading_Interlocked_CompareExchange:
                 betterToExpand = true;
                 break;
 
