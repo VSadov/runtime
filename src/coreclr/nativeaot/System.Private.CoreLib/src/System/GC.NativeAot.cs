@@ -900,5 +900,49 @@ namespace System
         {
             return RuntimeImports.RhGetGenerationBudget(generation);
         }
+
+        internal sealed class Stress
+        {
+#pragma warning disable CA2255
+            [ModuleInitializer]
+#pragma warning restore CA2255
+            internal static void Start()
+            {
+                Threading.Thread thread = null!;
+                thread = new Threading.Thread(
+                    () =>
+                    {
+                        System.Diagnostics.Stopwatch stopWatch = new System.Diagnostics.Stopwatch();
+                        for (; ; )
+                        {
+                            stopWatch.Restart();
+                            System.GC.Collect(0);
+                            stopWatch.Stop();
+
+                            // proportional to GC pause
+                            long pauseUsec = stopWatch.ElapsedTicks / 16;
+
+                            stopWatch.Restart();
+                            int i = 1;
+                            do
+                            {
+                                i *= 2;
+                                System.Threading.Thread.SpinWait(i);
+                            }
+                            while (stopWatch.ElapsedTicks < pauseUsec);
+
+                            object[] o = new object[Random.Shared.Next(128) + 1];
+                            o[0] = thread;
+                            o = new object[Random.Shared.Next(128) + 1];
+                            o[0] = o;
+                            o = new object[Random.Shared.Next(128) + 1];
+                            o[0] = o;
+                        }
+                    });
+
+                thread.IsBackground = true;
+                thread.Start();
+            }
+        }
     }
 }
