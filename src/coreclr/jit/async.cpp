@@ -764,10 +764,7 @@ CallDefinitionInfo AsyncTransformation::CanonicalizeCallDefinition(BasicBlock*  
         assert(call->TypeIs(TYP_VOID));
 
         // For async2 methods we always expect retbufs to point to locals. We
-        // ensure this in impStoreStruct. TODO-CQ: We can handle common "direct
-        // assignment" cases, e.g. obj.StructVal = Call(), by seeing if there
-        // is a base TYP_REF and keeping that live. This would avoid
-        // introducing copies in the importer on the synchronous path.
+        // ensure this in impStoreStruct.
         noway_assert(retbufArg->GetNode()->OperIs(GT_LCL_ADDR));
 
         callDefInfo.DefinitionNode = retbufArg->GetNode()->AsLclVarCommon();
