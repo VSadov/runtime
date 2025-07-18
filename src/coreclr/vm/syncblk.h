@@ -872,7 +872,7 @@ class SyncBlock
     //
     // We can't afford to use an SList<> here because we only want to burn
     // space for the minimum, which is the pointer within an SLink.
-    SLink       m_Link;
+    SLink       m_SbLink;
 
     // This is the hash code for the object. It can either have been transferred
     // from the header dword, in which case it will be limited to 26 bits, or

@@ -230,11 +230,11 @@ inline WaitEventLink *ThreadQueue::DequeueThread(SyncBlock *psb)
     SyncBlockCache::LockHolder lh(SyncBlockCache::GetSyncBlockCache());
 
     WaitEventLink      *ret = NULL;
-    SLink       *pLink = psb->m_Link.m_pNext;
+    SLink       *pLink = psb->m_SbLink.m_pNext;
 
     if (pLink)
     {
-        psb->m_Link.m_pNext = pLink->m_pNext;
+        psb->m_SbLink.m_pNext = pLink->m_pNext;
 #ifdef _DEBUG
         pLink->m_pNext = (SLink *)POISONC;
 #endif
@@ -264,7 +264,7 @@ inline void ThreadQueue::EnqueueThread(WaitEventLink *pWaitEventLink, SyncBlock 
     // it must be valid even if the lock is held. Be careful if you change the way the queue is updated.
     SyncBlockCache::LockHolder lh(SyncBlockCache::GetSyncBlockCache());
 
-    SLink       *pPrior = &psb->m_Link;
+    SLink       *pPrior = &psb->m_SbLink;
 
     while (pPrior->m_pNext)
     {
@@ -296,7 +296,7 @@ BOOL ThreadQueue::RemoveThread (Thread *pThread, SyncBlock *psb)
     // it must be valid even if the lock is held. Be careful if you change the way the queue is updated.
     SyncBlockCache::LockHolder lh(SyncBlockCache::GetSyncBlockCache());
 
-    SLink       *pPrior = &psb->m_Link;
+    SLink       *pPrior = &psb->m_SbLink;
     SLink       *pLink;
     WaitEventLink *pWaitEventLink;
 
@@ -335,7 +335,7 @@ void ThreadQueue::EnumerateThreads(SyncBlock *psb, FP_TQ_THREAD_ENUMERATION_CALL
     CONTRACTL_END;
     SUPPORTS_DAC;
 
-    PTR_SLink pLink = psb->m_Link.m_pNext;
+    PTR_SLink pLink = psb->m_SbLink.m_pNext;
     PTR_WaitEventLink pWaitEventLink;
 
     while (pLink != NULL)
@@ -662,7 +662,7 @@ void    SyncBlockCache::InsertCleanupSyncBlock(SyncBlock* psb)
 
     // free up the threads that are waiting before we use the link
     // for other purposes
-    if (psb->m_Link.m_pNext != NULL)
+    if (psb->m_SbLink.m_pNext != NULL)
     {
         while (ThreadQueue::DequeueThread(psb) != NULL)
             continue;
@@ -682,8 +682,8 @@ void    SyncBlockCache::InsertCleanupSyncBlock(SyncBlock* psb)
     // we don't need to lock here
     //EnterCacheLock();
 
-    psb->m_Link.m_pNext = m_pCleanupBlockList;
-    m_pCleanupBlockList = &psb->m_Link;
+    psb->m_SbLink.m_pNext = m_pCleanupBlockList;
+    m_pCleanupBlockList = &psb->m_SbLink;
 
     // we don't need a lock here
     //LeaveCacheLock();
@@ -700,7 +700,7 @@ SyncBlock* SyncBlockCache::GetNextCleanupSyncBlock()
     if (m_pCleanupBlockList)
     {
         // get the actual sync block pointer
-        psb = (SyncBlock *) (((BYTE *) m_pCleanupBlockList) - offsetof(SyncBlock, m_Link));
+        psb = (SyncBlock *) (((BYTE *) m_pCleanupBlockList) - offsetof(SyncBlock, m_SbLink));
         m_pCleanupBlockList = m_pCleanupBlockList->m_pNext;
     }
     return psb;
@@ -737,7 +737,7 @@ SyncBlock *SyncBlockCache::GetNextFreeSyncBlock()
         m_FreeCount--;
 
         // get the actual sync block pointer
-        psb = (SyncBlock *) (((BYTE *) plst) - offsetof(SyncBlock, m_Link));
+        psb = (SyncBlock *) (((BYTE *) plst) - offsetof(SyncBlock, m_SbLink));
 
         return psb;
     }
@@ -973,8 +973,8 @@ void    SyncBlockCache::DeleteSyncBlockMemory(SyncBlock *psb)
     m_ActiveCount--;
     m_FreeCount++;
 
-    psb->m_Link.m_pNext = m_FreeBlockList;
-    m_FreeBlockList = &psb->m_Link;
+    psb->m_SbLink.m_pNext = m_FreeBlockList;
+    m_FreeBlockList = &psb->m_SbLink;
 
 }
 
@@ -997,8 +997,8 @@ void SyncBlockCache::GCDeleteSyncBlock(SyncBlock *psb)
     m_ActiveCount--;
     m_FreeCount++;
 
-    psb->m_Link.m_pNext = m_FreeBlockList;
-    m_FreeBlockList = &psb->m_Link;
+    psb->m_SbLink.m_pNext = m_FreeBlockList;
+    m_FreeBlockList = &psb->m_SbLink;
 }
 
 void SyncBlockCache::GCWeakPtrScan(HANDLESCANPROC scanProc, uintptr_t lp1, uintptr_t lp2)
