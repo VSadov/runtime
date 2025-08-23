@@ -37,7 +37,7 @@ public class HandlerRefuses
         {
             if (expectUnhandledException)
             {
-                Environment.Exit(100);
+                Assert.Null(lastEx);
             }
         };
 
@@ -78,6 +78,7 @@ public class HandlerRefuses
             finally
             {
                 Assert.Null(lastEx);
+                Environment.Exit(100);
             }
         });
 

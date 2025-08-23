@@ -34,10 +34,9 @@ public class ForeignUnhandled
     {
         AppDomain.CurrentDomain.UnhandledException += (_, _) =>
         {
-            if (expectUnhandledException &&
-                lastEx == null)
+            if (expectUnhandledException)
             {
-                Environment.Exit(100);
+                Assert.Null(lastEx);
             }
         };
 
@@ -75,6 +74,7 @@ public class ForeignUnhandled
             finally
             {
                 Assert.Null(lastEx);
+                Environment.Exit(100);
             }
         });
 

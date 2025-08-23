@@ -12,7 +12,6 @@ public class NoEffectInMainThread
     private static Exception lastEx;
 
     private static bool expectUnhandledException = false;
-    private static bool finallyHasRun = false;
 
     private static bool Handler(Exception ex)
     {
@@ -30,11 +29,9 @@ public class NoEffectInMainThread
     {
         AppDomain.CurrentDomain.UnhandledException += (_, _) =>
         {
-            if (expectUnhandledException &&
-                lastEx == null &&
-                !finallyHasRun)
+            if (expectUnhandledException)
             {
-                Environment.Exit(100);
+                Assert.Null(lastEx);
             }
         };
 
@@ -71,7 +68,8 @@ public class NoEffectInMainThread
         }
         finally
         {
-            finallyHasRun = true;
+            Assert.Null(lastEx);
+            Environment.Exit(100);
         }
 
         // should not reach here
