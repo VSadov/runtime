@@ -71,6 +71,12 @@ namespace System.Text.Json.Serialization
             bufferState._isFinalBlock = readResult.IsCompleted;
             bufferState.ProcessReadBytes();
 
+            if (_utf8Json == null)
+                throw new Exception("AFTER AWAIT1: _utf8Json == null");
+
+            if (bufferState._utf8Json == null)
+                throw new Exception("AFTER AWAIT2: bufferState._utf8Json == null");
+
             if (readResult.IsCanceled)
             {
                 ThrowHelper.ThrowOperationCanceledException_PipeReadCanceled();
