@@ -57,6 +57,9 @@ namespace System.Text.Json.Serialization
         {
             Debug.Assert(_sequence.Equals(ReadOnlySequence<byte>.Empty), "ReadAsync should only be called when the buffer is empty.");
 
+            if (_utf8Json == null)
+                throw new Exception("READ_ASYNC: _utf8Json == null");
+
             // Since mutable structs don't work well with async state machines,
             // make all updates on a copy which is returned once complete.
             PipeReadBufferState bufferState = this;

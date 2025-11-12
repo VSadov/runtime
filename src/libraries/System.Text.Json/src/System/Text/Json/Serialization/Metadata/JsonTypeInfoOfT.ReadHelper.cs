@@ -32,17 +32,11 @@ namespace System.Text.Json.Serialization.Metadata
             readStack.Initialize(this, supportContinuation: true);
             var jsonReaderState = new JsonReaderState(options.GetReaderOptions());
 
-            if (bufferState == null)
-                throw new Exception("BEFORE TRY: bufferState == null");
-
             try
             {
                 while (true)
                 {
                     bufferState = await bufferState.ReadAsync(utf8Json, cancellationToken).ConfigureAwait(false);
-
-                    if (utf8Json == null)
-                        throw new Exception("AFTER READASYNC: bufferState == null");
 
                     bool success = ContinueDeserialize<TReadBufferState, TStream>(
                         ref bufferState,
