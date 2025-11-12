@@ -147,7 +147,7 @@ namespace System.Text.Json.Serialization
             // We should make sure to call AdvanceTo so that future reads on the PipeReader can be done without throwing.
             // We'll advance to the start of the sequence as we don't know how many bytes were consumed.
             if (_utf8Json == null)
-                Debug.WriteLine("_utf8Json == null");
+                throw new Exception("_utf8Json == null");
 
             //if (_sequence == null)
             //    System.Console.WriteLine("_sequence == null");
