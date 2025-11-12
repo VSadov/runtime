@@ -22,6 +22,9 @@ namespace System.Text.Json.Serialization
 
         public PipeReadBufferState(PipeReader utf8Json)
         {
+            if (utf8Json == null)
+                throw new Exception("IN CTOR: _utf8Json == null");
+
             _utf8Json = utf8Json;
         }
 
