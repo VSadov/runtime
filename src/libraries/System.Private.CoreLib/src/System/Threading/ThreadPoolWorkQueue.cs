@@ -420,21 +420,17 @@ namespace System.Threading
         private readonly int[] _assignedWorkItemQueueThreadCounts =
             s_assignableWorkItemQueueCount > 0 ? new int[s_assignableWorkItemQueueCount] : Array.Empty<int>();
 
-        private object? _nextWorkItemToProcess;
-
-        // The scheme works as follows:
-        // - From NotScheduled, the only transition is to Scheduled when new items are enqueued and a thread is requested to process them.
-        // - From Scheduled, the only transition is to Determining right before trying to dequeue an item.
-        // - From Determining, it can go to either NotScheduled when no items are present in the queue (the previous thread processed all of them)
-        //   or Scheduled if the queue is still not empty (let the current thread handle parallelization as convinient).
-        //
-        // The goal is to avoid requesting more threads than necessary, while still ensuring that all items are processed.
-        // Another thread isn't requested hastily while the state is Determining,
-        // instead the parallelizer takes care of that. We also ensure that only one thread can be parallelizing at any time.
         private enum QueueProcessingStage
         {
+            // NotScheduled has no guarantees
             NotScheduled,
-            Determining,
+            // Scheduled means something will sweep through workitems and
+            // pick up work.
+            // NB: The state must be cleared _before_ sweeping.
+            //     Otherwise there is a window between finding no more items
+            //     and resetting the flag, when the flag is in a wrong state.
+            //     A new item may be added right before the flag is reset
+            //     without asking for a sweep, while the last sweeper is quitting.
             Scheduled
         }
 
@@ -607,8 +603,7 @@ namespace System.Threading
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void EnsureThreadRequested()
         {
-            // Only request a thread if the stage is NotScheduled.
-            // Otherwise let the current requested thread handle parallelization.
+            // Only one thread is requested at a time to mitigate Thundering Herd problem.
             if (Interlocked.Exchange(
                 ref _separated.queueProcessingStage,
                 QueueProcessingStage.Scheduled) == QueueProcessingStage.NotScheduled)
@@ -735,15 +730,6 @@ namespace System.Threading
             if (workItem != null)
             {
                 return workItem;
-            }
-
-            if (_nextWorkItemToProcess != null)
-            {
-                workItem = Interlocked.Exchange(ref _nextWorkItemToProcess, null);
-                if (workItem != null)
-                {
-                    return workItem;
-                }
             }
 
             // Check for high-priority work items
@@ -879,7 +865,7 @@ namespace System.Threading
         // Dispatch (if YieldFromDispatchLoop is true), or performing periodic activities
         public const uint DispatchQuantumMs = 30;
 
-        private static object? DequeueWithPriorityAlternation(ThreadPoolWorkQueue workQueue, ThreadPoolWorkQueueThreadLocals tl, out bool missedSteal)
+        private static object? DequeueWithPriorityAlternation(ThreadPoolWorkQueue workQueue, ThreadPoolWorkQueueThreadLocals tl, ref bool missedSteal)
         {
             object? workItem = null;
 
@@ -899,7 +885,6 @@ namespace System.Threading
                 }
             }
 
-            missedSteal = false;
             workItem ??= workQueue.Dequeue(tl, ref missedSteal);
 
             return workItem;
@@ -922,130 +907,44 @@ namespace System.Threading
                 workQueue.AssignWorkItemQueue(tl);
             }
 
-            // The change needs to be visible to other threads that may request a worker thread before a work item is attempted
-            // to be dequeued by the current thread. In particular, if an enqueuer queues a work item and does not request a
-            // thread because it sees a Determining or Scheduled stage, and the current thread is the last thread processing
-            // work items, the current thread must either see the work item queued by the enqueuer, or it must see a stage of
-            // Scheduled, and try to dequeue again or request another thread.
-#if !TARGET_WASI
-            // TODO https://github.com/dotnet/runtime/issues/104803
-            Debug.Assert(workQueue._separated.queueProcessingStage == QueueProcessingStage.Scheduled);
-#endif
-            workQueue._separated.queueProcessingStage = QueueProcessingStage.Determining;
+            // Before dequeuing the first work item, acknowledge that the thread request has been satisfied
+            workQueue._separated.queueProcessingStage = QueueProcessingStage.NotScheduled;
+
+            // The state change must happen before sweeping queues for items.
             Interlocked.MemoryBarrier();
 
             object? workItem = null;
-            if (workQueue._nextWorkItemToProcess != null)
             {
-                workItem = Interlocked.Exchange(ref workQueue._nextWorkItemToProcess, null);
-            }
-
-            if (workItem == null)
-            {
-                // Try to dequeue a work item, clean up and return if no item was found
-                while ((workItem = DequeueWithPriorityAlternation(workQueue, tl, out bool missedSteal)) == null)
+                bool missedSteal = false;
+                workItem = DequeueWithPriorityAlternation(workQueue, tl, ref missedSteal);
+                if (workItem == null)
                 {
-                    //
-                    // No work.
-                    // If we missed a steal, though, there may be more work in the queue.
-                    // Instead of looping around and trying again, we'll just request another thread.  Hopefully the thread
-                    // that owns the contended work-stealing queue will pick up its own workitems in the meantime,
-                    // which will be more efficient than this thread doing it anyway.
-                    //
+                    if (s_assignableWorkItemQueueCount > 0)
+                    {
+                        workQueue.UnassignWorkItemQueue(tl);
+                    }
+
+                    // Missing a steal means there may be an item that we we were unable to get.
+                    // We could be the last worker that looked through queues and we are quitting,
+                    // so we need to make sure someone else will do another pass.
                     if (missedSteal)
                     {
-                        if (s_assignableWorkItemQueueCount > 0)
-                        {
-                            workQueue.UnassignWorkItemQueue(tl);
-                        }
-
-                        Debug.Assert(workQueue._separated.queueProcessingStage != QueueProcessingStage.NotScheduled);
-                        workQueue._separated.queueProcessingStage = QueueProcessingStage.Scheduled;
-                        ThreadPool.RequestWorkerThread();
-                        return true;
+                        workQueue.EnsureThreadRequested();
                     }
 
-                    // The stage here would be Scheduled if an enqueuer has enqueued work and changed the stage, or Determining
-                    // otherwise. If the stage is Determining, there's no more work to do. If the stage is Scheduled, the enqueuer
-                    // would not have scheduled a work item to process the work, so try to dequeue a work item again.
-                    QueueProcessingStage stageBeforeUpdate =
-                        Interlocked.CompareExchange(
-                            ref workQueue._separated.queueProcessingStage,
-                            QueueProcessingStage.NotScheduled,
-                            QueueProcessingStage.Determining);
-                    Debug.Assert(stageBeforeUpdate != QueueProcessingStage.NotScheduled);
-                    if (stageBeforeUpdate == QueueProcessingStage.Determining)
-                    {
-                        if (s_assignableWorkItemQueueCount > 0)
-                        {
-                            workQueue.UnassignWorkItemQueue(tl);
-                        }
-
-                        return true;
-                    }
-
-                    // A work item was enqueued after the stage was set to Determining earlier, and a thread was not requested
-                    // by the enqueuer. Set the stage back to Determining and try to dequeue a work item again.
-                    //
-                    // See the first similarly used memory barrier in the method for why it's necessary.
-                    workQueue._separated.queueProcessingStage = QueueProcessingStage.Determining;
-                    Interlocked.MemoryBarrier();
+                    // Tell the VM we're returning normally, not because Hill Climbing asked us to return.
+                    return true;
                 }
+
+                // A work item was successfully dequeued, and there may be more work items to process. Request a thread to
+                // parallelize processing of work items, before processing more work items. Following this, it is the
+                // responsibility of the new thread and other enqueuers to request more threads as necessary. The
+                // parallelization may be necessary here for correctness (aside from perf) if the work item blocks for some
+                // reason that may have a dependency on other queued work items.
+                workQueue.EnsureThreadRequested();
+
+                // After this point, this method is no longer responsible for ensuring thread requests except for missed steals
             }
-
-            {
-                // A work item may have been enqueued after the stage was set to Determining earlier, so the stage may be
-                // Scheduled here, and the enqueued work item may have already been dequeued above or by a different thread. Now
-                // that we're about to try dequeuing a second work item, set the stage back to Determining first so that we'll
-                // be able to detect if an enqueue races with the dequeue below.
-                //
-                // See the first similarly used memory barrier in the method for why it's necessary.
-                workQueue._separated.queueProcessingStage = QueueProcessingStage.Determining;
-                Interlocked.MemoryBarrier();
-
-                object? secondWorkItem = DequeueWithPriorityAlternation(workQueue, tl, out bool missedSteal);
-                if (secondWorkItem != null)
-                {
-                    Debug.Assert(workQueue._nextWorkItemToProcess == null);
-                    workQueue._nextWorkItemToProcess = secondWorkItem;
-                }
-
-                if (secondWorkItem != null || missedSteal)
-                {
-                    // A work item was successfully dequeued, and there may be more work items to process. Request a thread to
-                    // parallelize processing of work items, before processing more work items. Following this, it is the
-                    // responsibility of the new thread and other enqueuers to request more threads as necessary. The
-                    // parallelization may be necessary here for correctness (aside from perf) if the work item blocks for some
-                    // reason that may have a dependency on other queued work items.
-                    Debug.Assert(workQueue._separated.queueProcessingStage != QueueProcessingStage.NotScheduled);
-                    workQueue._separated.queueProcessingStage = QueueProcessingStage.Scheduled;
-                    ThreadPool.RequestWorkerThread();
-                }
-                else
-                {
-                    // The stage here would be Scheduled if an enqueuer has enqueued work and changed the stage, or Determining
-                    // otherwise. If the stage is Determining, there's no more work to do. If the stage is Scheduled, the enqueuer
-                    // would not have requested a thread, so request one now.
-                    QueueProcessingStage stageBeforeUpdate =
-                        Interlocked.CompareExchange(
-                            ref workQueue._separated.queueProcessingStage,
-                            QueueProcessingStage.NotScheduled,
-                            QueueProcessingStage.Determining);
-                    Debug.Assert(stageBeforeUpdate != QueueProcessingStage.NotScheduled);
-                    if (stageBeforeUpdate == QueueProcessingStage.Scheduled)
-                    {
-                        // A work item was enqueued after the stage was set to Determining earlier, and a thread was not
-                        // requested by the enqueuer, so request a thread now. An alternate is to retry dequeuing, as requesting
-                        // a thread can be more expensive, but retrying multiple times (though unlikely) can delay the
-                        // processing of the first work item that was already dequeued.
-                        ThreadPool.RequestWorkerThread();
-                    }
-                }
-            }
-
-            //
-            // After this point, this method is no longer responsible for ensuring thread requests except for missed steals
-            //
 
             // Has the desire for logging changed since the last time we entered?
             workQueue.RefreshLoggingEnabled();
@@ -1079,13 +978,9 @@ namespace System.Threading
                             workQueue.UnassignWorkItemQueue(tl);
                         }
 
-                        //
-                        // No work.
-                        // If we missed a steal, though, there may be more work in the queue.
-                        // Instead of looping around and trying again, we'll just request another thread.  Hopefully the thread
-                        // that owns the contended work-stealing queue will pick up its own workitems in the meantime,
-                        // which will be more efficient than this thread doing it anyway.
-                        //
+                        // Missing a steal means there may be an item that we we were unable to get.
+                        // We could be the last worker that looked through queues and we are quitting,
+                        // so we need to make sure someone else will do another pass.
                         if (missedSteal)
                         {
                             workQueue.EnsureThreadRequested();
@@ -1277,19 +1172,16 @@ namespace System.Threading
         where T : struct
         where TCallback : struct, IThreadPoolTypedWorkItemQueueCallback<T>
     {
-        // The scheme works as follows:
-        // - From NotScheduled, the only transition is to Scheduled when new items are enqueued and a TP work item is enqueued to process them.
-        // - From Scheduled, the only transition is to Determining right before trying to dequeue an item.
-        // - From Determining, it can go to either NotScheduled when no items are present in the queue (the previous TP work item processed all of them)
-        //   or Scheduled if the queue is still not empty (let the current TP work item handle parallelization as convinient).
-        //
-        // The goal is to avoid enqueueing more TP work items than necessary, while still ensuring that all items are processed.
-        // Another TP work item isn't enqueued to the thread pool hastily while the state is Determining,
-        // instead the parallelizer takes care of that. We also ensure that only one thread can be parallelizing at any time.
         private enum QueueProcessingStage
         {
+            // No guarantees
             NotScheduled,
-            Determining,
+            // Something will sweep through workitems and pick up work.
+            // NB: The state must be cleared _before_ sweeping.
+            //     Otherwise there is a window between finding no more items
+            //     and resetting the flag, when the flag is in a wrong state.
+            //     A new item may be added right before the flag is reset
+            //     without asking for a sweep, while the last sweeper is quitting.
             Scheduled
         }
 
@@ -1305,93 +1197,58 @@ namespace System.Threading
         }
 
         public void BatchEnqueue(T workItem) => _workItems.Enqueue(workItem);
-        public void CompleteBatchEnqueue()
+        public void CompleteBatchEnqueue() => EnsureWorkerScheduled();
+
+        private void EnsureWorkerScheduled()
         {
-            // Only enqueue a work item if the stage is NotScheduled.
-            // Otherwise there must be a work item already queued or another thread already handling parallelization.
+            // Only one worker is requested at a time to mitigate Thundering Herd problem.
             if (Interlocked.Exchange(
                 ref _queueProcessingStage,
                 QueueProcessingStage.Scheduled) == QueueProcessingStage.NotScheduled)
             {
+                // Currently where this type is used, queued work is expected to be processed
+                // at high priority. The implementation could be modified to support different
+                // priorities if necessary.
                 ThreadPool.UnsafeQueueHighPriorityWorkItemInternal(this);
             }
         }
 
-        private void UpdateQueueProcessingStage(bool isQueueEmpty)
-        {
-            if (!isQueueEmpty)
-            {
-                // There are more items to process, set stage to Scheduled and enqueue a TP work item.
-                _queueProcessingStage = QueueProcessingStage.Scheduled;
-            }
-            else
-            {
-                // The stage here would be Scheduled if an enqueuer has enqueued work and changed the stage, or Determining
-                // otherwise. If the stage is Determining, there's no more work to do. If the stage is Scheduled, the enqueuer
-                // would not have scheduled a work item to process the work, so schedule one one.
-                QueueProcessingStage stageBeforeUpdate =
-                    Interlocked.CompareExchange(
-                        ref _queueProcessingStage,
-                        QueueProcessingStage.NotScheduled,
-                        QueueProcessingStage.Determining);
-                Debug.Assert(stageBeforeUpdate != QueueProcessingStage.NotScheduled);
-                if (stageBeforeUpdate == QueueProcessingStage.Determining)
-                {
-                    return;
-                }
-            }
-
-            ThreadPool.UnsafeQueueHighPriorityWorkItemInternal(this);
-        }
-
         void IThreadPoolWorkItem.Execute()
         {
-            T workItem;
-            while (true)
+            // We are asking for one worker at a time, thus the sate should be Scheduled.
+            Debug.Assert(_queueProcessingStage == QueueProcessingStage.Scheduled);
+            _queueProcessingStage = QueueProcessingStage.NotScheduled;
+
+            // Checking for items must happen after resetting the processing state.
+            Interlocked.MemoryBarrier();
+
+            if (!_workItems.TryDequeue(out var workItem))
             {
-                Debug.Assert(_queueProcessingStage == QueueProcessingStage.Scheduled);
-
-                // The change needs to be visible to other threads that may request a worker thread before a work item is attempted
-                // to be dequeued by the current thread. In particular, if an enqueuer queues a work item and does not request a
-                // thread because it sees a Determining or Scheduled stage, and the current thread is the last thread processing
-                // work items, the current thread must either see the work item queued by the enqueuer, or it must see a stage of
-                // Scheduled, and try to dequeue again or request another thread.
-                _queueProcessingStage = QueueProcessingStage.Determining;
-                Interlocked.MemoryBarrier();
-
-                if (_workItems.TryDequeue(out workItem))
-                {
-                    break;
-                }
-
-                // The stage here would be Scheduled if an enqueuer has enqueued work and changed the stage, or Determining
-                // otherwise. If the stage is Determining, there's no more work to do. If the stage is Scheduled, the enqueuer
-                // would not have scheduled a work item to process the work, so try to dequeue a work item again.
-                QueueProcessingStage stageBeforeUpdate =
-                    Interlocked.CompareExchange(
-                        ref _queueProcessingStage,
-                        QueueProcessingStage.NotScheduled,
-                        QueueProcessingStage.Determining);
-                Debug.Assert(stageBeforeUpdate != QueueProcessingStage.NotScheduled);
-                if (stageBeforeUpdate == QueueProcessingStage.Determining)
-                {
-                    // Discount a work item here to avoid counting this queue processing work item
-                    ThreadInt64PersistentCounter.Decrement(
-                        ThreadPoolWorkQueueThreadLocals.threadLocals!.threadLocalCompletionCountObject!);
-                    return;
-                }
+                // Discount a work item here to avoid counting this queue processing work item
+                ThreadInt64PersistentCounter.Decrement(ThreadPoolWorkQueueThreadLocals.threadLocals!.threadLocalCompletionCountObject!);
+                return;
             }
 
-            UpdateQueueProcessingStage(_workItems.IsEmpty);
+            // The batch that is currently in the queue could have asked only for one worker.
+            // We are going to process a workitem, which may take unknown time or even block.
+            // In a worst case the current workitem will indirectly depend on progress of other
+            // items and that would lead to a deadlock.
+            // We must ensure at least one more worker is coming if the queue is not empty.
+            if (!_workItems.IsEmpty)
+            {
+                EnsureWorkerScheduled();
+            }
 
             ThreadPoolWorkQueueThreadLocals tl = ThreadPoolWorkQueueThreadLocals.threadLocals!;
             Debug.Assert(tl != null);
             Thread currentThread = tl.currentThread;
             Debug.Assert(currentThread == Thread.CurrentThread);
-            uint completedCount = 0;
+            // discount 1 for the queue processing item.
+            int completedCount = -1;
             int startTimeMs = Environment.TickCount;
             while (true)
             {
+                completedCount++;
                 TCallback.Invoke(workItem);
 
                 // This work item processes queued work items until certain conditions are met, and tracks some things:
@@ -1401,7 +1258,7 @@ namespace System.Threading
                 //   not starve other thread pool work items. Check how long it has been since this work item has started, and
                 //   yield to the thread pool after some time. The threshold used is half of the thread pool's dispatch quantum,
                 //   which the thread pool uses for doing periodic work.
-                if (++completedCount == uint.MaxValue ||
+                if (completedCount == int.MaxValue ||
                     tl.workStealingQueue.CanSteal ||
                     (uint)(Environment.TickCount - startTimeMs) >= ThreadPoolWorkQueue.DispatchQuantumMs / 2 ||
                     !_workItems.TryDequeue(out workItem))
@@ -1417,10 +1274,9 @@ namespace System.Threading
                 currentThread.ResetThreadPoolThread();
             }
 
-            // Discount a work item here to avoid counting this queue processing work item
             if (completedCount > 1)
             {
-                ThreadInt64PersistentCounter.Add(tl.threadLocalCompletionCountObject!, completedCount - 1);
+                ThreadInt64PersistentCounter.Add(tl.threadLocalCompletionCountObject!, (uint)completedCount);
             }
         }
     }
