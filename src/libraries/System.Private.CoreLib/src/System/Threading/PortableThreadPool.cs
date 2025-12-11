@@ -87,8 +87,9 @@ namespace System.Threading
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 1)]
             public ThreadCounts counts; // SOS's ThreadPool command depends on this name
 
+            // periodically updated time stamp to indicate that we are making progress.
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 2)]
-            public int lastDequeueTime;
+            public int lastDispatchTime;
 
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 3)]
             public int priorCompletionCount;
@@ -97,8 +98,20 @@ namespace System.Threading
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 3 + sizeof(int) * 2)]
             public int nextCompletedWorkRequestsTime;
 
+            // This flag is used for communication between item enqueuing and workers that process the items.
+            // There are two states of this flag:
+            // 0: has no guarantees
+            // 1: means a worker will check work queues and ensure that
+            //    any work items inserted in work queue before setting the flag
+            //    are picked up.
+            //    Note: The state must be cleared by the worker thread _before_
+            //       checking. Otherwise there is a window between finding no work
+            //       and resetting the flag, when the flag is in a wrong state.
+            //       A new work item may be added right before the flag is reset
+            //       without asking for a worker, while the last worker is quitting.
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 4)]
-            public volatile int numRequestedWorkers;
+            public int _hasOutstandingThreadRequest;
+
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 4 + sizeof(int))]
             public int gateThreadRunningState;
         }
@@ -209,7 +222,7 @@ namespace System.Threading
                 else if (_separated.counts.NumThreadsGoal < newMinThreads)
                 {
                     _separated.counts.InterlockedSetNumThreadsGoal(newMinThreads);
-                    if (_separated.numRequestedWorkers > 0)
+                    if (_separated._hasOutstandingThreadRequest != 0)
                     {
                         addWorker = true;
                     }
@@ -330,26 +343,31 @@ namespace System.Threading
             return threadLocalCompletionCountObject;
         }
 
-        private void NotifyWorkItemProgress(object threadLocalCompletionCountObject, int currentTimeMs)
+        private static void NotifyWorkItemProgress(object threadLocalCompletionCountObject)
         {
             ThreadInt64PersistentCounter.Increment(threadLocalCompletionCountObject);
-            _separated.lastDequeueTime = currentTimeMs;
-
-            if (ShouldAdjustMaxWorkersActive(currentTimeMs))
-            {
-                AdjustMaxWorkersActive();
-            }
         }
 
-        internal void NotifyWorkItemProgress() =>
-            NotifyWorkItemProgress(GetOrCreateThreadLocalCompletionCountObject(), Environment.TickCount);
+        internal void NotifyWorkItemProgress()
+        {
+            NotifyWorkItemProgress(GetOrCreateThreadLocalCompletionCountObject());
+        }
 
         internal bool NotifyWorkItemComplete(object? threadLocalCompletionCountObject, int currentTimeMs)
         {
             Debug.Assert(threadLocalCompletionCountObject != null);
+            NotifyWorkItemProgress(threadLocalCompletionCountObject!);
+            if (ShouldAdjustMaxWorkersActive(currentTimeMs))
+            {
+                AdjustMaxWorkersActive();
+            }
 
-            NotifyWorkItemProgress(threadLocalCompletionCountObject!, currentTimeMs);
             return !WorkerThread.ShouldStopProcessingWorkNow(this);
+        }
+
+        internal void NotifyDispatchProgress(int currentTickCount)
+        {
+            _separated.lastDispatchTime = currentTickCount;
         }
 
         //
@@ -459,13 +477,15 @@ namespace System.Threading
             return _pendingBlockingAdjustment == PendingBlockingAdjustment.None;
         }
 
-        internal void RequestWorker()
+        internal void EnsureWorkerRequested()
         {
-            // The order of operations here is important. MaybeAddWorkingWorker() and EnsureRunning() use speculative checks to
-            // do their work and the memory barrier from the interlocked operation is necessary in this case for correctness.
-            Interlocked.Increment(ref _separated.numRequestedWorkers);
-            WorkerThread.MaybeAddWorkingWorker(this);
-            GateThread.EnsureRunning(this);
+            // Only one worker is requested at a time to mitigate Thundering Herd problem.
+            if (_separated._hasOutstandingThreadRequest == 0 &&
+                Interlocked.Exchange(ref _separated._hasOutstandingThreadRequest, 1) == 0)
+            {
+                WorkerThread.MaybeAddWorkingWorker(this);
+                GateThread.EnsureRunning(this);
+            }
         }
 
         private bool OnGen2GCCallback()
