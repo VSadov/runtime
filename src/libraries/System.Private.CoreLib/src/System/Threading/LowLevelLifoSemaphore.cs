@@ -102,7 +102,8 @@ namespace System.Threading
             int spinIndex = isSingleProcessor ? SpinSleep0Threshold : 0;
             while (spinIndex < spinCount)
             {
-                LowLevelSpinWaiter.Wait(spinIndex, SpinSleep0Threshold, isSingleProcessor);
+                // a lock that can sleep on a condition should not sleep unconditionally.
+                LowLevelSpinWaiter.Wait(spinIndex, int.MaxValue, isSingleProcessor);
                 spinIndex++;
 
                 // Try to acquire the semaphore and unregister as a spinner
@@ -215,6 +216,11 @@ namespace System.Threading
             Counts counts = _separated._counts;
             while (true)
             {
+                if (counts.SignalCount > 0)
+                {
+                    Internal.Console.WriteLine("MULTIPLE SIGNALS: " + counts.SignalCount);
+                }
+
                 Counts newCounts = counts;
 
                 // Increase the signal count. The addition doesn't overflow because of the limit on the max signal count in constructor.

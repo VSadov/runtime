@@ -17,7 +17,7 @@ namespace System.Threading
             private const int DefaultSampleIntervalMsLow = 10;
             private const int DefaultSampleIntervalMsHigh = 200;
 
-            public static readonly bool IsDisabled = AppContextConfigHelper.GetBooleanComPlusOrDotNetConfig("System.Threading.ThreadPool.HillClimbing.Disable", "HillClimbing_Disable", false);
+            public static readonly bool IsDisabled = AppContextConfigHelper.GetBooleanComPlusOrDotNetConfig("System.Threading.ThreadPool.HillClimbing.Disable", "HillClimbing_Disable", true);
 
             // SOS's ThreadPool command depends on this name
             public static readonly HillClimbing ThreadPoolHillClimber = new HillClimbing();
