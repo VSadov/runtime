@@ -362,6 +362,12 @@ namespace System.Threading
                 AdjustMaxWorkersActive();
             }
 
+            // do not check if need to exit more than once per quantum
+            if ((uint)(currentTimeMs - _separated.lastDispatchTime) < ThreadPoolWorkQueue.DispatchQuantumMs)
+            {
+                return true;
+            }
+
             return !WorkerThread.ShouldStopProcessingWorkNow(this);
         }
 
