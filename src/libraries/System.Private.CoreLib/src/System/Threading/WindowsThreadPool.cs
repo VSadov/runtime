@@ -151,16 +151,6 @@ namespace System.Threading
         /// </remarks>
         public static long CompletedWorkItemCount => s_completedWorkItemCounter.Count;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static void NotifyWorkItemProgress() => IncrementCompletedWorkItemCount();
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static bool NotifyWorkItemComplete(ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode, int _ /*currentTimeMs*/)
-        {
-            threadLocalCompletionCountNode.Increment();
-            return true;
-        }
-
         internal static bool NotifyThreadBlocked() { return false; }
         internal static void NotifyThreadUnblocked() { }
 

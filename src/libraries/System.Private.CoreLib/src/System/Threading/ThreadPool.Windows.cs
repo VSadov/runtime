@@ -40,8 +40,7 @@ namespace System.Threading
                 return true;
             }
 
-            PortableThreadPool.ThreadPoolInstance.NotifyDispatchProgress(currentTickCount);
-            return false;
+            return PortableThreadPool.ThreadPoolInstance.NotifyDispatchProgressCheckForStop(currentTickCount);
         }
 
         [CLSCompliant(false)]
@@ -129,21 +128,8 @@ namespace System.Threading
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void NotifyWorkItemProgress()
         {
-            if (ThreadPool.UseWindowsThreadPool)
-            {
-                WindowsThreadPool.NotifyWorkItemProgress();
-            }
-            else
-            {
-                PortableThreadPool.ThreadPoolInstance.NotifyWorkItemProgress();
-            }
+            GetOrCreateThreadLocalCompletionCountNode().Increment();
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static bool NotifyWorkItemComplete(ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode, int currentTimeMs) =>
-            ThreadPool.UseWindowsThreadPool ?
-            WindowsThreadPool.NotifyWorkItemComplete(threadLocalCompletionCountNode, currentTimeMs) :
-            PortableThreadPool.ThreadPoolInstance.NotifyWorkItemComplete(threadLocalCompletionCountNode, currentTimeMs);
 
         internal static bool NotifyThreadBlocked() =>
             ThreadPool.UseWindowsThreadPool ?

@@ -344,30 +344,19 @@ namespace System.Threading
             return threadLocalCompletionCountNode;
         }
 
-        private static void NotifyWorkItemProgress(ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode)
-        {
-            threadLocalCompletionCountNode.Increment();
-        }
-
-        internal void NotifyWorkItemProgress()
-        {
-            NotifyWorkItemProgress(GetOrCreateThreadLocalCompletionCountNode());
-        }
-
-        internal bool NotifyWorkItemComplete(ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode, int currentTimeMs)
-        {
-            NotifyWorkItemProgress(threadLocalCompletionCountNode);
-            if (ShouldAdjustMaxWorkersActive(currentTimeMs))
-            {
-                AdjustMaxWorkersActive();
-            }
-
-            return !WorkerThread.ShouldStopProcessingWorkNow(this);
-        }
-
         internal void NotifyDispatchProgress(int currentTickCount)
         {
             _separated.lastDispatchTime = currentTickCount;
+            if (ShouldAdjustMaxWorkersActive(currentTickCount))
+            {
+                AdjustMaxWorkersActive();
+            }
+        }
+
+        internal bool NotifyDispatchProgressCheckForStop(int currentTickCount)
+        {
+            NotifyDispatchProgress(currentTickCount);
+            return WorkerThread.ShouldStopProcessingWorkNow(this);
         }
 
         //

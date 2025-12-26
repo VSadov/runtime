@@ -53,7 +53,7 @@ namespace System.Threading
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void NotifyWorkItemProgress()
         {
-            PortableThreadPool.ThreadPoolInstance.NotifyWorkItemProgress();
+            GetOrCreateThreadLocalCompletionCountNode().Increment();
         }
 
         internal static bool NotifyThreadBlocked() =>
@@ -63,10 +63,6 @@ namespace System.Threading
         {
             PortableThreadPool.ThreadPoolInstance.NotifyThreadUnblocked();
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static bool NotifyWorkItemComplete(ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode, int currentTimeMs) =>
-            PortableThreadPool.ThreadPoolInstance.NotifyWorkItemComplete(threadLocalCompletionCountNode, currentTimeMs);
 
         /// <summary>
         /// This method is called to request a new thread pool worker to handle pending work.
