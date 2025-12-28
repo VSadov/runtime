@@ -93,8 +93,6 @@ namespace System.Threading
 
         internal static ThreadInt64PersistentCounter.ThreadLocalNode? GetOrCreateThreadLocalCompletionCountNode() => null;
 
-        internal static bool NotifyWorkItemComplete(ThreadInt64PersistentCounter.ThreadLocalNode? _1, int _2) => true;
-
         private static RegisteredWaitHandle RegisterWaitForSingleObject(
              WaitHandle? waitObject,
              WaitOrTimerCallback? callBack,

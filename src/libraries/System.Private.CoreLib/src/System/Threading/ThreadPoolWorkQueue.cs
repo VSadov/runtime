@@ -1151,20 +1151,8 @@ namespace System.Threading
                 return true;
             }
 
-            // TODO: VS the following is probably an overkill
-            //for (int i = 0; i < _WorkStealingQueues.Length; ++i)
-            //{
-            //    if (i == WorkStealingQueueIndex)
-            //    {
-            //        continue;
-            //    }
-
-            //    WorkStealingQueue = _WorkStealingQueues[i];
-            //    if (WorkStealingQueue != null && WorkStealingQueue.TryRemove(callback))
-            //    {
-            //        return true;
-            //    }
-            //}
+            // We could also search through other local queues, but it seems to be an overkill.
+            // If the workitem was stolen, chances of finding it unexecuted are not high.
 
             return false;
         }
@@ -1439,22 +1427,8 @@ namespace System.Threading
                 // Reset thread state after all user code for the work item has completed
                 currentThread.ResetThreadPoolThread();
 
-                //
-                // Notify the VM that we executed this workitem.  This is also our opportunity to ask whether Hill Climbing wants
-                // us to return the thread to the pool or not.
-                //
+                threadLocalCompletionCountNode!.Increment();
                 int currentTickCount = Environment.TickCount;
-                if (!ThreadPool.NotifyWorkItemComplete(threadLocalCompletionCountNode!, currentTickCount))
-                {
-                    // This thread is being parked and may remain inactive for a while.
-                    // Tell the caller that this thread was requested to stop processing work items.
-                    tl.isProcessingHighPriorityWorkItems = false;
-                    if (s_assignableWorkItemQueueCount > 0)
-                    {
-                        workQueue.UnassignWorkItemQueue(tl);
-                    }
-                    return false;
-                }
 
                 // Check if the dispatch quantum has expired
                 if ((uint)(currentTickCount - startTickCount) < DispatchQuantumMs)
@@ -1464,16 +1438,19 @@ namespace System.Threading
 
                 // The quantum expired, do any necessary periodic activities
 
+                // Notify the threadpool that we executed through a quantum.
+                // This is also our opportunity to ask whether Hill Climbing wants
+                // us to return the thread to the pool or not.
                 if (ThreadPool.YieldFromDispatchLoop(currentTickCount))
                 {
-                    // The runtime-specific thread pool implementation requires the Dispatch loop to return to the VM
-                    // periodically to let it perform its own work
                     tl.isProcessingHighPriorityWorkItems = false;
                     if (s_assignableWorkItemQueueCount > 0)
                     {
                         workQueue.UnassignWorkItemQueue(tl);
                     }
-                    return true;
+
+                    // the thread should stop running.
+                    return false;
                 }
 
                 if (s_assignableWorkItemQueueCount > 0)
