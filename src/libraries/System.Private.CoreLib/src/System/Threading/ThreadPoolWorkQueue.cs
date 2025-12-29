@@ -909,6 +909,348 @@ namespace System.Threading
             }
         }
 
+        [DebuggerDisplay("Count = {Count}")]
+        internal sealed class FifoWorkQueue : WorkQueueBase
+        {
+            /// <summary>The current enqueue segment.</summary>
+            internal WorkQueueSegment _enqSegment;
+            /// <summary>The current dequeue segment.</summary>
+            internal WorkQueueSegment _deqSegment;
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="WorkQueue"/> class.
+            /// </summary>
+            internal FifoWorkQueue()
+            {
+                _enqSegment = _deqSegment = new WorkQueueSegment(InitialSegmentLength);
+            }
+
+            // for debugging
+            internal int Count
+            {
+                get
+                {
+                    int count = 0;
+                    for (WorkQueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
+                    {
+                        count += s.Count;
+                    }
+                    return count;
+                }
+            }
+
+            /// <summary>
+            /// Adds an object to the top of the queue
+            /// </summary>
+            internal void Enqueue(object item)
+            {
+                // try enqueuing. Should normally succeed unless we need a new segment.
+                if (!_enqSegment.TryEnqueue(item))
+                {
+                    // If we're unable to enque, this segment will never take enqueues again.
+                    // we need to take a slow path that will try adding a new segment.
+                    EnqueueSlow(item);
+                }
+            }
+
+            /// <summary>
+            /// Slow path for enqueue, adding a new segment if necessary.
+            /// </summary>
+            private void EnqueueSlow(object item)
+            {
+                for (; ; )
+                {
+                    WorkQueueSegment currentSegment = _enqSegment;
+                    if (currentSegment.TryEnqueue(item))
+                    {
+                        return;
+                    }
+
+                    // take the lock to add a new segment
+                    // we can make this optimistically lock free, but it is a rare code path
+                    // and we do not want stampeding enqueuers allocating a lot of new segments when only one will win.
+                    lock (_addSegmentLock)
+                    {
+                        if (currentSegment == _enqSegment)
+                        {
+                            // Make sure that no more items could be added to the current segment.
+                            // NB: there may be some strugglers still finishing up out-of-order enqueues
+                            //     TryDequeue knows how to deal with that.
+                            currentSegment.EnsureFrozenForEnqueues();
+
+                            // We determine the new segment's length based on the old length.
+                            // In general, we double the size of the segment, to make it less likely
+                            // that we'll need to grow again.
+                            int nextSize = Math.Min(currentSegment._slots.Length * 2, MaxSegmentLength);
+                            var newEnq = new WorkQueueSegment(nextSize);
+
+                            // Hook up the new enqueue segment.
+                            currentSegment._nextSegment = newEnq;
+                            _enqSegment = newEnq;
+                        }
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Removes an object at the bottom of the queue
+            /// Returns null if the queue is empty.
+            /// </summary>
+            internal object? TryDequeue()
+            {
+                var currentSegment = _deqSegment;
+                if (currentSegment.IsEmpty)
+                {
+                    return null;
+                }
+
+                object? result = currentSegment.TryDequeue();
+
+                if (result == null && currentSegment._nextSegment != null)
+                {
+                    // slow path that fixes up segments
+                    result = TryDequeueSlow(currentSegment);
+                }
+
+                return result;
+            }
+
+            /// <summary>
+            /// Slow path for Dequeue, removing frozen segments as needed.
+            /// </summary>
+            private object? TryDequeueSlow(WorkQueueSegment currentSegment)
+            {
+                object? result;
+                for (; ; )
+                {
+                    // At this point we know that this segment has been frozen for additional enqueues. But between
+                    // the time that we ran TryDequeue and checked for a next segment,
+                    // another item could have been added.  Try to dequeue one more time
+                    // to confirm that the segment is indeed empty.
+                    Debug.Assert(currentSegment._nextSegment != null);
+                    result = currentSegment.TryDequeueThoroughly();
+                    if (result != null)
+                    {
+                        return result;
+                    }
+
+                    // Current segment is frozen (nothing more can be added) and empty (nothing is in it).
+                    // Update _deqSegment to point to the next segment in the list, assuming no one's beat us to it.
+                    if (currentSegment == _deqSegment)
+                    {
+                        Interlocked.CompareExchange(ref _deqSegment, currentSegment._nextSegment, currentSegment);
+                    }
+
+                    currentSegment = _deqSegment;
+
+                    // Try to take.  If we're successful, we're done.
+                    result = currentSegment.TryDequeue();
+                    if (result != null)
+                    {
+                        return result;
+                    }
+
+                    // Check to see whether this segment is the last. If it is, we can consider
+                    // this to be a moment-in-time when the queue is empty.
+                    if (currentSegment._nextSegment == null)
+                    {
+                        return null;
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Provides a multi-producer, multi-consumer thread-safe bounded segment.  When the queue is full,
+            /// enqueues fail and return false.  When the queue is empty, dequeues fail and return null.
+            /// These segments are linked together to form the unbounded queue.
+            ///
+            /// The "global" flavor of the queue does not support Pop or Remove and that allows for some simplifications.
+            /// </summary>
+            [DebuggerDisplay("Count = {Count}")]
+            internal sealed class WorkQueueSegment : QueueSegmentBase
+            {
+                /// <summary>The segment following this one in the queue, or null if this segment is the last in the queue.</summary>
+                internal WorkQueueSegment? _nextSegment;
+
+                /// <summary>Creates the segment.</summary>
+                /// <param name="length">
+                /// The maximum number of elements the segment can contain.  Must be a power of 2.
+                /// </param>
+                internal WorkQueueSegment(int length) : base(length) { }
+
+                // for debugging
+                internal int Count => _queueEnds.Enqueue - _queueEnds.Dequeue;
+
+                internal bool IsEmpty
+                {
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    get
+                    {
+                        // Read Deq and then Enq. If not the same, there could be work for a dequeuer.
+                        // Order of reads is unimportant here since if there is work we are responsible for, we must see it.
+                        //
+                        // NB: Frozen segments have artificially increased Enqueue and will appear as having work even when there are no items.
+                        //     And they indeed require work - at very least to retire them.
+                        return _queueEnds.Dequeue == _queueEnds.Enqueue;
+                    }
+                }
+
+                /// <summary>Tries to dequeue an element from the queue.</summary>
+                internal object? TryDequeueThoroughly()
+                {
+                    // Loop in case of contention...
+                    SpinWait spinner = default;
+
+                    for (; ; )
+                    {
+                        int position = _queueEnds.Dequeue;
+                        ref Slot slot = ref this[position];
+
+                        // Read the sequence number for the slot.
+                        // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
+                        int sequenceNumber = slot.SequenceNumber;
+
+                        // Check if the slot is considered Full in the current generation.
+                        if (sequenceNumber == position + Full)
+                        {
+                            // Attempt to acquire the slot for Dequeuing.
+                            if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
+                            {
+                                var item = slot.Item;
+                                slot.Item = null;
+
+                                // make the slot appear empty in the next generation
+                                Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
+                                return item;
+                            }
+                        }
+                        else if (sequenceNumber - position < Full)
+                        {
+                            // The sequence number was less than what we needed, which means we cannot return this item.
+                            // Check if we have reached Enqueue and return null indicating the segment is in empty state.
+                            // NB: reading stale _frozenForEnqueues is fine - we would just spin once more
+                            var currentEnqueue = Volatile.Read(ref _queueEnds.Enqueue);
+                            if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
+                            {
+                                return null;
+                            }
+
+                            // The enqueuer went ahead and took a slot, but it has not finished filling the value.
+                            // We cannot return `null` since the segment is not empty, so we must retry.
+                        }
+
+                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
+                        // We should retry with a new dequeue.
+                        spinner.SpinOnce();
+                    }
+                }
+
+                /// <summary>Tries to dequeue an element from the queue.</summary>
+                internal object? TryDequeue()
+                {
+                    // Loop in case of contention...
+                    SpinWait spinner = default;
+
+                    // int retries = Environment.ProcessorCount;
+                    for (; ; )
+                    {
+                        int position = _queueEnds.Dequeue;
+                        ref Slot slot = ref this[position];
+
+                        // Read the sequence number for the slot.
+                        // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
+                        int sequenceNumber = slot.SequenceNumber;
+
+                        // Check if the slot is considered Full in the current generation.
+                        if (sequenceNumber == position + Full)
+                        {
+                            // Attempt to acquire the slot for Dequeuing.
+                            if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
+                            {
+                                var item = slot.Item;
+                                slot.Item = null;
+
+                                // make the slot appear empty in the next generation
+                                Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
+                                return item;
+                            }
+                        }
+                        else if (sequenceNumber - position < Full)
+                        {
+                            // the item is not there yet
+                            return null;
+                        }
+
+                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
+                        // We should retry with a new dequeue. If we keep seeing contentions, other queues are likely empty.
+                        spinner.SpinOnce();
+                    }
+                }
+
+                /// <summary>
+                /// Attempts to enqueue the item.  If successful, the item will be stored
+                /// in the queue and true will be returned; otherwise, the item won't be stored, the segment will be frozen
+                /// and false will be returned.
+                /// </summary>
+                public bool TryEnqueue(object item)
+                {
+                    // Loop in case of contention...
+                    SpinWait spinner = default;
+                    for (; ; )
+                    {
+                        int position = _queueEnds.Enqueue;
+                        ref Slot slot = ref this[position];
+
+                        // Read the sequence number for the enqueue position.
+                        // Should read before writing Item, but our write is after CAS, so ordinary read is ok.
+                        int sequenceNumber = slot.SequenceNumber;
+
+                        // The slot is empty and ready for us to enqueue into it if its sequence number matches the slot.
+                        if (sequenceNumber == position)
+                        {
+                            // Reserve the slot for Enqueuing.
+                            if (Interlocked.CompareExchange(ref _queueEnds.Enqueue, position + 1, position) == position)
+                            {
+                                slot.Item = item;
+                                Volatile.Write(ref slot.SequenceNumber, position + Full);
+                                // NB: Volatile.Write would be sufficient as the queue end update makes the queue not empty.
+                                // But we would need to spin in Dequeue until item appears and current thread could be preempted,
+                                // or implement some kind of "missed steal" scheme.
+                                // With the memory barrier we wait for publishing of the item before checking if a thread is invited,
+                                // thus dequeuer can treat seeing an old sequence number as "item is not there".
+                                // However, another enqueuer would still need to wait for the sequence number to change.
+                                Interlocked.MemoryBarrier();
+                                return true;
+                            }
+                        }
+                        else if (sequenceNumber - position < 0)
+                        {
+                            // The sequence number was less than what we needed, which means we have caught up with previous generation
+                            // Technically it's possible that we have dequeuers in progress and spaces are or about to be available.
+                            // We still would be better off with a new segment.
+                            return false;
+                        }
+
+                        // Lost a race to another enqueue. Need to retry.
+                        spinner.SpinOnce();
+                    }
+                }
+
+                internal void EnsureFrozenForEnqueues()
+                {
+                    // flag used to ensure we don't increase the enqueue more than once
+                    if (!_frozenForEnqueues)
+                    {
+                        // Increase the enqueue by FreezeOffset atomically.
+                        // enqueuing will be impossible after that
+                        // dequeuers would need to dequeue 2 generations to catch up, and they can't
+                        Interlocked.Add(ref _queueEnds.Enqueue, FreezeOffset);
+                        _frozenForEnqueues = true;
+                    }
+                }
+            }
+        }
+
         private const int ProcessorsPerAssignableWorkItemQueue = 16;
         private static readonly int s_assignableWorkItemQueueCount =
             Environment.ProcessorCount <= 32 ? 0 :
