@@ -179,6 +179,20 @@ namespace System.Threading
             /// <summary>The current dequeue segment.</summary>
             internal QueueSegment _deqSegment;
 
+            // Very cheap random sequence generator. We keep one per-local queue.
+            // We do not need a lot of randomness, I think even _rnd++ would be fairly good here.
+            // Sequences attached to different queues go out of sync quickly and that could be sufficient.
+            // However we can make this sequence is a bit more random at a very modest additional cost.
+            // [Fast High Quality Parallel Random Number] (http://www.drdobbs.com/tools/fast-high-quality-parallel-random-number/231000484)
+            private uint rndVal = 6247;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal int NextRnd()
+            {
+                var r = rndVal;
+                r -= Numerics.BitOperations.RotateRight(r, 11);
+                return (int)(rndVal = r);
+            }
+
             /// <summary>
             /// Initializes a new instance of the <see cref="WorkStealingQueue"/> class.
             /// </summary>
@@ -1012,11 +1026,6 @@ namespace System.Threading
             internal object? TryDequeue()
             {
                 var currentSegment = _deqSegment;
-                if (currentSegment.IsEmpty)
-                {
-                    return null;
-                }
-
                 object? result = currentSegment.TryDequeue();
 
                 if (result == null && currentSegment._nextSegment != null)
@@ -1298,16 +1307,6 @@ namespace System.Threading
             RefreshLoggingEnabled();
         }
 
-        public static ThreadPoolWorkQueueThreadLocals GetOrCreateThreadLocals() =>
-            ThreadPoolWorkQueueThreadLocals.threadLocals ?? CreateThreadLocals();
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static ThreadPoolWorkQueueThreadLocals CreateThreadLocals()
-        {
-            Debug.Assert(ThreadPoolWorkQueueThreadLocals.threadLocals == null);
-            return ThreadPoolWorkQueueThreadLocals.threadLocals = new ThreadPoolWorkQueueThreadLocals();
-        }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void RefreshLoggingEnabled()
         {
@@ -1449,16 +1448,24 @@ namespace System.Threading
                 return workItem;
             }
 
-            return DequeueAll(ref missedSteal);
+            return DequeueAll(ref missedSteal, localWsq);
         }
 
-        public object? DequeueAll(ref bool missedSteal)
+        public object? DequeueAll(ref bool missedSteal, WorkStealingQueue? localWsq)
         {
             // Try get a workitem from fifo queues
             // We scan all queues starting with a random one for fairness.
             FifoWorkQueue[] fqs = _FifoQueues;
-            ThreadPoolWorkQueueThreadLocals tl = GetOrCreateThreadLocals();
-            int startIndex = (int)tl.NextRnd() & (fqs.Length - 1);
+            int startIndex;
+            if (localWsq != null)
+            {
+                startIndex = localWsq.NextRnd() & (fqs.Length - 1);
+            }
+            else
+            {
+                startIndex = GetPreferredFifoQueueIndex();
+            }
+
             for (int i = 0; i < fqs.Length; i++)
             {
                 FifoWorkQueue? fq = fqs[startIndex ^ i];
@@ -1563,8 +1570,9 @@ namespace System.Threading
             // Has the desire for logging changed since the last time we entered?
             workQueue.RefreshLoggingEnabled();
 
-            ThreadPoolWorkQueueThreadLocals tl = GetOrCreateThreadLocals();
-            Thread currentThread = tl.currentThread;
+            Thread currentThread = Thread.CurrentThread; // AssumedInitialized;
+            ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode =
+                ThreadPool.GetOrCreateThreadLocalCompletionCountNode();
 
             // Start on clean ExecutionContext and SynchronizationContext
             currentThread._executionContext = null;
@@ -1626,8 +1634,7 @@ namespace System.Threading
                 // Reset thread state after all user code for the work item has completed
                 currentThread.ResetThreadPoolThread();
 
-                ThreadInt64PersistentCounter.ThreadLocalNode? threadLocalCompletionCountNode = tl.threadLocalCompletionCountNode;
-                threadLocalCompletionCountNode!.Increment();
+                threadLocalCompletionCountNode.Increment();
                 int currentTickCount = Environment.TickCount;
 
                 // Check if the dispatch quantum has expired
@@ -1700,35 +1707,6 @@ namespace System.Threading
         }
     }
 
-    // Holds a WorkStealingQueue, and removes it from the list when this object is no longer referenced.
-    internal sealed class ThreadPoolWorkQueueThreadLocals
-    {
-        [ThreadStatic]
-        public static ThreadPoolWorkQueueThreadLocals? threadLocals;
-        public readonly Thread currentThread;
-        public readonly ThreadInt64PersistentCounter.ThreadLocalNode? threadLocalCompletionCountNode;
-
-        // Very cheap random sequence generator. We keep one per-local queue.
-        // We do not need a lot of randomness, I think even _rnd++ would be fairly good here.
-        // Sequences attached to different queues go out of sync quickly and that could be sufficient.
-        // However we can make this sequence is a bit more random at a very modest additional cost.
-        // [Fast High Quality Parallel Random Number] (http://www.drdobbs.com/tools/fast-high-quality-parallel-random-number/231000484)
-        private uint rndVal = 6247;
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal uint NextRnd()
-        {
-            var r = rndVal;
-            r -= Numerics.BitOperations.RotateRight(r, 11);
-            return (rndVal = r);
-        }
-
-        public ThreadPoolWorkQueueThreadLocals()
-        {
-            currentThread = Thread.CurrentThread;
-            threadLocalCompletionCountNode = ThreadPool.GetOrCreateThreadLocalCompletionCountNode();
-        }
-    }
-
 #if TARGET_WINDOWS
 
     internal sealed class ThreadPoolTypedWorkItemQueue : IThreadPoolWorkItem
@@ -1779,10 +1757,11 @@ namespace System.Threading
             // Checking for items must happen after resetting the processing state.
             Interlocked.MemoryBarrier();
 
+            var threadLocalCompletionCountNode = ThreadPool.GetOrCreateThreadLocalCompletionCountNode();
             if (!_workItems.TryDequeue(out var workItem))
             {
                 // Discount a work item here to avoid counting this queue processing work item
-                ThreadPoolWorkQueueThreadLocals.threadLocals!.threadLocalCompletionCountNode!.Decrement();
+                threadLocalCompletionCountNode.Decrement();
                 return;
             }
 
@@ -1796,10 +1775,7 @@ namespace System.Threading
                 EnsureWorkerScheduled();
             }
 
-            ThreadPoolWorkQueueThreadLocals tl = ThreadPoolWorkQueueThreadLocals.threadLocals!;
-            Debug.Assert(tl != null);
-            Thread currentThread = tl.currentThread;
-            Debug.Assert(currentThread == Thread.CurrentThread);
+            Thread currentThread = Thread.CurrentThreadAssumedInitialized;
             uint completedCount = 0;
             int startTimeMs = Environment.TickCount;
             while (true)
@@ -1833,7 +1809,7 @@ namespace System.Threading
             // Discount a work item here to avoid counting this queue processing work item
             if (completedCount > 1)
             {
-                tl.threadLocalCompletionCountNode!.Add(completedCount - 1);
+                threadLocalCompletionCountNode.Add(completedCount - 1);
             }
         }
     }
