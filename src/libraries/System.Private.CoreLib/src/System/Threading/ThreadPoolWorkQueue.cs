@@ -1023,15 +1023,15 @@ namespace System.Threading
             /// Removes an object at the bottom of the queue
             /// Returns null if the queue is empty.
             /// </summary>
-            internal object? TryDequeue()
+            internal object? TryDequeue(ref bool missedSteal)
             {
                 var currentSegment = _deqSegment;
-                object? result = currentSegment.TryDequeue();
+                object? result = currentSegment.TryDequeue(ref missedSteal);
 
                 if (result == null && currentSegment._nextSegment != null)
                 {
                     // slow path that fixes up segments
-                    result = TryDequeueSlow(currentSegment);
+                    result = TryDequeueSlow(currentSegment, ref missedSteal);
                 }
 
                 return result;
@@ -1040,7 +1040,7 @@ namespace System.Threading
             /// <summary>
             /// Slow path for Dequeue, removing frozen segments as needed.
             /// </summary>
-            private object? TryDequeueSlow(QueueSegment currentSegment)
+            private object? TryDequeueSlow(QueueSegment currentSegment, ref bool missedSteal)
             {
                 object? result;
                 while (true)
@@ -1050,10 +1050,20 @@ namespace System.Threading
                     // another item could have been added.  Try to dequeue one more time
                     // to confirm that the segment is indeed empty.
                     Debug.Assert(currentSegment._nextSegment != null);
-                    result = currentSegment.TryDequeueThoroughly();
+                    bool localMisedSteal = false;
+                    result = currentSegment.TryDequeue(ref localMisedSteal);
                     if (result != null)
                     {
                         return result;
+                    }
+
+                    // Getting a missing steal makes us unsure if the segment has items or not.
+                    // We cannot continue. We could either spin through steals,
+                    // or just declare a missing steal to the caller. We do the latter.
+                    if (localMisedSteal)
+                    {
+                        missedSteal = true;
+                        return null;
                     }
 
                     // Current segment is frozen (nothing more can be added) and empty (nothing is in it).
@@ -1066,7 +1076,7 @@ namespace System.Threading
                     currentSegment = _deqSegment;
 
                     // Try to take.  If we're successful, we're done.
-                    result = currentSegment.TryDequeue();
+                    result = currentSegment.TryDequeue(ref missedSteal);
                     if (result != null)
                     {
                         return result;
@@ -1132,12 +1142,11 @@ namespace System.Threading
                 }
 
                 /// <summary>Tries to dequeue an element from the queue.</summary>
-                internal object? TryDequeueThoroughly()
+                internal object? TryDequeue(ref bool missedSteal)
                 {
-                    // Loop in case of contention...
-                    SpinWait spinner = default;
-
-                    while (true)
+                    // SpinWait sw = default; ;
+                    // uint attempt = 0;
+                    for (uint attempt = 0; attempt < 4; attempt++)
                     {
                         int position = _queueEnds.Dequeue;
                         ref Slot slot = ref this[position];
@@ -1165,6 +1174,7 @@ namespace System.Threading
                             // The sequence number was less than what we needed, which means we cannot return this item.
                             // Check if we have reached Enqueue and return null indicating the segment is in empty state.
                             // NB: reading stale _frozenForEnqueues is fine - we would just spin once more
+                            // TODO: VS if reading stale _frozenForEnqueues is ok, why Volatile.Read?
                             var currentEnqueue = Volatile.Read(ref _queueEnds.Enqueue);
                             if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
                             {
@@ -1172,51 +1182,18 @@ namespace System.Threading
                             }
 
                             // The enqueuer went ahead and took a slot, but it has not finished filling the value.
-                            // We cannot return `null` since the segment is not empty, so we must retry.
-                        }
-
-                        // Or we have a stale dequeue value. Another dequeuer was quicker than us.
-                        // We should retry with a new dequeue.
-                        spinner.SpinOnce();
-                    }
-                }
-
-                /// <summary>Tries to dequeue an element from the queue.</summary>
-                internal object? TryDequeue()
-                {
-                    while (true)
-                    {
-                        int position = _queueEnds.Dequeue;
-                        ref Slot slot = ref this[position];
-
-                        // Read the sequence number for the slot.
-                        // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
-                        int sequenceNumber = slot.SequenceNumber;
-
-                        // Check if the slot is considered Full in the current generation.
-                        if (sequenceNumber == position + Full)
-                        {
-                            // Attempt to acquire the slot for Dequeuing.
-                            if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
-                            {
-                                var item = slot.Item;
-                                slot.Item = null;
-
-                                // make the slot appear empty in the next generation
-                                Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
-                                return item;
-                            }
-                        }
-                        else if (sequenceNumber - position < Full)
-                        {
-                            // the item is not there yet
+                            missedSteal = true;
                             return null;
                         }
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
-                        // We should retry with a new dequeue. If we keep seeing contentions, other queues are likely empty.
-                        spinner.SpinOnce();
+                        // We should retry with a new dequeue.
+                        Backoff.Exponential(attempt);
+                        // sw.SpinOnce();
                     }
+
+                    missedSteal = true;
+                    return null;
                 }
 
                 /// <summary>
@@ -1226,8 +1203,6 @@ namespace System.Threading
                 /// </summary>
                 public bool TryEnqueue(object item)
                 {
-                    // Loop in case of contention...
-                    SpinWait spinner = default;
                     while (true)
                     {
                         int position = _queueEnds.Enqueue;
@@ -1251,7 +1226,7 @@ namespace System.Threading
                                 // With the memory barrier we wait for publishing of the item before checking if a thread is invited,
                                 // thus dequeuer can treat seeing an old sequence number as "item is not there".
                                 // However, another enqueuer would still need to wait for the sequence number to change.
-                                Interlocked.MemoryBarrier();
+                                // Interlocked.MemoryBarrier();
                                 return true;
                             }
                         }
@@ -1263,8 +1238,9 @@ namespace System.Threading
                             return false;
                         }
 
-                        // Lost a race to another enqueue. Need to retry.
-                        spinner.SpinOnce();
+                        // Lost a race to another enqueue. This is unusual.
+                        // Need to retry, but no need to wait either.
+                        // Either us or another thread use wrong queue. Waiting will not help with that.
                     }
                 }
 
@@ -1465,7 +1441,7 @@ namespace System.Threading
             for (int i = 0; i < fqs.Length; i++)
             {
                 FifoWorkQueue? fq = fqs[startIndex ^ i];
-                object? workItem = fq?.TryDequeue();
+                object? workItem = fq?.TryDequeue(ref missedSteal);
                 if (workItem != null)
                 {
                     return workItem;
