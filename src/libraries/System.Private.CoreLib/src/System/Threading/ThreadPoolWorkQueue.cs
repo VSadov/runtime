@@ -1570,7 +1570,7 @@ namespace System.Threading
             // Has the desire for logging changed since the last time we entered?
             workQueue.RefreshLoggingEnabled();
 
-            Thread currentThread = Thread.CurrentThread; // AssumedInitialized;
+            Thread currentThread = Thread.CurrentThread;
             ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode =
                 ThreadPool.GetOrCreateThreadLocalCompletionCountNode();
 
