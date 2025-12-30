@@ -248,7 +248,7 @@ namespace System.Threading
             private void EnqueueSlow(object item)
             {
                 QueueSegment currentSegment = _enqSegment;
-                for (; ; )
+                while (true)
                 {
                     if (currentSegment.TryEnqueue(item))
                     {
@@ -313,7 +313,7 @@ namespace System.Threading
             private object? TryStealSlow(QueueSegment currentSegment, ref bool missedSteal)
             {
                 object? result;
-                for (; ; )
+                while (true)
                 {
                     // At this point we know that this segment has been frozen for additional enqueues. But between
                     // the time that we ran TryDequeue and checked for a next segment,
@@ -597,7 +597,7 @@ namespace System.Threading
                     // retry in rare cases like finding a removed item or enqueue is changed.
                     // in a case of collision, we just leave and try doing somewthing else.
                     // we will eventually try stealing from the same queue and will have a chance to check/report a missed steal.
-                    for (; ; )
+                    while (true)
                     {
                         int position = _queueEnds.Enqueue - 1;
                         ref Slot slot = ref this[position];
@@ -660,7 +660,7 @@ namespace System.Threading
                 /// </summary>
                 internal object? TrySteal(ref bool missedSteal)
                 {
-                    for (; ; )
+                    while (true)
                     {
                         int position = _queueEnds.Dequeue;
 
@@ -985,7 +985,7 @@ namespace System.Threading
             /// </summary>
             private void EnqueueSlow(object item)
             {
-                for (; ; )
+                while (true)
                 {
                     QueueSegment currentSegment = _enqSegment;
                     if (currentSegment.TryEnqueue(item))
@@ -1043,7 +1043,7 @@ namespace System.Threading
             private object? TryDequeueSlow(QueueSegment currentSegment)
             {
                 object? result;
-                for (; ; )
+                while (true)
                 {
                     // At this point we know that this segment has been frozen for additional enqueues. But between
                     // the time that we ran TryDequeue and checked for a next segment,
@@ -1137,7 +1137,7 @@ namespace System.Threading
                     // Loop in case of contention...
                     SpinWait spinner = default;
 
-                    for (; ; )
+                    while (true)
                     {
                         int position = _queueEnds.Dequeue;
                         ref Slot slot = ref this[position];
@@ -1184,11 +1184,7 @@ namespace System.Threading
                 /// <summary>Tries to dequeue an element from the queue.</summary>
                 internal object? TryDequeue()
                 {
-                    // Loop in case of contention...
-                    SpinWait spinner = default;
-
-                    // int retries = Environment.ProcessorCount;
-                    for (; ; )
+                    while (true)
                     {
                         int position = _queueEnds.Dequeue;
                         ref Slot slot = ref this[position];
@@ -1232,7 +1228,7 @@ namespace System.Threading
                 {
                     // Loop in case of contention...
                     SpinWait spinner = default;
-                    for (; ; )
+                    while (true)
                     {
                         int position = _queueEnds.Enqueue;
                         ref Slot slot = ref this[position];
