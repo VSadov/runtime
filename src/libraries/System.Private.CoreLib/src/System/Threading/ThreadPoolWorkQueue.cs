@@ -15,10 +15,11 @@ using Internal;
 using System.Numerics;
 
 #if FEATURE_SINGLE_THREADED
-using WorkQueue = System.Collections.Generic.Queue<object>;
+using WorkQueueUnused = System.Collections.Generic.Queue<object>;
 #else
-using WorkQueue = System.Collections.Concurrent.ConcurrentQueue<object>;
+using WorkQueueUnused = System.Collections.Concurrent.ConcurrentQueue<object>;
 #endif
+
 #if TARGET_WINDOWS
 using IOCompletionPollerEvent = System.Threading.PortableThreadPool.IOCompletionPoller.Event;
 #endif // TARGET_WINDOWS
@@ -174,9 +175,9 @@ namespace System.Threading
             internal const int MoveThreshold = 32;
 
             /// <summary>The current enqueue segment.</summary>
-            internal WorkStealingQueueSegment _enqSegment;
+            internal QueueSegment _enqSegment;
             /// <summary>The current dequeue segment.</summary>
-            internal WorkStealingQueueSegment _deqSegment;
+            internal QueueSegment _deqSegment;
 
             /// <summary>
             /// Initializes a new instance of the <see cref="WorkStealingQueue"/> class.
@@ -184,7 +185,7 @@ namespace System.Threading
             internal WorkStealingQueue()
             {
                 _addSegmentLock = new object();
-                _enqSegment = _deqSegment = new WorkStealingQueueSegment(InitialSegmentLength);
+                _enqSegment = _deqSegment = new QueueSegment(InitialSegmentLength);
             }
 
             // for debugging
@@ -193,7 +194,7 @@ namespace System.Threading
                 get
                 {
                     int count = 0;
-                    for (WorkStealingQueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
+                    for (QueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
                     {
                         count += s.Count;
                     }
@@ -204,7 +205,7 @@ namespace System.Threading
             // for debugging
             internal IEnumerable<object> GetQueuedWorkItems()
             {
-                for (WorkStealingQueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
+                for (QueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
                 {
                     foreach (object item in s.GetQueuedWorkItems())
                     {
@@ -232,7 +233,7 @@ namespace System.Threading
             /// </summary>
             private void EnqueueSlow(object item)
             {
-                WorkStealingQueueSegment currentSegment = _enqSegment;
+                QueueSegment currentSegment = _enqSegment;
                 for (; ; )
                 {
                     if (currentSegment.TryEnqueue(item))
@@ -243,7 +244,7 @@ namespace System.Threading
                 }
             }
 
-            private WorkStealingQueueSegment EnsureNextSegment(WorkStealingQueueSegment currentSegment)
+            private QueueSegment EnsureNextSegment(QueueSegment currentSegment)
             {
                 var nextSegment = currentSegment._nextSegment;
                 if (nextSegment != null)
@@ -262,7 +263,7 @@ namespace System.Threading
                         // In general, we double the size of the segment, to make it less likely
                         // that we'll need to grow again.
                         int nextSize = Math.Min(currentSegment._slots.Length * 2, MaxSegmentLength);
-                        var newEnq = new WorkStealingQueueSegment(nextSize);
+                        var newEnq = new QueueSegment(nextSize);
 
                         // Hook up the new enqueue segment.
                         currentSegment._nextSegment = newEnq;
@@ -295,7 +296,7 @@ namespace System.Threading
             /// <summary>
             /// Tries to dequeue an item, removing frozen segments as needed.
             /// </summary>
-            private object? TryStealSlow(WorkStealingQueueSegment currentSegment, ref bool missedSteal)
+            private object? TryStealSlow(QueueSegment currentSegment, ref bool missedSteal)
             {
                 object? result;
                 for (; ; )
@@ -372,7 +373,7 @@ namespace System.Threading
                     return true;
                 }
 
-                for (WorkStealingQueueSegment? segment = _deqSegment;
+                for (QueueSegment? segment = _deqSegment;
                    segment != null && segment != enqSegment;
                    segment = segment._nextSegment)
                 {
@@ -433,10 +434,10 @@ namespace System.Threading
             ///
             /// </summary>
             [DebuggerDisplay("Count = {Count}")]
-            internal sealed class WorkStealingQueueSegment : QueueSegmentBase
+            internal sealed class QueueSegment : QueueSegmentBase
             {
                 /// <summary>The segment following this one in the queue, or null if this segment is the last in the queue.</summary>
-                internal WorkStealingQueueSegment? _nextSegment;
+                internal QueueSegment? _nextSegment;
 
                 /// <summary>
                 /// Another state of the slot in addition to Empty and Full.
@@ -451,7 +452,7 @@ namespace System.Threading
                 /// <param name="length">
                 /// The maximum number of elements the segment can contain.  Must be a power of 2.
                 /// </param>
-                internal WorkStealingQueueSegment(int length) : base(length) { }
+                internal QueueSegment(int length) : base(length) { }
 
                 /// <summary>
                 /// Attempts to enqueue the item.  If successful, the item will be stored
@@ -710,7 +711,7 @@ namespace System.Threading
                     }
                 }
 
-                internal object? TryMoveTo(WorkStealingQueueSegment other)
+                internal object? TryMoveTo(QueueSegment other)
                 {
                     int deqPos = _queueEnds.Dequeue;
                     ref Slot slot = ref this[deqPos];
@@ -744,7 +745,7 @@ namespace System.Threading
                     return null;
                 }
 
-                internal object? TryMoveCore(WorkStealingQueueSegment other, int deqPosition, int enqPosition)
+                internal object? TryMoveCore(QueueSegment other, int deqPosition, int enqPosition)
                 {
                     // same as in TryEnqueue
                     int otherEnqPosition = other._queueEnds.Enqueue;
@@ -913,16 +914,16 @@ namespace System.Threading
         internal sealed class FifoWorkQueue : WorkQueueBase
         {
             /// <summary>The current enqueue segment.</summary>
-            internal WorkQueueSegment _enqSegment;
+            internal QueueSegment _enqSegment;
             /// <summary>The current dequeue segment.</summary>
-            internal WorkQueueSegment _deqSegment;
+            internal QueueSegment _deqSegment;
 
             /// <summary>
-            /// Initializes a new instance of the <see cref="WorkQueue"/> class.
+            /// Initializes a new instance of the <see cref="FifoWorkQueue"/> class.
             /// </summary>
             internal FifoWorkQueue()
             {
-                _enqSegment = _deqSegment = new WorkQueueSegment(InitialSegmentLength);
+                _enqSegment = _deqSegment = new QueueSegment(InitialSegmentLength);
             }
 
             // for debugging
@@ -931,11 +932,23 @@ namespace System.Threading
                 get
                 {
                     int count = 0;
-                    for (WorkQueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
+                    for (QueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
                     {
                         count += s.Count;
                     }
                     return count;
+                }
+            }
+
+            // for debugging
+            internal IEnumerable<object> GetQueuedWorkItems()
+            {
+                for (QueueSegment? s = _deqSegment; s != null; s = s._nextSegment)
+                {
+                    foreach (object item in s.GetQueuedWorkItems())
+                    {
+                        yield return item;
+                    }
                 }
             }
 
@@ -960,7 +973,7 @@ namespace System.Threading
             {
                 for (; ; )
                 {
-                    WorkQueueSegment currentSegment = _enqSegment;
+                    QueueSegment currentSegment = _enqSegment;
                     if (currentSegment.TryEnqueue(item))
                     {
                         return;
@@ -982,7 +995,7 @@ namespace System.Threading
                             // In general, we double the size of the segment, to make it less likely
                             // that we'll need to grow again.
                             int nextSize = Math.Min(currentSegment._slots.Length * 2, MaxSegmentLength);
-                            var newEnq = new WorkQueueSegment(nextSize);
+                            var newEnq = new QueueSegment(nextSize);
 
                             // Hook up the new enqueue segment.
                             currentSegment._nextSegment = newEnq;
@@ -1018,7 +1031,7 @@ namespace System.Threading
             /// <summary>
             /// Slow path for Dequeue, removing frozen segments as needed.
             /// </summary>
-            private object? TryDequeueSlow(WorkQueueSegment currentSegment)
+            private object? TryDequeueSlow(QueueSegment currentSegment)
             {
                 object? result;
                 for (; ; )
@@ -1067,16 +1080,16 @@ namespace System.Threading
             /// The "global" flavor of the queue does not support Pop or Remove and that allows for some simplifications.
             /// </summary>
             [DebuggerDisplay("Count = {Count}")]
-            internal sealed class WorkQueueSegment : QueueSegmentBase
+            internal sealed class QueueSegment : QueueSegmentBase
             {
                 /// <summary>The segment following this one in the queue, or null if this segment is the last in the queue.</summary>
-                internal WorkQueueSegment? _nextSegment;
+                internal QueueSegment? _nextSegment;
 
                 /// <summary>Creates the segment.</summary>
                 /// <param name="length">
                 /// The maximum number of elements the segment can contain.  Must be a power of 2.
                 /// </param>
-                internal WorkQueueSegment(int length) : base(length) { }
+                internal QueueSegment(int length) : base(length) { }
 
                 // for debugging
                 internal int Count => _queueEnds.Enqueue - _queueEnds.Dequeue;
@@ -1092,6 +1105,20 @@ namespace System.Threading
                         // NB: Frozen segments have artificially increased Enqueue and will appear as having work even when there are no items.
                         //     And they indeed require work - at very least to retire them.
                         return _queueEnds.Dequeue == _queueEnds.Enqueue;
+                    }
+                }
+
+                // for debugging
+                internal IEnumerable<object> GetQueuedWorkItems()
+                {
+                    Slot[] slots = _slots;
+                    for (int i = 0; i < slots.Length; i++)
+                    {
+                        object? item = slots[i].Item;
+                        if (item != null)
+                        {
+                            yield return item;
+                        }
                     }
                 }
 
@@ -1254,19 +1281,19 @@ namespace System.Threading
         private bool _loggingEnabled;
 
         // SOS's ThreadPool command depends on the following names (these are dummies though)
-        internal readonly WorkQueue workItems = new WorkQueue();
-        internal readonly WorkQueue highPriorityWorkItems = new WorkQueue();
-        internal readonly WorkQueue[] _assignableWorkItemQueues = new WorkQueue[1];
+        internal readonly WorkQueueUnused workItems = new WorkQueueUnused();
+        internal readonly WorkQueueUnused highPriorityWorkItems = new WorkQueueUnused();
+        internal readonly WorkQueueUnused[] _assignableWorkItemQueues = new WorkQueueUnused[1];
 
         // actual queues
         internal readonly WorkStealingQueue[] _WorkStealingQueues;
-        internal readonly WorkQueue[] _FifoQueues;
+        internal readonly FifoWorkQueue[] _FifoQueues;
 
         public ThreadPoolWorkQueue()
         {
             uint queueCount = BitOperations.RoundUpToPowerOf2((uint)Environment.ProcessorCount);
             _WorkStealingQueues = new WorkStealingQueue[queueCount];
-            _FifoQueues = new WorkQueue[queueCount];
+            _FifoQueues = new FifoWorkQueue[queueCount];
 
             RefreshLoggingEnabled();
         }
@@ -1327,7 +1354,7 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal WorkQueue GetOrAddFifoQueue()
+        internal FifoWorkQueue GetOrAddFifoQueue()
         {
             var index = GetPreferredQueueIndex();
             var result = _FifoQueues[index] ?? EnsureFifoQueue(index);
@@ -1335,9 +1362,9 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private WorkQueue EnsureFifoQueue(int index)
+        private FifoWorkQueue EnsureFifoQueue(int index)
         {
-            var newQueue = new WorkQueue();
+            var newQueue = new FifoWorkQueue();
             Interlocked.CompareExchange(ref _FifoQueues[index], newQueue, null!);
             return _FifoQueues[index];
         }
@@ -1415,17 +1442,16 @@ namespace System.Threading
 
         public object? DequeueAll(ref bool missedSteal)
         {
-            // Try get a workitem from global queues
+            // Try get a workitem from fifo queues
             // We scan all queues starting with a random one for fairness.
-            WorkQueue[] fqs = _FifoQueues;
+            FifoWorkQueue[] fqs = _FifoQueues;
             ThreadPoolWorkQueueThreadLocals tl = GetOrCreateThreadLocals();
             int startIndex = (int)tl.NextRnd() & (fqs.Length - 1);
-            // do a sweep of all local queues.
             for (int i = 0; i < fqs.Length; i++)
             {
-                WorkQueue? fq = fqs[startIndex ^ i];
-                object? workItem;
-                if (fq?.TryDequeue(out workItem) == true)
+                FifoWorkQueue? fq = fqs[startIndex ^ i];
+                object? workItem = fq?.TryDequeue();
+                if (workItem != null)
                 {
                     return workItem;
                 }
@@ -1470,7 +1496,7 @@ namespace System.Threading
             get
             {
                 long count = 0;
-                foreach (WorkQueue workStealingQueue in _FifoQueues)
+                foreach (FifoWorkQueue workStealingQueue in _FifoQueues)
                 {
                     if (workStealingQueue != null)
                     {
@@ -2285,11 +2311,11 @@ namespace System.Threading
         internal static IEnumerable<object> GetQueuedWorkItems()
         {
             // Enumerate each global queue
-            foreach (WorkQueue workQueue in s_workQueue._FifoQueues)
+            foreach (ThreadPoolWorkQueue.FifoWorkQueue workQueue in s_workQueue._FifoQueues)
             {
                 if (workQueue != null)
                 {
-                    foreach (object item in workQueue)
+                    foreach (object item in workQueue.GetQueuedWorkItems())
                     {
                         yield return item;
                     }
