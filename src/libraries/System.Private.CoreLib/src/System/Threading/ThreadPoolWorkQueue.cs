@@ -1334,13 +1334,13 @@ namespace System.Threading
         /// </summary>
         internal WorkStealingQueue? GetWorkStealingQueue()
         {
-            return _WorkStealingQueues[GetPreferredQueueIndex()];
+            return _WorkStealingQueues[GetPreferredStealingQueueIndex()];
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal WorkStealingQueue GetOrAddWorkStealingQueue()
         {
-            var index = GetPreferredQueueIndex();
+            var index = GetPreferredStealingQueueIndex();
             var result = _WorkStealingQueues[index] ?? EnsureWorkStealingQueue(index);
             return result;
         }
@@ -1354,9 +1354,21 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal int GetPreferredStealingQueueIndex()
+        {
+            int id = Threading.Thread.GetCurrentProcessorNumber();
+            // on windows GetCurrentProcessorNumber always works
+#if !TARGET_WINDOWS
+            if (id < 0)
+                id = Environment.CurrentManagedThreadId;
+#endif
+            return id & (_WorkStealingQueues.Length - 1);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal FifoWorkQueue GetOrAddFifoQueue()
         {
-            var index = GetPreferredQueueIndex();
+            var index = GetPreferredFifoQueueIndex();
             var result = _FifoQueues[index] ?? EnsureFifoQueue(index);
             return result;
         }
@@ -1370,7 +1382,7 @@ namespace System.Threading
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal int GetPreferredQueueIndex()
+        internal int GetPreferredFifoQueueIndex()
         {
             int id = Threading.Thread.GetCurrentProcessorNumber();
             // on windows GetCurrentProcessorNumber always works
@@ -1378,7 +1390,7 @@ namespace System.Threading
             if (id < 0)
                 id = Environment.CurrentManagedThreadId;
 #endif
-            return id & (_WorkStealingQueues.Length - 1);
+            return id & (_FifoQueues.Length - 1);
         }
 
         public void Enqueue(object callback, bool forceGlobal)
@@ -1414,7 +1426,7 @@ namespace System.Threading
 
         internal bool TryRemove(Task callback)
         {
-            int WorkStealingQueueIndex = GetPreferredQueueIndex();
+            int WorkStealingQueueIndex = GetPreferredStealingQueueIndex();
             WorkStealingQueue? WorkStealingQueue = _WorkStealingQueues[WorkStealingQueueIndex];
             if (WorkStealingQueue != null && WorkStealingQueue.TryRemove(callback))
             {
@@ -1459,7 +1471,7 @@ namespace System.Threading
 
             // Try to steal from other threads' local work items
             WorkStealingQueue[] wsqs = _WorkStealingQueues;
-            startIndex = GetPreferredQueueIndex();
+            startIndex = GetPreferredStealingQueueIndex();
 
             // do a sweep of all local queues.
             for (int i = 0; i < wsqs.Length; i++)
