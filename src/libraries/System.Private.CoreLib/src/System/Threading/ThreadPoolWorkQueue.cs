@@ -308,7 +308,9 @@ namespace System.Threading
                 var currentSegment = _deqSegment;
                 object? result = currentSegment.TryDequeue(ref missedSteal);
 
-                if (result == null && currentSegment._nextSegment != null)
+                if (result == null &&
+                    !missedSteal &&
+                    currentSegment._nextSegment != null)
                 {
                     // slow path that fixes up segments
                     result = TryDequeueSlow(currentSegment, ref missedSteal);
