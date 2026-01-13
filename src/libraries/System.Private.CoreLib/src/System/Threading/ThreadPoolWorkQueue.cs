@@ -194,6 +194,15 @@ namespace System.Threading
             }
         }
 
+        /// This flavor of the queue only supports Enqueue and Dequeue and that allows for some simplifications.
+        /// We use multiple queues like this to implement a "global queue" - so that multiple enqueuer threads
+        /// would not compete for the same queue.
+        ///
+        /// For a single queue the fifo order mostly holds, but is not guaranteed as concurrent dequeue operations
+        /// do not necessarily finish in the same order as they start. The combined "global" queue guarantees
+        /// even less. However, the dequeuing strategy tries to be fair, thus no single item should be
+        /// arbitrarily delayed while other items make progress.
+        /// Basically the "global" queue provides overall fairness at some cost to the throughput.
         [DebuggerDisplay("Count = {Count}")]
         internal sealed class FifoWorkQueue : WorkQueueBase
         {
@@ -356,8 +365,6 @@ namespace System.Threading
             /// Provides a multi-producer, multi-consumer thread-safe bounded segment.  When the queue is full,
             /// enqueues fail and return false.  When the queue is empty, dequeues fail and return null.
             /// These segments are linked together to form the unbounded queue.
-            ///
-            /// The "global" flavor of the queue does not support Pop or Remove and that allows for some simplifications.
             /// </summary>
             [DebuggerDisplay("Count = {Count}")]
             internal sealed class QueueSegment : QueueSegmentBase
@@ -422,7 +429,7 @@ namespace System.Threading
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
                         // We should retry with a new dequeue.
-                        spinner.SpinOnce();
+                        spinner.SpinOnce(sleep1Threshold: -1);
                     }
                 }
 
@@ -539,14 +546,14 @@ namespace System.Threading
         }
 
         /// <summary>
-        /// The "local" flavor of the queue is similar to the "global", but also supports Pop, Remove and Move operations.
+        /// A flavor of the queue that is similar to the fifo queue, but also supports Pop, Remove and Move operations.
         /// - Pop is used to implement Busy-Leaves scheduling strategy.
         /// - Remove is used when the caller finds it beneficial to execute a workitem "inline" after it has been scheduled.
         ///   (such as waiting on a task completion).
         /// - Move is used to rebalance queues if one is found to be "rich" by stealing 1/2 of its queue.
-        ///   (basically a divide-and-conquer mitigation for thieves contention if a few queues contain most of tasks)
+        ///   (a divide-and-conquer mitigation for contention among thieves if a few queues contain most of tasks)
         ///
-        /// We create multiple local queues and softly affinitize them with CPU cores.
+        /// We create multiple such "local" queues and associate with CPU cores.
         /// </summary>
         [DebuggerDisplay("Count = {Count}")]
         internal sealed class WorkStealingQueue : WorkQueueBase
@@ -751,7 +758,7 @@ namespace System.Threading
 
             /// <summary>
             /// Pops the newest item from the queue.
-            /// Returns null if there is nothing to pop or there is a contention.
+            /// Returns null if there is nothing to pop.
             /// </summary>
             internal object? TryPop()
             {
@@ -788,28 +795,29 @@ namespace System.Threading
 
             /// <summary>
             /// Provides a multi-producer, multi-consumer thread-safe bounded segment.  When the queue is full,
-            /// enqueues fail and return false.  When the queue is empty, attempts to fetch an items fail and return null.
+            /// enqueues fail and return false.  When the queue is empty, attempts to fetch an item fail and return null.
             /// These segments are linked together to form the unbounded queue.
             ///
             /// The main difference from the implementation in fifo queue is support for Pop so that a worker could select
-            /// the most recent workitem, which is more likely to be a "leaf" workitem, vs. forking more workitems.
-            /// Among other benefits, like improving locality of workitem execution, the approach is critical to minimizing
-            /// the number of workitems that exist at any given time (i.e. the max queue size).
+            /// the most recent workitem. Among other benefits, like improving locality of workitem execution, the approach
+            /// is critical to minimizing the number of workitems that exist at any given time (i.e. the max queue size),
+            /// because a recently enqueued workitem is more likely to be a "leaf" workitem, vs. a workitem that might
+            /// decompose itself into multiple workitems.
             ///
             /// Supporting Pop leads to additional complexity compared to fifo segments.
             /// In particular the enqueue index may move both forward and backward and therefore we cannot rely on atomic
             /// update of the enqueue index as a way of acquiring access to an Enqueue/Pop slot.
-            /// Another issue that complicates things is that all operation (Steal, Enqueue, Pop, etc.) may be concurrently
-            /// performed and should coordinate access to the slots when necessary.
+            /// Since all operation (Steal, Enqueue, Pop, etc.) we need coordination scheme that would work for all
+            /// operations when the segment contains one element.
             ///
             /// We resolve these issues by observing the following rules:
             /// - In an empty segment dequeue and enqueue ends point to the same slot. This is also the initial state.
             /// - The enqueue end is never behind the dequeue end.
             /// - Slots in "Full" state form a contiguous range.
-            /// - Steal operation must acquire access to the dequeue slot by atomically moving it to the "Change" state.
-            ///   Setting the slot to the next state can be done via regular write. After the Dequeue is complete and dequeue end is moved forward.
             /// - Pop and Enqueue operation must acquire the access to enqueue slot by atomically moving the previous slot to the "Change" state.
-            ///   Setting the next state can be done via regular write. After the Enqueue/Pop is complete and enqueue end is moved appropriately.
+            ///   Setting the next state can be done via regular write after the Enqueue/Pop is complete and enqueue end is moved appropriately.
+            /// - Steal operation must acquire access to the dequeue slot by atomically moving it to the "Dequeue" state.
+            ///   Setting the slot to the next state can be done via regular write. After the Dequeue is complete and dequeue end is moved forward.
             ///
             ///   To summarize:
             ///     In a rare case of concurrent Pop and Enqueue, the threads claim the access by setting "Change" state in the same slot.
@@ -818,7 +826,7 @@ namespace System.Threading
             ///     This indirectly guarantees that concurrent Steal and Pop cannot use the same slot and move enqueue/dequeue ends across each other.
             ///
             /// - Move/Remove operations get exclusive access to appropriate ranges of slots by setting "Change" on both sides of the range.
-            /// - The enqueue and dequeue ends are updated only when corresponding slots are in the "Change" state.
+            /// - The enqueue and dequeue ends are updated only when corresponding slots are reserved for changing.
             /// - It is possible, in a case of a contention, to move a wrong slot to the "Change" state.
             ///   (Ex: the slot is no longer previous to an enqueue slot because enqueue index has moved forward)
             ///   When such situation is possible, it can be detected by re-examining the condition after the slot has been moved to "Change" state.
@@ -836,11 +844,14 @@ namespace System.Threading
                 /// <summary>
                 /// Another state of the slot in addition to Empty and Full.
                 /// "Change" means that the slot is reserved for possible modifications.
-                /// The state is used for mutual communication between Enqueue/Dequeue/Pop/Remove.
+                /// The state is used for mutual communication between Enqueue/Pop/Remove.
                 /// NB: Enqueue reserves the slot "to the left" of the slot that is targeted by Enqueue.
                 ///     This ensures that "Full" slots occupy a contiguous range (not a requirement and is not true for the fifo flavor of the queue)
+                /// "Dequeue" has roughly the same purpose as "Change", but only used on the dequeuing end of the queue.
+                /// This allows us to detect cases where pop has reached the dequeuing end of the segment.
                 /// </summary>
                 private const int Change = 2;
+                private const int Dequeue = 3;
 
                 /// <summary>Creates the segment.</summary>
                 /// <param name="length">
@@ -857,11 +868,8 @@ namespace System.Threading
                 {
                     // Loop in case of contention a few times.
                     // Contention is rare here, since this is "our" queue.
-                    // When happens, it is mostly a collision with stealing of the last item and cannot last long.
-                    // However in even more rare cases the stealing thread could be preempted while holding the
-                    // slot in the Change state and then it can take unknown time.
-                    // Therefore after a few failed attempts we fallback to a fifo enqueue instead of waiting.
-                    for (int i = 0; i < 4; i++)
+                    SpinWait sw = default;
+                    while (true)
                     {
                         int position = _queueEnds.Enqueue;
                         ref Slot prevSlot = ref this[position - 1];
@@ -872,8 +880,8 @@ namespace System.Threading
                         // otherwise retry - we have some kind of race, most likely the prev item is being stolen
                         if (prevSequenceNumber == position || prevSequenceNumber == position + _slotsMask)
                         {
-                            // lock the previous slot (so noone could dequeue past us, pop the prev slot or enqueue into the same position)
-                            // NB: once we lock, the segment can not be considered empty by the TrySteal
+                            // lock the previous slot (so no one could dequeue past us, pop the prev slot or enqueue into the same position)
+                            // NB: once we lock the slot, the segment can not be considered empty by the TrySteal
                             if (Interlocked.CompareExchange(ref prevSlot.SequenceNumber, prevSequenceNumber + Change, prevSequenceNumber) == prevSequenceNumber)
                             {
                                 // confirm that enqueue did not change while we were locking the slot
@@ -891,7 +899,7 @@ namespace System.Threading
                                         slot.Item = item;
 
                                         // make the slot appear full in the current generation.
-                                        // since the slot on the left is still locked, only poppers/enqueuers can use it, but can use immediately
+                                        // since the slot on the left is still locked, only poppers/enqueuers can use current slot, but can use immediately
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
 
                                         // unlock prev slot
@@ -921,15 +929,9 @@ namespace System.Threading
                             return false;
                         }
 
-                        // Lost a race. Most likely to the dequeuer of the last remaining item.
-                        // Try again after a tiny delay.
-                        Thread.SpinWait(i);
+                        // Lost a race. Try again after a delay.
+                        sw.SpinOnce(sleep1Threshold: -1);
                     }
-
-                    // We could not enqueue in a few tries. Someone is locking the queue end.
-                    // Instead of trying more, just put the workitem into a fifo queue. This is very rare.
-                    ThreadPool.s_workQueue.EnqueueAtHighPriority(item);
-                    return true;
                 }
 
                 internal bool CanPop
@@ -947,11 +949,12 @@ namespace System.Threading
                     }
                 }
 
+                // Returns null if determined that the segment is empty.
+                // Otherwise returns an item. (will spin until we can be sure of one case or another)
                 internal object? TryPop()
                 {
-                    // Retry in rare cases like finding a removed item or enqueue is changed.
-                    // In a case of collision, we just leave and try doing something else.
-                    // we will eventually try stealing from the same queue and will have a chance to report a missed steal.
+                    // Retry in cases like contention or finding a removed item.
+                    SpinWait sw = default;
                     while (true)
                     {
                         int position = _queueEnds.Enqueue - 1;
@@ -961,13 +964,15 @@ namespace System.Threading
                         int sequenceNumber = slot.SequenceNumber;
 
                         // Check if the slot is considered Full in the current generation (other likely state - Empty).
-                        if (sequenceNumber == position + Full)
+                        int diff = sequenceNumber - position;
+                        if (diff == Full)
                         {
                             // lock the slot.
-                            if (Interlocked.CompareExchange(ref slot.SequenceNumber, position + Change, sequenceNumber) == sequenceNumber)
+                            int actualSequenceNumber = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Change, sequenceNumber);
+                            if (actualSequenceNumber == sequenceNumber)
                             {
                                 // Confirm that enqueue did not change while we were locking the slot.
-                                // It is extremely rare, but we may see another Pop or Enqueue on the same segment.
+                                // It is not common, but we may see another Pop or Enqueue on the same segment.
                                 // The following is the same as "if (_queueEnds.Enqueue == position + 1)"
                                 if (_queueEnds.Enqueue == sequenceNumber)
                                 {
@@ -996,13 +1001,24 @@ namespace System.Threading
                                     // enqueue changed, we locked a wrong slot, in this rare case we just retry.
                                     // unlock the slot through CAS in case the slot was Moved and the new state should win.
                                     Interlocked.CompareExchange(ref slot.SequenceNumber, sequenceNumber, position + Change);
-                                    continue;
                                 }
+                            }
+                            else
+                            {
+                                diff = actualSequenceNumber - position;
                             }
                         }
 
-                        // found no items or encountered a contention (most likely with a dequeuer)
-                        return null;
+                        // If the slot is empty (in the next generation) or in Dequeue state,
+                        // then we have reached the dequeuing end of the segment.
+                        // At this point in time, the segment is empty.
+                        if (diff == 1 + _slotsMask || diff == Dequeue)
+                        {
+                            return null;
+                        }
+
+                        // the slot has changed or is changing, we should try again
+                        sw.SpinOnce(sleep1Threshold: -1);
                     }
                 }
 
@@ -1041,13 +1057,13 @@ namespace System.Threading
                         if (diff == Full)
                         {
                             // Reserve the slot for dequeuing.
-                            if (Interlocked.CompareExchange(ref slot.SequenceNumber, position + Change, sequenceNumber) == sequenceNumber)
+                            if (Interlocked.CompareExchange(ref slot.SequenceNumber, position + Dequeue, sequenceNumber) == sequenceNumber)
                             {
                                 object? item;
                                 var enqPos = _queueEnds.Enqueue;
                                 if (enqPos - position < MoveThreshold ||
                                     // "this" is a sentinel for a failed Moving attempt
-                                    (item = TryMoveCore(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
+                                    (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
@@ -1082,41 +1098,7 @@ namespace System.Threading
                     }
                 }
 
-                internal object? TryMoveTo(QueueSegment other)
-                {
-                    int deqPos = _queueEnds.Dequeue;
-                    ref Slot slot = ref this[deqPos];
-                    int sequenceNumber = slot.SequenceNumber;
-
-                    // Check if the slot is considered Full in the current generation.
-                    int diff = sequenceNumber - deqPos;
-                    if (diff == Full)
-                    {
-                        // Reserve the slot for Dequeuing.
-                        if (Interlocked.CompareExchange(ref slot.SequenceNumber, deqPos + Change, sequenceNumber) == sequenceNumber)
-                        {
-                            var enqPos = _queueEnds.Enqueue;
-                            object? item = TryMoveCore(other, deqPos, enqPos);
-
-                            // "this" is a sentinel for a failed Moving attempt
-                            if (item == this)
-                            {
-                                // steal one item anyways then, since we can.
-                                _queueEnds.Dequeue = deqPos + 1;
-                                item = slot.Item;
-                                slot.Item = null;
-                            }
-
-                            // unlock the slot for enqueuing by making the slot empty in the next generation
-                            Volatile.Write(ref slot.SequenceNumber, deqPos + 1 + _slotsMask);
-                            return item;
-                        }
-                    }
-
-                    return null;
-                }
-
-                internal object? TryMoveCore(QueueSegment other, int deqPosition, int enqPosition)
+                internal object? TryMove(QueueSegment other, int deqPosition, int enqPosition)
                 {
                     // similar sequence as in TryEnqueue, since we will be adding items to the other queue.
                     int otherEnqPosition = other._queueEnds.Enqueue;
@@ -1138,7 +1120,7 @@ namespace System.Threading
                         if (Interlocked.CompareExchange(ref enqPrevSlot.SequenceNumber, prevSequenceNumber + Change, prevSequenceNumber) == prevSequenceNumber)
                         {
                             // confirm that enqueue did not change while we were locking the slot
-                            // it is extremely rare, but we may see another Pop or Enqueue on the same segment.
+                            // it is uncommon, but we may see another Pop or Enqueue on the same segment.
                             if (other._queueEnds.Enqueue == otherEnqPosition)
                             {
                                 // lock halfslot, it must be full
@@ -1332,7 +1314,7 @@ namespace System.Threading
         }
 
         /// <summary>
-        /// Returns a local queue softly affinitized with the current thread.
+        /// Returns a work stealing queue softly associated with the current thread.
         /// </summary>
         internal WorkStealingQueue? GetPreferredWorkStealingQueue()
         {
@@ -1458,52 +1440,53 @@ namespace System.Threading
 
         public void TryStealFromRandom()
         {
-            WorkStealingQueue? currentWsQueue = GetPreferredWorkStealingQueue();
+            WorkStealingQueue? localWsQueue = GetPreferredWorkStealingQueue();
             // only continue if there is a local queue and it is empty.
-            if (currentWsQueue?.CanPop != false)
+            if (localWsQueue?.CanPop != false)
             {
                 return;
             }
 
-            uint rnd = currentWsQueue.NextRnd();
+            uint rnd = localWsQueue.NextRnd();
             WorkStealingQueue[] wsQueues = _WorkStealingQueues;
             WorkStealingQueue? otherWsQueue = wsQueues[rnd & (wsQueues.Length - 1)];
             bool missedSteal = false;
             object? workItem = otherWsQueue?.TrySteal(ref missedSteal);
             if (workItem != null)
             {
-                currentWsQueue.Enqueue(workItem);
+                localWsQueue.Enqueue(workItem);
             }
         }
 
         public object? Dequeue(ref bool missedSteal)
         {
             // Check for local work items
-            WorkStealingQueue? wsQueue = GetPreferredWorkStealingQueue();
-            object? workItem = wsQueue?.TryPop();
+            WorkStealingQueue? localWsQueue = GetPreferredWorkStealingQueue();
+            object? workItem = localWsQueue?.TryPop();
             if (workItem != null)
             {
                 return workItem;
             }
 
-            return DequeueAll(ref missedSteal, wsQueue);
+            return DequeueAll(localWsQueue, ref missedSteal);
         }
 
-        public object? DequeueAll(ref bool missedSteal, WorkStealingQueue? localWsq)
+        public object? DequeueAll(WorkStealingQueue? localWsQueue, ref bool missedSteal)
         {
             object? workItem;
             FifoWorkQueue[] ffQueues = _FifoQueues;
 
             // For fairness we will traverse fifo queues starting from a random index.
-            uint start = localWsq?.NextRnd() ?? this.NextRnd();
+            uint start = localWsQueue?.NextRnd() ?? this.NextRnd();
 
-            // To decorellate traversal patterns in different workers we will
+            // To decorrelate traversal patterns in different workers we will
             // do traversal with an odd stride derived from localWsq index.
-            // Odd stride would visit every index and only once, since the array
-            // length is a power of 2, thus any odd number is a coprime of the length.
+            // For an array with a power of 2 length, an odd-stride traversal
+            // will see every item and only once, since an odd number is a coprime
+            // of the length.
             // Compute the stride by mixing up the start and the queue index and
             // force the result to be odd.
-            uint stride = ((localWsq?._queueIndex ?? 0 + start) * 1664525u) | 1;
+            uint stride = ((localWsQueue?._queueIndex ?? 0 + start) * 1664525u) | 1;
 
             uint n = (uint)ffQueues.Length;
             uint mask = n - 1;
@@ -1518,18 +1501,22 @@ namespace System.Threading
                 }
             }
 
-            // Try stealing from local queues.
-            // We check all the queues, including localWsq, since popping could have
-            // been unsuccessful due to a conflict, but we want that localWsq is
-            // the last one checked as it is more likely that it is simply empty.
+            // Try stealing from all local queues, except localWsQueue.
+            // When we tried to pop from it, the localWsQueue was empty.
+            // It may be not empty right now, but either way
+            // we do not need or want to steal from it.
             WorkStealingQueue[] wsQueues = _WorkStealingQueues;
             n = (uint)wsQueues.Length;
             mask = n - 1;
-            start = localWsq?._queueIndex ?? start;
-            for (uint i = 1; i <= n; i++)
+            for (uint i = 0; i < n; i++)
             {
                 uint idx = (start + i * stride) & mask;
                 WorkStealingQueue? wsQueue = wsQueues[idx];
+                if (wsQueue == localWsQueue)
+                {
+                    continue;
+                }
+
                 workItem = wsQueue?.TrySteal(ref missedSteal);
                 if (workItem != null)
                 {
@@ -2350,7 +2337,7 @@ namespace System.Threading
         // Get all workitems.  Called by TaskScheduler in its debugger hooks.
         internal static IEnumerable<object> GetQueuedWorkItems()
         {
-            // Enumerate each global queue
+            // Enumerate each fifo queue
             foreach (ThreadPoolWorkQueue.FifoWorkQueue workQueue in s_workQueue._FifoQueues)
             {
                 if (workQueue != null)
