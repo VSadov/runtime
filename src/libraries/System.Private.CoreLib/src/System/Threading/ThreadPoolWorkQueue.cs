@@ -1059,7 +1059,8 @@ namespace System.Threading
                         if (diff == Full)
                         {
                             // Reserve the slot for dequeuing.
-                            if (Interlocked.CompareExchange(ref slot.SequenceNumber, position + Dequeue, sequenceNumber) == sequenceNumber)
+                            int actualSequenceNumber = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Dequeue, sequenceNumber);
+                            if (actualSequenceNumber == sequenceNumber)
                             {
                                 object? item;
                                 var enqPos = _queueEnds.Enqueue;
@@ -1084,8 +1085,13 @@ namespace System.Threading
 
                                 return item;
                             }
+                            else
+                            {
+                                diff = actualSequenceNumber - position;
+                            }
                         }
-                        else if (diff == 0)
+
+                        if (diff == 0)
                         {
                             // reached an empty slot
                             // since full slots are contiguous, finding an empty slot means that
