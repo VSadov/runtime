@@ -920,9 +920,10 @@ namespace System.Threading
                                     }
                                 }
 
-                                // enqueue changed or segment is full (rare cases)
+                                // enqueue changed or segment is full, in these rare cases we just retry.
                                 // unlock the slot through CAS in case slot was Moved
                                 Interlocked.CompareExchange(ref prevSlot.SequenceNumber, prevSequenceNumber, prevSequenceNumber + Change);
+                                continue;
                             }
                         }
 
@@ -998,12 +999,11 @@ namespace System.Threading
 
                                     return item;
                                 }
-                                else
-                                {
+
                                     // enqueue changed, we locked a wrong slot, in this rare case we just retry.
-                                    // unlock the slot through CAS in case the slot was Moved and the new state should win.
+                                // unlock the slot through CAS in case the slot was Moved so that the the new state would win if present.
                                     Interlocked.CompareExchange(ref slot.SequenceNumber, sequenceNumber, position + Change);
-                                }
+                                continue;
                             }
                             else
                             {
