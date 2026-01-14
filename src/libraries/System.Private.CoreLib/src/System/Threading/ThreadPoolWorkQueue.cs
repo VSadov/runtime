@@ -895,13 +895,17 @@ namespace System.Threading
                                     int sequenceNumber = slot.SequenceNumber;
                                     if (sequenceNumber == position)
                                     {
-                                        // update Enqueue - must do before marking the slot full.
-                                        // otherwise someone could lock the full slot while having stale Enqueue.
-                                        _queueEnds.Enqueue = position + 1;
                                         slot.Item = item;
 
+                                        // update Enqueue - must do before marking the slot full.
+                                        // The order of updating Enqueue vs. inserting the item is irrelevant.
+                                        // We update the Enqueue after inserting. No operation on the Enqueue end
+                                        // can succeed until we mark the slot Full anyways.
+                                        _queueEnds.Enqueue = position + 1;
+
                                         // make the slot appear full in the current generation.
-                                        // since the slot on the left is still locked, only poppers/enqueuers can use current slot, but can use immediately
+                                        // since the slot on the left is still locked, only poppers/enqueuers can use current slot,
+                                        // but can use immediately.
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
 
                                         // unlock prev slot
@@ -918,6 +922,13 @@ namespace System.Threading
                                         _queueEnds.Enqueue = position + FreezeOffset;
                                         _frozenForEnqueues = true;
                                     }
+                                    else
+                                    {
+                                        // the slot is being popped, Enqueue has already retracted, but the slot is still Full.
+                                        // we will retry after a delay.
+                                        prevSlot.SequenceNumber = prevSequenceNumber;
+                                        goto spin;
+                                    }
                                 }
 
                                 // enqueue changed or segment is full, in these rare cases we just retry.
@@ -931,6 +942,8 @@ namespace System.Threading
                         {
                             return false;
                         }
+
+                    spin:
 
                         // Lost a race. Try again after a delay.
                         sw.SpinOnce(sleep1Threshold: -1);
@@ -979,12 +992,15 @@ namespace System.Threading
                                 // The following is the same as "if (_queueEnds.Enqueue == position + 1)"
                                 if (_queueEnds.Enqueue == sequenceNumber)
                                 {
+                                    // Update Enqueue before marking slot empty.
+                                    // if enqueue update is later than that someone may enqueue into a wrong slot.
+                                    // The order of updating Enqueue vs. taking the item is irrelevant.
+                                    // We update the Enqueue first - with everything equal, there is a tiny chance there
+                                    // is concurrent Pop and it may be able to succeed as soon as Enqueue is updated.
+                                    _queueEnds.Enqueue = position;
+
                                     var item = slot.Item;
                                     slot.Item = null;
-
-                                    // update Enqueue before marking slot empty.
-                                    // if enqueue update is later than that someone may enqueue into a wrong slot.
-                                    _queueEnds.Enqueue = position;
 
                                     // make the slot appear empty in the current generation and update enqueue
                                     // that unlocks the slot
@@ -1000,9 +1016,9 @@ namespace System.Threading
                                     return item;
                                 }
 
-                                    // enqueue changed, we locked a wrong slot, in this rare case we just retry.
+                                // enqueue changed, we locked a wrong slot, in this rare case we just retry.
                                 // unlock the slot through CAS in case the slot was Moved so that the the new state would win if present.
-                                    Interlocked.CompareExchange(ref slot.SequenceNumber, sequenceNumber, position + Change);
+                                Interlocked.CompareExchange(ref slot.SequenceNumber, sequenceNumber, position + Change);
                                 continue;
                             }
                             else
@@ -1019,7 +1035,7 @@ namespace System.Threading
                             return null;
                         }
 
-                        // the slot has changed or is changing, we should try again
+                        // the slot inconsistent, someone may be using it, we should try again after a delay
                         sw.SpinOnce(sleep1Threshold: -1);
                     }
                 }
