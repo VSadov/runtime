@@ -886,11 +886,11 @@ namespace System.Threading
                             if (Interlocked.CompareExchange(ref prevSlot.SequenceNumber, prevSequenceNumber + Change, prevSequenceNumber) == prevSequenceNumber)
                             {
                                 // confirm that enqueue did not change while we were locking the slot
-                                // it is extremely rare, but we may see another Pop or Enqueue on the same segment.
+                                // it is rare, but we may see another Enqueue on the same segment.
                                 if (_queueEnds.Enqueue == position)
                                 {
                                     // Successfully locked prev slot.
-                                    // is the slot empty?   (most common path)
+                                    // is the Enqueue slot empty?   (most common path)
                                     int sequenceNumber = slot.SequenceNumber;
                                     if (sequenceNumber == position)
                                     {
