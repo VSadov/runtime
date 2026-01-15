@@ -254,7 +254,7 @@ namespace System.Threading
                 // try enqueuing. Should normally succeed unless we need a new segment.
                 if (!_enqSegment.TryEnqueue(item))
                 {
-                    // If we're unable to enque, this segment will never take enqueues again.
+                    // If we're unable to enqueue, this segment will never take enqueues again.
                     // we need to take a slow path that will try adding a new segment.
                     EnqueueSlow(item);
                 }
@@ -387,8 +387,7 @@ namespace System.Threading
                 internal object? TryDequeueThoroughly()
                 {
                     // Loop in case of contention...
-                    SpinWait spinner = default;
-
+                    SpinWait sw = default;
                     while (true)
                     {
                         int position = _queueEnds.Dequeue;
@@ -431,7 +430,7 @@ namespace System.Threading
 
                         // Or we have a stale dequeue value. Another dequeuer was quicker than us.
                         // We should retry with a new dequeue.
-                        spinner.SpinOnce(sleep1Threshold: -1);
+                        sw.SpinOnce(sleep1Threshold: -1);
                     }
                 }
 
