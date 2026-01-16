@@ -5530,7 +5530,7 @@ MethodTableBuilder::PlaceVirtualMethods()
 // that the name+signature corresponds to. Used by ProcessMethodImpls and ProcessInexactMethodImpls
 // Always returns the first match that it finds. Affects the ambiguities in code:#ProcessInexactMethodImpls_Ambiguities
 MethodTableBuilder::bmtMethodHandle
-MethodTableBuilder::FindDeclMethodOnInterfaceEntry(bmtInterfaceEntry *pItfEntry, MethodSignature &declSig, AsyncVariantLookup variantLookup, bool searchForStaticMethods)
+MethodTableBuilder::FindDeclMethodOnInterfaceEntry(bmtInterfaceEntry *pItfEntry, MethodSignature &declSig, bool needAsyncVariant, bool searchForStaticMethods)
 {
     STANDARD_VM_CONTRACT;
 
@@ -5567,9 +5567,10 @@ MethodTableBuilder::FindDeclMethodOnInterfaceEntry(bmtInterfaceEntry *pItfEntry,
         }
     }
 
-    if (variantLookup == AsyncVariantLookup::AsyncOtherVariant && !declMethod.IsNull())
+    if (needAsyncVariant && !declMethod.IsNull())
     {
         bmtRTMethod* declRTMethod = declMethod.AsRTMethod();
+        _ASSERTE(!declRTMethod->GetMethodDesc()->IsAsyncVariantMethod());
         // Other variant may not exist. For example we return Task and the base is generic and returns T.
         // Then we return Null.
         declMethod = {};
@@ -5580,7 +5581,7 @@ MethodTableBuilder::FindDeclMethodOnInterfaceEntry(bmtInterfaceEntry *pItfEntry,
             if ((slotDeclMethod->GetOwningType() == declRTMethod->GetOwningType()) &&
                 (slotDeclMethod->GetMethodDesc()->GetMethodTable() == declRTMethod->GetMethodDesc()->GetMethodTable()) &&
                 (slotDeclMethod->GetMethodDesc()->GetMemberDef() == declRTMethod->GetMethodDesc()->GetMemberDef()) &&
-                (slotDeclMethod->GetMethodDesc()->IsAsyncVariantMethod() != declRTMethod->GetMethodDesc()->IsAsyncVariantMethod()))
+                (slotDeclMethod->GetMethodDesc()->IsAsyncVariantMethod()))
             {
                 declMethod = slotIt->Decl();
                 break;
@@ -5656,9 +5657,7 @@ MethodTableBuilder::ProcessInexactMethodImpls()
             continue;
         }
 
-        AsyncVariantLookup asyncVariantOfDeclToFind = !it->IsAsyncVariant() ?
-            AsyncVariantLookup::MatchingAsyncVariant :
-            AsyncVariantLookup::AsyncOtherVariant;
+        bool needAsyncVariant = it->IsAsyncVariant();
 
         // If this method serves as the BODY of a MethodImpl specification, then
         // we should iterate all the MethodImpl's for this class and see just how many
@@ -5714,7 +5713,7 @@ MethodTableBuilder::ProcessInexactMethodImpls()
                 pItfEntry = &bmtInterface->pInterfaceMap[i];
 
                 // Search for declmethod on this interface
-                declMethod = FindDeclMethodOnInterfaceEntry(pItfEntry, declSig, asyncVariantOfDeclToFind);
+                declMethod = FindDeclMethodOnInterfaceEntry(pItfEntry, declSig, needAsyncVariant);
 
                 // If we didn't find a match, continue on to next interface in the equivalence set
                 if (declMethod.IsNull())
@@ -5801,9 +5800,7 @@ MethodTableBuilder::ProcessMethodImpls()
             continue;
         }
 
-        AsyncVariantLookup asyncVariantOfDeclToFind = !it->IsAsyncVariant() ?
-            AsyncVariantLookup::MatchingAsyncVariant :
-            AsyncVariantLookup::AsyncOtherVariant;
+        bool needAsyncVariant = it->IsAsyncVariant();
 
         // If this method serves as the BODY of a MethodImpl specification, then
         // we should iterate all the MethodImpl's for this class and see just how many
@@ -5846,7 +5843,7 @@ MethodTableBuilder::ProcessMethodImpls()
                         }
 
                         CONSISTENCY_CHECK(TypeFromToken(mdDecl) == mdtMethodDef);
-                        declMethod = bmtMethod->FindDeclaredMethodByToken(mdDecl, asyncVariantOfDeclToFind);
+                        declMethod = bmtMethod->FindDeclaredMethodByToken(mdDecl, needAsyncVariant);
                     }
                     else
                     {   // We can't call GetDescFromMemberDefOrRef here because this
@@ -5980,15 +5977,15 @@ MethodTableBuilder::ProcessMethodImpls()
                                 }
 
                                 // 3. Find the matching method.
-                                declMethod = FindDeclMethodOnInterfaceEntry(pItfEntry, declSig, asyncVariantOfDeclToFind, isVirtualStaticOverride); // Search for statics when the impl is non-virtual
+                                declMethod = FindDeclMethodOnInterfaceEntry(pItfEntry, declSig, needAsyncVariant, isVirtualStaticOverride); // Search for statics when the impl is non-virtual
                             }
                             else
                             {
                                 GetHalfBakedClass()->SetHasVTableMethodImpl();
-                                declMethod = FindDeclMethodOnClassInHierarchy(it, pDeclMT, declSig, asyncVariantOfDeclToFind);
+                                declMethod = FindDeclMethodOnClassInHierarchy(it, pDeclMT, declSig, needAsyncVariant);
                             }
 
-                            if (declMethod.IsNull() && asyncVariantOfDeclToFind == AsyncVariantLookup::AsyncOtherVariant)
+                            if (declMethod.IsNull() && needAsyncVariant)
                             {
                                 // when implementing/overriding, we may see a Task-returning method
                                 // which matches a T-returning method in the interface/base, which would not have variants.
@@ -6044,7 +6041,7 @@ MethodTableBuilder::ProcessMethodImpls()
 }
 
 
-MethodTableBuilder::bmtMethodHandle MethodTableBuilder::FindDeclMethodOnClassInHierarchy(const DeclaredMethodIterator& it, MethodTable * pDeclMT, MethodSignature &declSig, AsyncVariantLookup variantLookup)
+MethodTableBuilder::bmtMethodHandle MethodTableBuilder::FindDeclMethodOnClassInHierarchy(const DeclaredMethodIterator& it, MethodTable * pDeclMT, MethodSignature &declSig, bool needAsyncVariant)
 {
     bmtRTType * pDeclType = NULL;
     bmtMethodHandle declMethod;
@@ -6103,6 +6100,12 @@ MethodTableBuilder::bmtMethodHandle MethodTableBuilder::FindDeclMethodOnClassInH
             {
                 MethodDesc * pCurMD = methIt.GetMethodDesc();
 
+                if (pCurMD->IsAsyncVariantMethod())
+                {
+                    // the lookup is always in terms of a nonasync declaration and should not match aync variants directly.
+                    continue;
+                }
+
                 if (pCurDeclMT != pDeclMT)
                 {
                     // If the method isn't on the declaring type, then it must be virtual.
@@ -6130,11 +6133,11 @@ MethodTableBuilder::bmtMethodHandle MethodTableBuilder::FindDeclMethodOnClassInH
                         FALSE,
                         iPass == 0 ? &newVisited : NULL))
                     {
-                        if (variantLookup == AsyncVariantLookup::AsyncOtherVariant)
+                        if (needAsyncVariant)
                         {
-                            if (pCurMD->IsAsyncVariantMethod() || pCurMD->ReturnsTaskOrValueTask())
+                            if (pCurMD->ReturnsTaskOrValueTask())
                             {
-                                pCurMD = pCurMD->GetAsyncOtherVariant();
+                                pCurMD = pCurMD->GetAsyncVariant();
                             }
                             else
                             {
