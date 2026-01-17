@@ -2019,7 +2019,7 @@ private:
         // Searches the declared methods for a method with a token value equal to tok.
         bmtMDMethod *
         FindDeclaredMethodByToken(
-            mdMethodDef tok, bool needAsyncVariant)
+            mdMethodDef tok, AsyncVariantLookup variantLookup)
         {
             LIMITED_METHOD_CONTRACT;
             for (SLOT_INDEX i = 0; i < m_cDeclaredMethods; ++i)
@@ -2027,7 +2027,11 @@ private:
                 if ((*this)[i]->GetMethodSignature().GetToken() == tok)
                 {
                     auto result = (*this)[i];
-                    if (result->IsAsyncVariant() == needAsyncVariant)
+                    if (variantLookup == AsyncVariantLookup::AsyncOtherVariant)
+                    {
+                        return result->GetAsyncOtherVariant();
+                    }
+                    else
                     {
                         return result;
                     }
@@ -2794,13 +2798,13 @@ private:
     // Find the decl method on a given interface entry that matches the method name+signature specified
     // If none is found, return a null method handle
     bmtMethodHandle
-    FindDeclMethodOnInterfaceEntry(bmtInterfaceEntry *pItfEntry, MethodSignature &declSig, bool needAsyncVariant,  bool searchForStaticMethods = false);
+    FindDeclMethodOnInterfaceEntry(bmtInterfaceEntry *pItfEntry, MethodSignature &declSig, AsyncVariantLookup variantLookup,  bool searchForStaticMethods = false);
 
     // --------------------------------------------------------------------------------------------
     // Find the decl method within the class hierarchy method name+signature specified
     // If none is found, return a null method handle
     bmtMethodHandle
-    FindDeclMethodOnClassInHierarchy(const DeclaredMethodIterator& it, MethodTable * pDeclMT, MethodSignature &declSig, bool needAsyncVariant);
+    FindDeclMethodOnClassInHierarchy(const DeclaredMethodIterator& it, MethodTable * pDeclMT, MethodSignature &declSig, AsyncVariantLookup variantLookup);
 
     // --------------------------------------------------------------------------------------------
     // Throws if an entry already exists that has been MethodImpl'd. Adds the interface slot and

@@ -8424,17 +8424,15 @@ MethodTable::TryResolveVirtualStaticMethodOnThisType(MethodTable* pInterfaceType
             COMPlusThrow(kTypeLoadException, E_FAIL);
         }
 
-        _ASSERTE(!pMethodDecl->IsAsyncVariantMethod());
-
         bool differsByAsyncVariant = false;
         if (!pMethodDecl->HasSameMethodDefAs(pInterfaceMD))
         {
             if (pMethodDecl->GetMemberDef() == pInterfaceMD->GetMemberDef() &&
                 pMethodDecl->GetModule() == pInterfaceMD->GetModule() &&
-                pInterfaceMD->IsAsyncVariantMethod())
+                pMethodDecl->IsAsyncVariantMethod() != pInterfaceMD->IsAsyncVariantMethod())
             {
                 differsByAsyncVariant = true;
-                pMethodDecl = pMethodDecl->GetAsyncVariant();
+                pMethodDecl = pMethodDecl->GetAsyncOtherVariant();
                 if (verifyImplemented)
                 {
                     // if only asked to verify, return pMethodDecl as a success (not NULL)
@@ -8472,10 +8470,9 @@ MethodTable::TryResolveVirtualStaticMethodOnThisType(MethodTable* pInterfaceType
             COMPlusThrow(kTypeLoadException, E_FAIL);
         }
 
-        _ASSERTE(!pMethodImpl->IsAsyncVariantMethod());
         if (differsByAsyncVariant)
         {
-            pMethodImpl = pMethodImpl->GetAsyncVariant();
+            pMethodImpl = pMethodImpl->GetAsyncOtherVariant();
         }
 
         if (!verifyImplemented && instantiateMethodParameters)
