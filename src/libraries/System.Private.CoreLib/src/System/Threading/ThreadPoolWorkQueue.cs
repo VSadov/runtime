@@ -395,10 +395,10 @@ namespace System.Threading
 
                         // Read the sequence number for the slot.
                         // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
-                        int sequenceNumber = slot.SequenceNumber;
+                        int diff = slot.SequenceNumber - position;
 
                         // Check if the slot is considered Full in the current generation.
-                        if (sequenceNumber == position + Full)
+                        if (diff == Full)
                         {
                             // Attempt to acquire the slot for Dequeuing.
                             if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
@@ -413,7 +413,7 @@ namespace System.Threading
 
                             // lost a race to another dequeuer
                         }
-                        else if (sequenceNumber - position < Full)
+                        else if (diff < Full)
                         {
                             // The sequence number was less than what we needed, which means we cannot return this item.
                             // Check if we have reached Enqueue and return null indicating the segment is in empty state.
@@ -982,12 +982,10 @@ namespace System.Threading
                         if (diff == Full)
                         {
                             // lock the slot.
-                            int actualSequenceNumber = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Change, sequenceNumber);
-                            if (actualSequenceNumber == sequenceNumber)
+                            diff = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Change, sequenceNumber) - position;
+                            if (diff == Full)
                             {
                                 // Confirm that enqueue did not change while we were locking the slot.
-                                // It is not common, but we may see concurrent Enqueue on the same segment.
-                                // The following is the same as "if (_queueEnds.Enqueue == position + 1)"
                                 if (_queueEnds.Enqueue == sequenceNumber)
                                 {
                                     // Update Enqueue before marking slot empty.
@@ -1000,10 +998,8 @@ namespace System.Threading
                                     var item = slot.Item;
                                     slot.Item = null;
 
-                                    // make the slot appear empty in the current generation
-                                    // that unlocks the slot
+                                    // make the slot appear empty in the current generation, this unlocks the slot
                                     Volatile.Write(ref slot.SequenceNumber, position);
-
                                     if (item == null)
                                     {
                                         // item was Removed
@@ -1017,10 +1013,6 @@ namespace System.Threading
                                 // enqueue changed, we locked a wrong slot
                                 // Unlock the slot through CAS in case slot was Moved, in such case the new state should win.
                                 Interlocked.CompareExchange(ref slot.SequenceNumber, sequenceNumber, position + Change);
-                            }
-                            else
-                            {
-                                diff = actualSequenceNumber - position;
                             }
                         }
 
@@ -1053,8 +1045,8 @@ namespace System.Threading
                         // if prev is not empty (in next generation), there might be more work in the segment.
                         // NB: Enqueues are initiated by CAS-locking the prev slot.
                         //     The write that activated the current worker should have done such CAS before we come here.
-                        //     It is possible though, while highly unlikely, that we will arrive here and see only the
-                        //     results of the CAS, while all other changes are still write-buffered in the other core.
+                        //     It is possible though, that we will arrive here and see only the results of the CAS,
+                        //     while all other changes are still write-buffered in the other core.
                         //     Thus, if prev slot was inconsistent prior to a failed attempt to dequeue,
                         //     we cannot claim that the slot that we are responsible for is empty, and should treat
                         //     this as a missed steal.
@@ -1072,13 +1064,13 @@ namespace System.Threading
                         if (diff == Full)
                         {
                             // Reserve the slot for dequeuing.
-                            int actualSequenceNumber = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Dequeue, sequenceNumber);
-                            if (actualSequenceNumber == sequenceNumber)
+                            diff = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Dequeue, sequenceNumber) - position;
+                            if (diff == Full)
                             {
                                 object? item;
                                 var enqPos = _queueEnds.Enqueue;
                                 if (enqPos - position < MoveThreshold ||
-                                    // "this" is a sentinel for a failed Moving attempt
+                                    // "this" is a sentinel for a failed Move attempt
                                     (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
@@ -1091,30 +1083,25 @@ namespace System.Threading
 
                                 if (item == null)
                                 {
-                                    // the item was removed, so we have nothing to return.
-                                    // this is not a lost race though, so must try again.
+                                    // the item was removed, so we have nothing to return. This is not a lost race though, so must try again.
                                     continue;
                                 }
 
                                 return item;
                             }
-                            else
-                            {
-                                diff = actualSequenceNumber - position;
-                            }
                         }
 
                         if (diff == 0)
                         {
-                            // reached an empty slot
-                            // since full slots are contiguous, finding an empty slot means that
-                            // for our purposes and for the moment in time the segment is empty
-                            return null;
+                            // Reached an empty slot. Since full slots are contiguous, finding an empty slot means that
+                            // for our purposes and for the moment the segment is empty.
+                        }
+                        else
+                        {
+                            // Contention with other thread. Must check this segment again later.
+                            missedSteal = true;
                         }
 
-                        // contention with other thread
-                        // must check this segment again later
-                        missedSteal = true;
                         return null;
                     }
                 }
@@ -1144,7 +1131,7 @@ namespace System.Threading
                             // it is uncommon, but we may see another Pop or Enqueue on the same segment.
                             if (other._queueEnds.Enqueue == otherEnqPosition)
                             {
-                                // lock halfslot, it must be full
+                                // lock the halfSlot, it must be full
                                 if (Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Change, halfPosition + Full) == halfPosition + Full)
                                 {
                                     // our enqueue could have changed before we locked half
