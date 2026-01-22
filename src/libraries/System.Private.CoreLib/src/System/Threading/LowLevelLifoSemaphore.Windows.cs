@@ -6,18 +6,14 @@ using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
-    // gate on which threads may wait.
     internal unsafe partial struct LowLevelGate
     {
-        private const int Open = 1;
-        private const int Blocking = 0;
-
         private int* _pState;
 
         public LowLevelGate()
         {
             _pState = (int*)Marshal.AllocHGlobal(sizeof(int));
-            *_pState = Blocking;
+            *_pState = 0;
         }
 
         internal void DisposeCore()
@@ -33,38 +29,64 @@ namespace System.Threading
 
         internal void Wait()
         {
-            int blocking = Blocking;
-            // sleep if the gate is blocked
-            Interop.BOOL result = Interop.Kernel32.WaitOnAddress(_pState, &blocking, sizeof(int), -1);
-            Debug.Assert(result == Interop.BOOL.TRUE);
+            while (true)
+            {
+                int originalState = *_pState;
+                while (originalState == 0)
+                {
+                    Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), -1);
+                    originalState = *_pState;
+                }
 
-            // close the gate after us (consume the wake)
-            *_pState = Blocking;
+                if (Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
+                {
+                    return;
+                }
+            }
         }
 
         internal bool TimedWait(int timeoutMs)
         {
-            int blocking = Blocking;
-            // sleep if the gate is blocked
-            Interop.BOOL result = Interop.Kernel32.WaitOnAddress(_pState, &blocking, sizeof(int), timeoutMs);
-            Debug.Assert(result == Interop.BOOL.TRUE || Interop.Kernel32.GetLastError() == Interop.Errors.ERROR_TIMEOUT);
-
-            bool woken = result == Interop.BOOL.TRUE;
-            if (woken)
+            long deadline = Environment.TickCount64 + timeoutMs;
+            while (true)
             {
-                // close the gate after us (consume the wake)
-                *_pState = Blocking;
-            }
+                int originalState = *_pState;
+                while (originalState == 0)
+                {
+                    if (Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), timeoutMs) != Interop.BOOL.TRUE)
+                    {
+                        return false;
+                    }
 
-            return woken;
+                    long current = Environment.TickCount64;
+                    if (current >= deadline)
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        timeoutMs = (int)(deadline - current);
+                    }
+
+                    originalState = *_pState;
+                }
+
+                if (Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
+                {
+                    return true;
+                }
+            }
         }
 
         internal void WakeOne()
         {
-            // open the gate
-            *_pState = Open;
-            // ping the wait queue
+            Interlocked.Increment(ref *_pState);
             Interop.Kernel32.WakeByAddressSingle(_pState);
+        }
+
+        internal void Reset()
+        {
+            Interlocked.Exchange(ref *_pState, 0);
         }
     }
 

@@ -127,7 +127,7 @@ namespace System.Threading
                     // Unregister the waiter. The wait subsystem used above guarantees that a thread that wakes due to a timeout does
                     // not observe a signal to the object being waited upon.
 
-                    // TODO: now we have unfullfilled wake. should we
+                    // TODO: VS now we have unfullfilled wake. should we
 
                     //newCounts.DecrementCountOfWaitersSignaledToWake();
                     _separated._counts.InterlockedDecrementWaiterCount();
