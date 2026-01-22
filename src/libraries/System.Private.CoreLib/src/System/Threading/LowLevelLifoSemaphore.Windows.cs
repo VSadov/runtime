@@ -6,48 +6,86 @@ using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
-    /// <summary>
-    /// A LIFO semaphore implemented using Win32 IO Completion Ports.
-    /// </summary>
-    /// <remarks>
-    /// IO Completion ports release waiting threads in LIFO order, so we can use them to create a LIFO semaphore.
-    /// See https://msdn.microsoft.com/en-us/library/windows/desktop/aa365198(v=vs.85).aspx under How I/O Completion Ports Work.
-    /// From the docs "Threads that block their execution on an I/O completion port are released in last-in-first-out (LIFO) order."
-    /// </remarks>
+    // gate on which threads may wait.
+    internal unsafe partial struct LowLevelGate
+    {
+        private const int Open = 1;
+        private const int Blocking = 0;
+
+        private int* _pState;
+
+        public LowLevelGate()
+        {
+            _pState = (int*)Marshal.AllocHGlobal(sizeof(int));
+            *_pState = Blocking;
+        }
+
+        internal void DisposeCore()
+        {
+            if (_pState == null)
+            {
+                return;
+            }
+
+            Marshal.FreeHGlobal((nint)_pState);
+            _pState = null;
+        }
+
+        internal void Wait()
+        {
+            int blocking = Blocking;
+            // sleep if the gate is blocked
+            Interop.BOOL result = Interop.Kernel32.WaitOnAddress(_pState, &blocking, sizeof(int), -1);
+            Debug.Assert(result == Interop.BOOL.TRUE);
+
+            // close the gate after us (consume the wake)
+            *_pState = Blocking;
+        }
+
+        internal bool TimedWait(int timeoutMs)
+        {
+            int blocking = Blocking;
+            // sleep if the gate is blocked
+            Interop.BOOL result = Interop.Kernel32.WaitOnAddress(_pState, &blocking, sizeof(int), timeoutMs);
+            Debug.Assert(result == Interop.BOOL.TRUE || Interop.Kernel32.GetLastError() == Interop.Errors.ERROR_TIMEOUT);
+
+            bool woken = result == Interop.BOOL.TRUE;
+            if (woken)
+            {
+                // close the gate after us (consume the wake)
+                *_pState = Blocking;
+            }
+
+            return woken;
+        }
+
+        internal void WakeOne()
+        {
+            // open the gate
+            *_pState = Open;
+            // ping the wait queue
+            Interop.Kernel32.WakeByAddressSingle(_pState);
+        }
+    }
+
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
     {
-        private IntPtr _completionPort;
+        private LowLevelGate _gate;
 
-        private void Create(int maximumSignalCount)
+        private void Create()
         {
-            Debug.Assert(maximumSignalCount > 0);
-
-            _completionPort =
-                Interop.Kernel32.CreateIoCompletionPort(new IntPtr(-1), IntPtr.Zero, UIntPtr.Zero, maximumSignalCount);
-            if (_completionPort == IntPtr.Zero)
-            {
-                int hr = Marshal.GetHRForLastWin32Error();
-                var exception = new OutOfMemoryException();
-                exception.HResult = hr;
-                throw exception;
-            }
+            _gate = new LowLevelGate();
         }
 
         ~LowLevelLifoSemaphore()
         {
-            if (_completionPort != IntPtr.Zero)
-            {
-                Dispose();
-            }
+            Dispose();
         }
 
         public bool WaitCore(int timeoutMs)
         {
             Debug.Assert(timeoutMs >= -1);
-
-            bool success = Interop.Kernel32.GetQueuedCompletionStatus(_completionPort, out _, out _, out _, timeoutMs);
-            Debug.Assert(success || (Marshal.GetLastPInvokeError() == WaitHandle.WaitTimeout));
-            return success;
+            return _gate.TimedWait(timeoutMs);
         }
 
         private void ReleaseCore(int count)
@@ -56,22 +94,13 @@ namespace System.Threading
 
             for (int i = 0; i < count; i++)
             {
-                if (!Interop.Kernel32.PostQueuedCompletionStatus(_completionPort, 1, UIntPtr.Zero, IntPtr.Zero))
-                {
-                    int lastError = Marshal.GetLastPInvokeError();
-                    var exception = new OutOfMemoryException();
-                    exception.HResult = lastError;
-                    throw exception;
-                }
+                _gate.WakeOne();
             }
         }
 
         public void Dispose()
         {
-            Debug.Assert(_completionPort != IntPtr.Zero);
-
-            Interop.Kernel32.CloseHandle(_completionPort);
-            _completionPort = IntPtr.Zero;
+            _gate.DisposeCore();
             GC.SuppressFinalize(this);
         }
     }

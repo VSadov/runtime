@@ -30,5 +30,14 @@ internal static partial class Interop
 
         [LibraryImport(Libraries.Kernel32)]
         internal static unsafe partial void DeleteCriticalSection(CRITICAL_SECTION* lpCriticalSection);
+
+        [LibraryImport("API-MS-Win-Core-Synch-l1-2-0.dll")]
+        internal static unsafe partial BOOL WaitOnAddress(void* Address, void* CompareAddress, nint AddressSize, int dwMilliseconds);
+
+        [LibraryImport("API-MS-Win-Core-Synch-l1-2-0.dll")]
+        internal static unsafe partial void WakeByAddressSingle(void* Address);
+
+        [LibraryImport("API-MS-Win-Core-Synch-l1-2-0.dll")]
+        internal static unsafe partial void WakeByAddressAll(void* Address);
     }
 }
