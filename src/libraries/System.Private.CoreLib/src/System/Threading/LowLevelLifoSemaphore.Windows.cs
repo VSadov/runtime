@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+#define USE_MONITOR
+
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -10,10 +12,18 @@ namespace System.Threading
     {
         private int* _pState;
 
+#if USE_MONITOR
+        private LowLevelMonitor _monitor;
+#endif
+
         public LowLevelGate()
         {
             _pState = (int*)Marshal.AllocHGlobal(sizeof(int));
             *_pState = 0;
+
+#if USE_MONITOR
+            _monitor.Initialize();
+#endif
         }
 
         internal void DisposeCore()
@@ -25,8 +35,69 @@ namespace System.Threading
 
             Marshal.FreeHGlobal((nint)_pState);
             _pState = null;
+
+#if USE_MONITOR
+            _monitor.Dispose();
+#endif
         }
 
+#if USE_MONITOR
+        internal void Wait()
+        {
+            _monitor.Acquire();
+
+            int originalState = *_pState;
+            while (originalState == 0)
+            {
+                _monitor.Wait();
+                originalState = *_pState;
+            }
+
+            *_pState = originalState - 1;
+            _monitor.Release();
+        }
+
+        internal bool TimedWait(int timeoutMs)
+        {
+            long deadline = Environment.TickCount64 + timeoutMs;
+            int originalState = *_pState;
+            while (originalState == 0)
+            {
+                _monitor.Wait(timeoutMs);
+
+                long current = Environment.TickCount64;
+                if (current >= deadline)
+                {
+                    return false;
+                }
+                else
+                {
+                    timeoutMs = (int)(deadline - current);
+                }
+
+                originalState = *_pState;
+            }
+
+            *_pState = originalState - 1;
+            _monitor.Release();
+            return true;
+        }
+
+        internal void WakeOne()
+        {
+            _monitor.Acquire();
+            *_pState = *_pState + 1;
+            _monitor.Signal_Release();
+        }
+
+        internal void Reset()
+        {
+            _monitor.Acquire();
+            *_pState = 0;
+            _monitor.Release();
+        }
+
+#else
         internal void Wait()
         {
             while (true)
@@ -88,6 +159,7 @@ namespace System.Threading
         {
             Interlocked.Exchange(ref *_pState, 0);
         }
+#endif
     }
 
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
