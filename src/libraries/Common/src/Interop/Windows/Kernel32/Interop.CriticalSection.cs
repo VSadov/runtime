@@ -23,6 +23,9 @@ internal static partial class Interop
         internal static unsafe partial void InitializeCriticalSection(CRITICAL_SECTION* lpCriticalSection);
 
         [LibraryImport(Libraries.Kernel32)]
+        internal static unsafe partial int SetCriticalSectionSpinCount(CRITICAL_SECTION* lpCriticalSection, int dwSpinCount);
+
+        [LibraryImport(Libraries.Kernel32)]
         internal static unsafe partial void EnterCriticalSection(CRITICAL_SECTION* lpCriticalSection);
 
         [LibraryImport(Libraries.Kernel32)]

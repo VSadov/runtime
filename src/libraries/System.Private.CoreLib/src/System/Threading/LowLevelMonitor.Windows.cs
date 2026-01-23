@@ -18,7 +18,7 @@ namespace System.Threading
             public Interop.Kernel32.CONDITION_VARIABLE _conditionVariable;
         }
 
-        private Monitor* _pMonitor;
+        internal Monitor* _pMonitor;
 
         public void Initialize()
         {

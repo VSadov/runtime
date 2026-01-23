@@ -23,6 +23,7 @@ namespace System.Threading
 
 #if USE_MONITOR
             _monitor.Initialize();
+            Interop.Kernel32.SetCriticalSectionSpinCount(&_monitor._pMonitor->_criticalSection, 1);
 #endif
         }
 
@@ -59,27 +60,31 @@ namespace System.Threading
 
         internal bool TimedWait(int timeoutMs)
         {
-            long deadline = Environment.TickCount64 + timeoutMs;
-            int originalState = *_pState;
-            while (originalState == 0)
-            {
-                _monitor.Wait(timeoutMs);
+            _ = timeoutMs;
 
-                long current = Environment.TickCount64;
-                if (current >= deadline)
-                {
-                    return false;
-                }
-                else
-                {
-                    timeoutMs = (int)(deadline - current);
-                }
+            Wait();
 
-                originalState = *_pState;
-            }
+            //long deadline = Environment.TickCount64 + timeoutMs;
+            //int originalState = *_pState;
+            //while (originalState == 0)
+            //{
+            //    _monitor.Wait(timeoutMs);
 
-            *_pState = originalState - 1;
-            _monitor.Release();
+            //    long current = Environment.TickCount64;
+            //    if (current >= deadline)
+            //    {
+            //        return false;
+            //    }
+            //    else
+            //    {
+            //        timeoutMs = (int)(deadline - current);
+            //    }
+
+            //    originalState = *_pState;
+            //}
+
+            //*_pState = originalState - 1;
+            //_monitor.Release();
             return true;
         }
 
