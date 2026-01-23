@@ -59,31 +59,23 @@ namespace System.Threading
 
         internal bool TimedWait(int timeoutMs)
         {
-            _ = timeoutMs;
+            long deadline = Environment.TickCount64 + timeoutMs;
+            int originalState = *_pState;
+            while (originalState == 0)
+            {
+                _monitor.Wait(timeoutMs);
 
-            Wait();
+                timeoutMs = (int)(deadline - Environment.TickCount64);
+                if (timeoutMs <= 0)
+                {
+                    return false;
+                }
 
-            //long deadline = Environment.TickCount64 + timeoutMs;
-            //int originalState = *_pState;
-            //while (originalState == 0)
-            //{
-            //    _monitor.Wait(timeoutMs);
+                originalState = *_pState;
+            }
 
-            //    long current = Environment.TickCount64;
-            //    if (current >= deadline)
-            //    {
-            //        return false;
-            //    }
-            //    else
-            //    {
-            //        timeoutMs = (int)(deadline - current);
-            //    }
-
-            //    originalState = *_pState;
-            //}
-
-            //*_pState = originalState - 1;
-            //_monitor.Release();
+            *_pState = originalState - 1;
+            _monitor.Release();
             return true;
         }
 
