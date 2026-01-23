@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
-    internal unsafe partial struct LowLevelGate
+    internal sealed unsafe class LowLevelGate : IDisposable
     {
         private int* _pState;
 
@@ -27,7 +27,12 @@ namespace System.Threading
 #endif
         }
 
-        internal void DisposeCore()
+        ~LowLevelGate()
+        {
+            Dispose();
+        }
+
+        public void Dispose()
         {
             if (_pState == null)
             {
@@ -40,6 +45,8 @@ namespace System.Threading
 #if USE_MONITOR
             _monitor.Dispose();
 #endif
+
+            GC.SuppressFinalize(this);
         }
 
 #if USE_MONITOR
@@ -157,11 +164,11 @@ namespace System.Threading
 
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
     {
-        private LowLevelGate _gate;
+        private LowLevelGate _gate = new LowLevelGate();
 
         private void Create()
         {
-            _gate = new LowLevelGate();
+            _ = this;
         }
 
         ~LowLevelLifoSemaphore()
@@ -187,7 +194,7 @@ namespace System.Threading
 
         public void Dispose()
         {
-            _gate.DisposeCore();
+            _gate.Dispose();
             GC.SuppressFinalize(this);
         }
     }
