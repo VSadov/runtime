@@ -73,11 +73,10 @@ namespace System.Threading
             int originalState = *_pState;
             while (originalState == 0)
             {
-                _monitor.Wait(timeoutMs);
-
-                timeoutMs = (int)(deadline - Environment.TickCount64);
-                if (timeoutMs <= 0)
+                if (_monitor.Wait(timeoutMs) ||
+                    (timeoutMs = (int)(deadline - Environment.TickCount64)) < 0)
                 {
+                    _monitor.Release();
                     return false;
                 }
 
