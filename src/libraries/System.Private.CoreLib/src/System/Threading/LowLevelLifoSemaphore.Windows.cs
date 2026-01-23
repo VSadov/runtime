@@ -1,7 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-#define USE_MONITOR
+// #define USE_MONITOR
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -126,14 +126,10 @@ namespace System.Threading
                         return false;
                     }
 
-                    long current = Environment.TickCount64;
-                    if (current >= deadline)
+                    timeoutMs = (int)(deadline - Environment.TickCount64);
+                    if (timeoutMs <= 0)
                     {
                         return false;
-                    }
-                    else
-                    {
-                        timeoutMs = (int)(deadline - current);
                     }
 
                     originalState = *_pState;
