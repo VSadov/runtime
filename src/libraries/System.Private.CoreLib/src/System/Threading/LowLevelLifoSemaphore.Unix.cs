@@ -23,7 +23,6 @@ namespace System.Threading
 
 #if USE_MONITOR
             _monitor.Initialize();
-            Interop.Kernel32.SetCriticalSectionSpinCount(&_monitor._pMonitor->_criticalSection, 1);
 #endif
         }
 
