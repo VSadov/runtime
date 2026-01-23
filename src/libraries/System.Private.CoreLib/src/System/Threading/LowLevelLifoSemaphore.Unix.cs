@@ -67,6 +67,8 @@ namespace System.Threading
         internal bool TimedWait(int timeoutMs)
         {
             long deadline = Environment.TickCount64 + timeoutMs;
+            _monitor.Acquire();
+
             int originalState = *_pState;
             while (originalState == 0)
             {

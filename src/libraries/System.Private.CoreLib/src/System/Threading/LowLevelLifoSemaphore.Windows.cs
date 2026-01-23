@@ -1,7 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-// #define USE_MONITOR
+#define USE_MONITOR
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -68,6 +68,8 @@ namespace System.Threading
         internal bool TimedWait(int timeoutMs)
         {
             long deadline = Environment.TickCount64 + timeoutMs;
+            _monitor.Acquire();
+
             int originalState = *_pState;
             while (originalState == 0)
             {
