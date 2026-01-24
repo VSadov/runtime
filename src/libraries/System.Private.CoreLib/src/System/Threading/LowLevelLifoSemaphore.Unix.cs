@@ -72,7 +72,7 @@ namespace System.Threading
             int originalState = *_pState;
             while (originalState == 0)
             {
-                if (_monitor.Wait(timeoutMs) ||
+                if (!_monitor.Wait(timeoutMs) ||
                     (timeoutMs = (int)(deadline - Environment.TickCount64)) < 0)
                 {
                     _monitor.Release();
@@ -128,13 +128,8 @@ namespace System.Threading
                 int originalState = *_pState;
                 while (originalState == 0)
                 {
-                    if (Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), timeoutMs) != Interop.BOOL.TRUE)
-                    {
-                        return false;
-                    }
-
-                    timeoutMs = (int)(deadline - Environment.TickCount64);
-                    if (timeoutMs <= 0)
+                    if (Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), timeoutMs) != Interop.BOOL.TRUE ||
+                        (timeoutMs = (int)(deadline - Environment.TickCount64)) < 0))
                     {
                         return false;
                     }
