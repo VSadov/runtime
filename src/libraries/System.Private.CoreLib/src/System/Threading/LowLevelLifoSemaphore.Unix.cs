@@ -203,7 +203,14 @@ namespace System.Threading
         [ThreadStatic]
         private static LowLevelGate? t_gate;
 
-        public bool WaitCore(int timeoutMs)
+        private enum WaitResult
+        {
+            Retry,
+            Woken,
+            TimedOut,
+        }
+
+        private WaitResult WaitCore(int timeoutMs)
         {
             Debug.Assert(timeoutMs >= -1);
 
@@ -213,7 +220,7 @@ namespace System.Threading
                 t_gate = gate = new LowLevelGate();
             }
 
-            using (_stackLock.EnterScope())
+            if (_stackLock.TryEnter())
             {
                 if (_signals != 0)
                 {
@@ -225,19 +232,26 @@ namespace System.Threading
                     gate._next = _stack;
                     _stack = gate;
                 }
+                _stackLock.Exit();
+            }
+            else
+            {
+                return WaitResult.Retry;
             }
 
+            if (gate != null)
+            {
+                bool result = gate.TimedWait(timeoutMs);
+                if (!result)
+                {
+                    // we did not consume a wake.
+                    // TODO: VS do we ever reset?
+                    return WaitResult.TimedOut;
+                }
+            }
 
-            //bool result = gate.TimedWait(timeoutMs);
-            //if (!result)
-            //{
-            //    Remove(gate);
-            //}
-
-            //return result;
-
-            gate?.Wait();
-            return true;
+            // we consumed a wake
+            return WaitResult.Woken;
         }
 
         private void WakeOne()

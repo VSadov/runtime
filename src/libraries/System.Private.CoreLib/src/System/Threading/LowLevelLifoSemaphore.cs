@@ -119,21 +119,18 @@ namespace System.Threading
 
             _onWait();
 
+            SpinWait sw = default;
             while (true)
             {
+                // TODO: VS 64bit tick count
                 int startWaitTicks = timeoutMs != -1 ? Environment.TickCount : 0;
-                if (timeoutMs == 0 || !WaitCore(timeoutMs))
+                WaitResult waitResult = WaitCore(timeoutMs);
+                if (waitResult == WaitResult.TimedOut)
                 {
-                    // Unregister the waiter. The wait subsystem used above guarantees that a thread that wakes due to a timeout does
-                    // not observe a signal to the object being waited upon.
-
-                    // TODO: VS now we have unfullfilled wake. should we
-
-                    //newCounts.DecrementCountOfWaitersSignaledToWake();
+                    // Unregister the waiter, but do not consume a wake.
                     _separated._counts.InterlockedDecrementWaiterCount();
                     return false;
                 }
-                int endWaitTicks = timeoutMs != -1 ? Environment.TickCount : 0;
 
                 uint collisionCount = 0;
                 while (true)
@@ -144,11 +141,24 @@ namespace System.Threading
                     Debug.Assert(counts.WaiterCount != 0);
                     Debug.Assert(counts.CountOfWaitersSignaledToWake != 0);
 
-                    newCounts.DecrementCountOfWaitersSignaledToWake();
+                    // if consumed a wake, decrement the count
+                    if (waitResult == WaitResult.Woken)
+                    {
+                        newCounts.DecrementCountOfWaitersSignaledToWake();
+                    }
+
+                    // if there is a signal, try claiming it
                     if (newCounts.SignalCount != 0)
                     {
                         newCounts.DecrementSignalCount();
                         newCounts.DecrementWaiterCount();
+                    }
+
+                    if (newCounts == counts)
+                    {
+                        // We could not enter the wait.
+                        // It is possible if many threads are out of work and entering wait.
+                        break;
                     }
 
                     Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
@@ -160,7 +170,8 @@ namespace System.Threading
                             return true;
                         }
 
-                        // we've consumed a wake, but there was no signal, we will wait again.
+                        // we've consumed a wake, but there was no signal, we will start over.
+                        sw = default;
                         break;
                     }
 
@@ -168,9 +179,14 @@ namespace System.Threading
                     Backoff.Exponential(collisionCount++);
                 }
 
+                // If we can't start waiting and there is no signal, spin a bit and eventually yield,
+                // there is no work anyways.
+                sw.SpinOnce(sleep1Threshold: -1);
+
                 // we will wait again, reduce timeout
                 if (timeoutMs != -1)
                 {
+                    int endWaitTicks = Environment.TickCount;
                     int waitMs = endWaitTicks - startWaitTicks;
                     if (waitMs >= 0 && waitMs < timeoutMs)
                         timeoutMs -= waitMs;
