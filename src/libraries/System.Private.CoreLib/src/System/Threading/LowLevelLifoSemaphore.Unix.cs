@@ -16,6 +16,8 @@ namespace System.Threading
         private LowLevelMonitor _monitor;
 #endif
 
+        internal LowLevelGate? _next;
+
         public LowLevelGate()
         {
             _pState = (int*)Marshal.AllocHGlobal(sizeof(int));
@@ -23,6 +25,7 @@ namespace System.Threading
 
 #if USE_MONITOR
             _monitor.Initialize();
+            Interop.Kernel32.SetCriticalSectionSpinCount(&_monitor._pMonitor->_criticalSection, 1);
 #endif
         }
 
@@ -128,8 +131,13 @@ namespace System.Threading
                 int originalState = *_pState;
                 while (originalState == 0)
                 {
-                    if (Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), timeoutMs) != Interop.BOOL.TRUE ||
-                        (timeoutMs = (int)(deadline - Environment.TickCount64)) < 0))
+                    if (Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), timeoutMs) != Interop.BOOL.TRUE)
+                    {
+                        return false;
+                    }
+
+                    timeoutMs = (int)(deadline - Environment.TickCount64);
+                    if (timeoutMs <= 0)
                     {
                         return false;
                     }
@@ -159,7 +167,29 @@ namespace System.Threading
 
     internal sealed partial class LowLevelLifoSemaphore : IDisposable
     {
-        private LowLevelGate _gate = new LowLevelGate();
+        private Lock _stackLock = new Lock(useTrivialWaits: true);
+        private LowLevelGate? _stack;
+        private int _signals;
+
+        private void Remove(LowLevelGate item)
+        {
+            using (_stackLock.EnterScope())
+            {
+                LowLevelGate? current = _stack;
+                if (current == item)
+                {
+                    _stack = item._next;
+                    return;
+                }
+
+                while (current != null && current._next != item)
+                {
+                    current = current._next;
+                }
+
+                current?._next = current._next!._next;
+            }
+        }
 
         private void Create()
         {
@@ -171,10 +201,64 @@ namespace System.Threading
             Dispose();
         }
 
+        [ThreadStatic]
+        private static LowLevelGate? t_gate;
+
         public bool WaitCore(int timeoutMs)
         {
             Debug.Assert(timeoutMs >= -1);
-            return _gate.TimedWait(timeoutMs);
+
+            LowLevelGate? gate = t_gate;
+            if (gate == null)
+            {
+                t_gate = gate = new LowLevelGate();
+            }
+
+            using (_stackLock.EnterScope())
+            {
+                if (_signals != 0)
+                {
+                    _signals--;
+                    gate = null;
+                }
+                else
+                {
+                    gate._next = _stack;
+                    _stack = gate;
+                }
+            }
+
+
+            //bool result = gate.TimedWait(timeoutMs);
+            //if (!result)
+            //{
+            //    Remove(gate);
+            //}
+
+            //return result;
+
+            gate?.Wait();
+            return true;
+        }
+
+        private void WakeOne()
+        {
+            LowLevelGate? head;
+            using (_stackLock.EnterScope())
+            {
+                head = _stack;
+                if (head != null)
+                {
+                    _stack = head._next;
+                    head._next = null;
+                }
+                else
+                {
+                    _signals++;
+                }
+            }
+
+            head?.WakeOne();
         }
 
         private void ReleaseCore(int count)
@@ -183,14 +267,14 @@ namespace System.Threading
 
             for (int i = 0; i < count; i++)
             {
-                _gate.WakeOne();
+                WakeOne();
             }
         }
 
         public void Dispose()
         {
-            _gate.Dispose();
-            GC.SuppressFinalize(this);
+            //_gate.Dispose();
+            //GC.SuppressFinalize(this);
         }
     }
 }
