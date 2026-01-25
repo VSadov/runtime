@@ -124,6 +124,7 @@ namespace System.Threading
 #else
         internal void Wait()
         {
+
             // Last chance for the waking thread to wake us before we block, so lets spin a bit.
             // This spinning is on a per-thread state, thus not too costly.
             // The number of spins is somewhat arbitrary.
@@ -286,13 +287,15 @@ namespace System.Threading
 
             if (gate != null)
             {
-                bool result = gate.TimedWait(timeoutMs);
-                if (!result)
-                {
-                    // we did not consume a wake.
-                    // TODO: VS do we ever reset?
-                    return WaitResult.TimedOut;
-                }
+                //bool result = gate.TimedWait(timeoutMs);
+                //if (!result)
+                //{
+                //    // we did not consume a wake.
+                //    // TODO: VS do we ever reset?
+                //    return WaitResult.TimedOut;
+                //}
+
+                gate.Wait();
             }
 
             // we consumed a wake
