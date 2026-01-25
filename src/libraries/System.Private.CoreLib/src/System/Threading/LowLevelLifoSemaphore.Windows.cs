@@ -8,6 +8,24 @@ using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
+    internal static class LowLevelFutex
+    {
+        internal static unsafe void WaitOnAddress(int* address, int comparand)
+        {
+            Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), -1);
+        }
+
+        internal static unsafe bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
+        {
+            return Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), milliseconds) == Interop.BOOL.TRUE;
+        }
+
+        internal static unsafe void WakeByAddressSingle(int* address)
+        {
+            Interop.Kernel32.WakeByAddressSingle(address);
+        }
+    }
+
     internal sealed unsafe class LowLevelGate : IDisposable
     {
         private int* _pState;
@@ -25,7 +43,6 @@ namespace System.Threading
 
 #if USE_MONITOR
             _monitor.Initialize();
-            Interop.Kernel32.SetCriticalSectionSpinCount(&_monitor._pMonitor->_criticalSection, 1);
 #endif
         }
 
@@ -107,12 +124,25 @@ namespace System.Threading
 #else
         internal void Wait()
         {
+            // Last chance for the waking thread to wake us before we block, so lets spin a bit.
+            // This spinning is on a per-thread state, thus not too costly.
+            // The number of spins is somewhat arbitrary.
+            for (int i = 0; i < 1000; i++)
+            {
+                int originalState = *_pState;
+                if (originalState != 0 &&
+                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
+                {
+                    return;
+                }
+            }
+
             while (true)
             {
                 int originalState = *_pState;
                 while (originalState == 0)
                 {
-                    Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), -1);
+                    LowLevelFutex.WaitOnAddress(_pState, originalState);
                     originalState = *_pState;
                 }
 
@@ -126,12 +156,26 @@ namespace System.Threading
         internal bool TimedWait(int timeoutMs)
         {
             long deadline = Environment.TickCount64 + timeoutMs;
+
+            // Last chance for the waking thread to wake us before we block, so lets spin a bit.
+            // This spinning is on a per-thread state, thus not too costly.
+            // The number of spins is somewhat arbitrary.
+            for (int i = 0; i < 1000; i++)
+            {
+                int originalState = *_pState;
+                if (originalState != 0 &&
+                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
+                {
+                    return true;
+                }
+            }
+
             while (true)
             {
                 int originalState = *_pState;
                 while (originalState == 0)
                 {
-                    if (Interop.Kernel32.WaitOnAddress(&*_pState, &originalState, sizeof(int), timeoutMs) != Interop.BOOL.TRUE)
+                    if (!LowLevelFutex.WaitOnAddressTimeout(_pState, originalState, timeoutMs))
                     {
                         return false;
                     }
@@ -155,7 +199,7 @@ namespace System.Threading
         internal void WakeOne()
         {
             Interlocked.Increment(ref *_pState);
-            Interop.Kernel32.WakeByAddressSingle(_pState);
+            LowLevelFutex.WakeByAddressSingle(_pState);
         }
 
         internal void Reset()
