@@ -4,23 +4,20 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace System.Threading
+internal static unsafe class LowLevelFutex
 {
-    internal static unsafe class LowLevelFutex
+    internal static void WaitOnAddress(int* address, int comparand)
     {
-        internal static void WaitOnAddress(int* address, int comparand)
-        {
-            Interop.Sys.LowLevelFutex_WaitOnAddress(address, comparand);
-        }
+        Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), -1);
+    }
 
-        internal static bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
-        {
-            return Interop.Sys.LowLevelFutex_WaitOnAddressTimeout(address, comparand, milliseconds);
-        }
+    internal static bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
+    {
+        return Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), milliseconds) == Interop.BOOL.TRUE;
+    }
 
-        internal static void WakeByAddressSingle(int* address)
-        {
-            Interop.Sys.LowLevelFutex_WakeByAddressSingle(address);
-        }
+    internal static void WakeByAddressSingle(int* address)
+    {
+        Interop.Kernel32.WakeByAddressSingle(address);
     }
 }
