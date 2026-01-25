@@ -288,16 +288,19 @@ namespace System.Threading
                 return WaitResult.Retry;
             }
 
-            if (gate != null)
-            {
-                bool result = gate.TimedWait(timeoutMs);
-                if (!result)
-                {
-                    // we did not consume a wake.
-                    // TODO: VS do we ever reset?
-                    return WaitResult.TimedOut;
-                }
-            }
+            //if (gate != null)
+            //{
+            //    bool result = gate.TimedWait(timeoutMs);
+            //    if (!result)
+            //    {
+            //        // we did not consume a wake.
+            //        // TODO: VS do we ever reset?
+            //        Remove(gate);
+            //       return WaitResult.TimedOut;
+            //    }
+            //}
+
+            gate?.Wait();
 
             // we consumed a wake
             return WaitResult.Woken;
