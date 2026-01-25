@@ -230,7 +230,7 @@ void SystemNative_LowLevelFutex_WaitOnAddress(int32_t* address, int32_t comparan
 
 int32_t SystemNative_LowLevelFutex_WaitOnAddressTimeout(int32_t* address, int32_t comparand, int32_t timeoutMilliseconds)
 {
-    timespec t;
+    struct timespec t;
     uint64_t nanoseconds = (uint64_t)timeout * tccMilliSecondsToNanoSeconds;
     t.tv_sec = nanoseconds / tccSecondsToNanoSeconds;
     t.tv_nsec = nanoseconds % tccSecondsToNanoSeconds;
