@@ -1,28 +1,28 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-#define USE_MONITOR
+// #define USE_MONITOR
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
-    internal static class LowLevelFutex
+    internal static unsafe class LowLevelFutex
     {
-        internal static unsafe void WaitOnAddress(int* address, int comparand)
+        internal static void WaitOnAddress(int* address, int comparand)
         {
-            Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), -1);
+            Interop.Sys.LowLevelFutex_WaitOnAddress(address, comparand);
         }
 
-        internal static unsafe bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
+        internal static bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
         {
-            return Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), milliseconds) == Interop.BOOL.TRUE;
+            return Interop.Sys.LowLevelFutex_WaitOnAddressTimeout(address, comparand, milliseconds);
         }
 
-        internal static unsafe void WakeByAddressSingle(int* address)
+        internal static void WakeByAddressSingle(int* address)
         {
-            Interop.Kernel32.WakeByAddressSingle(address);
+            Interop.Sys.LowLevelFutex_WakeByAddressSingle(address);
         }
     }
 

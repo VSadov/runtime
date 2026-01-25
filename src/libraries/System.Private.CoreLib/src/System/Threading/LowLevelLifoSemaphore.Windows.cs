@@ -8,19 +8,19 @@ using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
-    internal static class LowLevelFutex
+    internal static unsafe class LowLevelFutex
     {
-        internal static unsafe void WaitOnAddress(int* address, int comparand)
+        internal static void WaitOnAddress(int* address, int comparand)
         {
             Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), -1);
         }
 
-        internal static unsafe bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
+        internal static bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
         {
             return Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), milliseconds) == Interop.BOOL.TRUE;
         }
 
-        internal static unsafe void WakeByAddressSingle(int* address)
+        internal static void WakeByAddressSingle(int* address)
         {
             Interop.Kernel32.WakeByAddressSingle(address);
         }
