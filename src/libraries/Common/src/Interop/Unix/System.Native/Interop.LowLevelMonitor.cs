@@ -34,14 +34,14 @@ internal static partial class Interop
 
 
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_LowLevelFutex_WaitOnAddress")]
-        internal static partial void LowLevelFutex_WaitOnAddress(IntPtr address, int comparand);
+        internal static unsafe partial void LowLevelFutex_WaitOnAddress(int* address, int comparand);
 
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_LowLevelFutex_WaitOnAddressTimeout")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static partial bool LowLevelFutex_WaitOnAddressTimeout(IntPtr address, int comparand, int timeoutMilliseconds);
+        internal static unsafe partial bool LowLevelFutex_WaitOnAddressTimeout(int* address, int comparand, int timeoutMilliseconds);
 
         [SuppressGCTransition]
         [LibraryImport(Libraries.SystemNative, EntryPoint = "SystemNative_LowLevelFutex_WakeByAddressSingle")]
-        internal static partial void LowLevelFutex_WakeByAddressSingle(IntPtr address);
+        internal static unsafe partial void LowLevelFutex_WakeByAddressSingle(int* address);
     }
 }
