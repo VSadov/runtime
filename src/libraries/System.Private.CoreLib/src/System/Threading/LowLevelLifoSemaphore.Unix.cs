@@ -128,7 +128,7 @@ namespace System.Threading
             // Last chance for the waking thread to wake us before we block, so lets spin a bit.
             // This spinning is on a per-thread state, thus not too costly.
             // The number of spins is somewhat arbitrary.
-            for (int i = 0; i < 1000; i++)
+            for (int i = 0; i < 100; i++)
             {
                 int originalState = *_pState;
                 if (originalState != 0 &&
@@ -163,7 +163,7 @@ namespace System.Threading
             // Last chance for the waking thread to wake us before we block, so lets spin a bit.
             // This spinning is on a per-thread state, thus not too costly.
             // The number of spins is somewhat arbitrary.
-            for (int i = 0; i < 1000; i++)
+            for (int i = 0; i < 100; i++)
             {
                 int originalState = *_pState;
                 if (originalState != 0 &&
