@@ -135,6 +135,8 @@ namespace System.Threading
                 {
                     return;
                 }
+
+                Thread.SpinWait(1);
             }
 
             while (true)

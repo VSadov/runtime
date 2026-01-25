@@ -136,6 +136,8 @@ namespace System.Threading
                 {
                     return;
                 }
+
+                Thread.SpinWait(1);
             }
 
             while (true)
@@ -169,6 +171,8 @@ namespace System.Threading
                 {
                     return true;
                 }
+
+                Thread.SpinWait(1);
             }
 
             while (true)
