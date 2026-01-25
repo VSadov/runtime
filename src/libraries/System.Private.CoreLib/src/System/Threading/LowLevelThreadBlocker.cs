@@ -1,32 +1,16 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-// #define USE_MONITOR
+#if !TARGET_LINUX && !TARGET_WINDOWS
+#define USE_MONITOR
+#endif
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace System.Threading
 {
-    internal static unsafe class LowLevelFutex
-    {
-        internal static void WaitOnAddress(int* address, int comparand)
-        {
-            Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), -1);
-        }
-
-        internal static bool WaitOnAddressTimeout(int* address, int comparand, int milliseconds)
-        {
-            return Interop.Kernel32.WaitOnAddress(address, &comparand, sizeof(int), milliseconds) == Interop.BOOL.TRUE;
-        }
-
-        internal static void WakeByAddressSingle(int* address)
-        {
-            Interop.Kernel32.WakeByAddressSingle(address);
-        }
-    }
-
-    internal sealed unsafe class LowLevelGate : IDisposable
+    internal unsafe class LowLevelThreadBlocker : IDisposable
     {
         private int* _pState;
 
@@ -34,11 +18,9 @@ namespace System.Threading
         private LowLevelMonitor _monitor;
 #endif
 
-        internal LowLevelGate? _next;
-
-        public LowLevelGate()
+        public LowLevelThreadBlocker()
         {
-            _pState = (int*)Marshal.AllocHGlobal(sizeof(int));
+            _pState = (int*)NativeMemory.AlignedAlloc(PaddingHelpers.CACHE_LINE_SIZE, PaddingHelpers.CACHE_LINE_SIZE);
             *_pState = 0;
 
 #if USE_MONITOR
@@ -46,7 +28,7 @@ namespace System.Threading
 #endif
         }
 
-        ~LowLevelGate()
+        ~LowLevelThreadBlocker()
         {
             Dispose();
         }
@@ -58,7 +40,7 @@ namespace System.Threading
                 return;
             }
 
-            Marshal.FreeHGlobal((nint)_pState);
+            NativeMemory.AlignedFree(_pState);
             _pState = null;
 
 #if USE_MONITOR
@@ -127,7 +109,7 @@ namespace System.Threading
             // Last chance for the waking thread to wake us before we block, so lets spin a bit.
             // This spinning is on a per-thread state, thus not too costly.
             // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < 100; i++)
+            for (int i = 0; i < 1000; i++)
             {
                 int originalState = *_pState;
                 if (originalState != 0 &&
@@ -162,7 +144,7 @@ namespace System.Threading
             // Last chance for the waking thread to wake us before we block, so lets spin a bit.
             // This spinning is on a per-thread state, thus not too costly.
             // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < 100; i++)
+            for (int i = 0; i < 1000; i++)
             {
                 int originalState = *_pState;
                 if (originalState != 0 &&
@@ -204,6 +186,11 @@ namespace System.Threading
         {
             Interlocked.Increment(ref *_pState);
             LowLevelFutex.WakeByAddressSingle(_pState);
+        }
+
+        internal void Reset()
+        {
+            Interlocked.Exchange(ref *_pState, 0);
         }
 #endif
     }

@@ -325,15 +325,23 @@ namespace System.Threading
 
     internal sealed partial class LowLevelLifoSemaphore
     {
+        private class LifoWaitNode : LowLevelThreadBlocker
+        {
+            internal LifoWaitNode? _next;
+        }
+
         private Lock _stackLock = new Lock(useTrivialWaits: true);
-        private LowLevelGate? _stack;
+        private LifoWaitNode? _stack;
         private int _signals;
 
-        private bool Remove(LowLevelGate item)
+        [ThreadStatic]
+        private static LifoWaitNode? t_gate;
+
+        private bool Remove(LifoWaitNode item)
         {
             using (_stackLock.EnterScope())
             {
-                LowLevelGate? current = _stack;
+                LifoWaitNode? current = _stack;
                 if (current == item)
                 {
                     _stack = item._next;
@@ -351,9 +359,6 @@ namespace System.Threading
             return false;
         }
 
-        [ThreadStatic]
-        private static LowLevelGate? t_gate;
-
         private enum WaitResult
         {
             Retry,
@@ -365,10 +370,10 @@ namespace System.Threading
         {
             Debug.Assert(timeoutMs >= -1);
 
-            LowLevelGate? gate = t_gate;
+            LifoWaitNode? gate = t_gate;
             if (gate == null)
             {
-                t_gate = gate = new LowLevelGate();
+                t_gate = gate = new LifoWaitNode();
             }
 
             if (_stackLock.TryEnter())
@@ -409,7 +414,7 @@ namespace System.Threading
 
         private void WakeOne()
         {
-            LowLevelGate? head;
+            LifoWaitNode? head;
             using (_stackLock.EnterScope())
             {
                 head = _stack;
