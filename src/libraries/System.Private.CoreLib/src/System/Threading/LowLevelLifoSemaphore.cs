@@ -11,7 +11,7 @@ namespace System.Threading
     /// A LIFO semaphore.
     /// Waits on this semaphore are uninterruptible.
     /// </summary>
-    internal sealed partial class LowLevelLifoSemaphore : IDisposable
+    internal sealed partial class LowLevelLifoSemaphore
     {
         private CacheLineSeparatedCounts _separated;
 
@@ -29,8 +29,6 @@ namespace System.Threading
             _maximumSignalCount = maximumSignalCount;
             _spinCount = spinCount;
             _onWait = onWait;
-
-            Create();
         }
 
         public bool Wait(int timeoutMs)
@@ -322,6 +320,121 @@ namespace System.Threading
             private readonly Internal.PaddingFor32 _pad1;
             public Counts _counts;
             private readonly Internal.PaddingFor32 _pad2;
+        }
+    }
+
+    internal sealed partial class LowLevelLifoSemaphore
+    {
+        private Lock _stackLock = new Lock(useTrivialWaits: true);
+        private LowLevelGate? _stack;
+        private int _signals;
+
+        private bool Remove(LowLevelGate item)
+        {
+            using (_stackLock.EnterScope())
+            {
+                LowLevelGate? current = _stack;
+                if (current == item)
+                {
+                    _stack = item._next;
+                    return true;
+                }
+
+                while (current != null && current._next != item)
+                {
+                    current = current._next;
+                }
+
+                current?._next = current._next!._next;
+            }
+
+            return false;
+        }
+
+        [ThreadStatic]
+        private static LowLevelGate? t_gate;
+
+        private enum WaitResult
+        {
+            Retry,
+            Woken,
+            TimedOut,
+        }
+
+        private WaitResult WaitCore(int timeoutMs)
+        {
+            Debug.Assert(timeoutMs >= -1);
+
+            LowLevelGate? gate = t_gate;
+            if (gate == null)
+            {
+                t_gate = gate = new LowLevelGate();
+            }
+
+            if (_stackLock.TryEnter())
+            {
+                if (_signals != 0)
+                {
+                    _signals--;
+                    gate = null;
+                }
+                else
+                {
+                    gate._next = _stack;
+                    _stack = gate;
+                }
+                _stackLock.Exit();
+            }
+            else
+            {
+                return WaitResult.Retry;
+            }
+
+            if (gate != null)
+            {
+                while (!gate.TimedWait(timeoutMs))
+                {
+                    if (Remove(gate))
+                    {
+                        return WaitResult.TimedOut;
+                    }
+
+                    // We timed out but could not remove our water. Someone is going to signal it.
+                    // We can't leave or the wake could be lost, let's wait again.
+                }
+            }
+
+            return WaitResult.Woken;
+        }
+
+        private void WakeOne()
+        {
+            LowLevelGate? head;
+            using (_stackLock.EnterScope())
+            {
+                head = _stack;
+                if (head != null)
+                {
+                    _stack = head._next;
+                    head._next = null;
+                }
+                else
+                {
+                    _signals++;
+                }
+            }
+
+            head?.WakeOne();
+        }
+
+        private void ReleaseCore(int count)
+        {
+            Debug.Assert(count > 0);
+
+            for (int i = 0; i < count; i++)
+            {
+                WakeOne();
+            }
         }
     }
 }
