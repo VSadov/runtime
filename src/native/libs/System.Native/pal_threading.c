@@ -230,12 +230,12 @@ void SystemNative_LowLevelFutex_WaitOnAddress(int32_t* address, int32_t comparan
 
 int32_t SystemNative_LowLevelFutex_WaitOnAddressTimeout(int32_t* address, int32_t comparand, int32_t timeoutMilliseconds)
 {
-    struct timespec t;
-    uint64_t nanoseconds = (uint64_t)timeout * tccMilliSecondsToNanoSeconds;
-    t.tv_sec = nanoseconds / tccSecondsToNanoSeconds;
-    t.tv_nsec = nanoseconds % tccSecondsToNanoSeconds;
+    struct timespec timeoutTimeSpec;
+    uint64_t nanoseconds = (uint64_t)timeoutMilliseconds * 1000 * 1000 + (uint64_t)timeoutTimeSpec.tv_nsec;
+    timeoutTimeSpec.tv_sec += nanoseconds / (1000 * 1000 * 1000);
+    timeoutTimeSpec.tv_nsec = nanoseconds % (1000 * 1000 * 1000);
 
-    long waitResult = syscall(SYS_futex, address, FUTEX_WAIT_PRIVATE, comparand, &t, NULL, 0);
+    long waitResult = syscall(SYS_futex, address, FUTEX_WAIT_PRIVATE, comparand, &timeoutTimeSpec, NULL, 0);
 
     // possible results: woken, not blocking, interrupted, timeout
     assert(waitResult == 0 || errno == EAGAIN || errno == EINTR || errno == ETIMEDOUT);
