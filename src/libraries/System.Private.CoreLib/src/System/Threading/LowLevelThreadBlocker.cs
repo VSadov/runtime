@@ -106,13 +106,13 @@ namespace System.Threading
 
 #else
 
-        private const int spins = 5;
+        // private const int spins = 5;
 
         internal void Wait()
         {
             // Last chance for the waking thread to wake us before we block, so lets spin briefly.
             // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < spins; i++)
+            for (int i = 0; i < 100; i++)
             {
                 int originalState = *_pState;
                 if (originalState != 0 &&
@@ -121,8 +121,8 @@ namespace System.Threading
                     return;
                 }
 
-                Backoff.Exponential((uint)i);
-//                Thread.SpinWait(1);
+//                Backoff.Exponential((uint)i);
+                Thread.SpinWait(1);
             }
 
             while (true)
@@ -147,7 +147,7 @@ namespace System.Threading
 
             // Last chance for the waking thread to wake us before we block, so lets spin briefly.
             // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < spins; i++)
+            for (int i = 0; i < 100; i++)
             {
                 int originalState = *_pState;
                 if (originalState != 0 &&
@@ -156,8 +156,8 @@ namespace System.Threading
                     return true;
                 }
 
-                Backoff.Exponential((uint)i);
-                //                Thread.SpinWait(1);
+//                Backoff.Exponential((uint)i);
+                Thread.SpinWait(1);
             }
 
             while (true)
