@@ -20,7 +20,7 @@ namespace System.Threading
 
         public LowLevelThreadBlocker()
         {
-            _pState = (int*)NativeMemory.AlignedAlloc(PaddingHelpers.CACHE_LINE_SIZE, PaddingHelpers.CACHE_LINE_SIZE);
+            _pState = (int*)NativeMemory.AlignedAlloc(Internal.PaddingHelpers.CACHE_LINE_SIZE, Internal.PaddingHelpers.CACHE_LINE_SIZE);
             *_pState = 0;
 
 #if USE_MONITOR

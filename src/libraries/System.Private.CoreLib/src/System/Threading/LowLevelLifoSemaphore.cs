@@ -325,7 +325,7 @@ namespace System.Threading
 
     internal sealed partial class LowLevelLifoSemaphore
     {
-        private class LifoWaitNode : LowLevelThreadBlocker
+        private sealed class LifoWaitNode : LowLevelThreadBlocker
         {
             internal LifoWaitNode? _next;
         }
