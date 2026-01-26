@@ -20,7 +20,7 @@ namespace System.Threading
 
         internal static unsafe void Exponential(uint attempt)
         {
-            attempt = Math.Min(attempt, MaxExponentialBackoffBits);
+            attempt = Math.Min(attempt + 1, MaxExponentialBackoffBits);
             // We will backoff for some random number of spins that roughly grows as attempt^2
             // No need for much randomness here, randomness is "good to have", we could do without it,
             // so we will just cheaply hash in the stack location.
