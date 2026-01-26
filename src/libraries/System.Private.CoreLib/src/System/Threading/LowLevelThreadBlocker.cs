@@ -110,20 +110,20 @@ namespace System.Threading
 
         internal void Wait()
         {
-            // Last chance for the waking thread to wake us before we block, so lets spin briefly.
-            // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < 100; i++)
-            {
-                int originalState = *_pState;
-                if (originalState != 0 &&
-                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
-                {
-                    return;
-                }
+//            // Last chance for the waking thread to wake us before we block, so lets spin briefly.
+//            // The number of spins is somewhat arbitrary. (approx 1-5 usec)
+//            for (int i = 0; i < 100; i++)
+//            {
+//                int originalState = *_pState;
+//                if (originalState != 0 &&
+//                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
+//                {
+//                    return;
+//                }
 
-//                Backoff.Exponential((uint)i);
-                Thread.SpinWait(1);
-            }
+////                Backoff.Exponential((uint)i);
+//                Thread.SpinWait(1);
+//            }
 
             while (true)
             {
@@ -145,20 +145,20 @@ namespace System.Threading
         {
             long deadline = Environment.TickCount64 + timeoutMs;
 
-            // Last chance for the waking thread to wake us before we block, so lets spin briefly.
-            // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < 100; i++)
-            {
-                int originalState = *_pState;
-                if (originalState != 0 &&
-                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
-                {
-                    return true;
-                }
+//            // Last chance for the waking thread to wake us before we block, so lets spin briefly.
+//            // The number of spins is somewhat arbitrary. (approx 1-5 usec)
+//            for (int i = 0; i < 100; i++)
+//            {
+//                int originalState = *_pState;
+//                if (originalState != 0 &&
+//                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
+//                {
+//                    return true;
+//                }
 
-//                Backoff.Exponential((uint)i);
-                Thread.SpinWait(1);
-            }
+////                Backoff.Exponential((uint)i);
+//                Thread.SpinWait(1);
+//            }
 
             while (true)
             {
