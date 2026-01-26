@@ -106,7 +106,7 @@ namespace System.Threading
 
 #else
 
-        private const int spins = 500;
+        private const int spins = 8;
 
         internal void Wait()
         {
@@ -121,7 +121,8 @@ namespace System.Threading
                     return;
                 }
 
-                Thread.SpinWait(1);
+                Backoff.Exponential((uint)i);
+//                Thread.SpinWait(1);
             }
 
             while (true)
@@ -155,7 +156,8 @@ namespace System.Threading
                     return true;
                 }
 
-                Thread.SpinWait(1);
+                Backoff.Exponential((uint)i);
+                //                Thread.SpinWait(1);
             }
 
             while (true)
