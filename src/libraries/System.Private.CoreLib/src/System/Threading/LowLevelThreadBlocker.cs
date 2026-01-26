@@ -106,7 +106,7 @@ namespace System.Threading
 
 #else
 
-        private const int spins = 10;
+        private const int spins = 8;
 
         internal void Wait()
         {
