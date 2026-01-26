@@ -330,32 +330,32 @@ namespace System.Threading
             internal LifoWaitNode? _next;
         }
 
-        private Lock _stackLock = new Lock(useTrivialWaits: true);
+        private LowLevelLock _stackLock = new LowLevelLock();
         private LifoWaitNode? _stack;
         private int _signals;
 
         [ThreadStatic]
-        private static LifoWaitNode? t_gate;
+        private static LifoWaitNode? t_blocker;
 
-        private bool Remove(LifoWaitNode item)
+        private bool Remove(LifoWaitNode node)
         {
-            using (_stackLock.EnterScope())
+            _stackLock.Acquire();
+            LifoWaitNode? current = _stack;
+            if (current == node)
             {
-                LifoWaitNode? current = _stack;
-                if (current == item)
-                {
-                    _stack = item._next;
-                    return true;
-                }
-
-                while (current != null && current._next != item)
-                {
-                    current = current._next;
-                }
-
-                current?._next = current._next!._next;
+                _stack = node._next;
+                _stackLock.Release();
+                return true;
             }
 
+            while (current != null && current._next != node)
+            {
+                current = current._next;
+            }
+
+            current?._next = current._next!._next;
+
+            _stackLock.Release();
             return false;
         }
 
@@ -370,36 +370,37 @@ namespace System.Threading
         {
             Debug.Assert(timeoutMs >= -1);
 
-            LifoWaitNode? gate = t_gate;
-            if (gate == null)
+            LifoWaitNode? blocker = t_blocker;
+            if (blocker == null)
             {
-                t_gate = gate = new LifoWaitNode();
+                t_blocker = blocker = new LifoWaitNode();
             }
 
-            if (_stackLock.TryEnter())
+            if (_stackLock.TryAcquire())
             {
                 if (_signals != 0)
                 {
                     _signals--;
-                    gate = null;
+                    blocker = null;
                 }
                 else
                 {
-                    gate._next = _stack;
-                    _stack = gate;
+                    blocker._next = _stack;
+                    _stack = blocker;
                 }
-                _stackLock.Exit();
+
+                _stackLock.Release();
             }
             else
             {
                 return WaitResult.Retry;
             }
 
-            if (gate != null)
+            if (blocker != null)
             {
-                while (!gate.TimedWait(timeoutMs))
+                while (!blocker.TimedWait(timeoutMs))
                 {
-                    if (Remove(gate))
+                    if (Remove(blocker))
                     {
                         return WaitResult.TimedOut;
                     }
@@ -415,20 +416,19 @@ namespace System.Threading
         private void WakeOne()
         {
             LifoWaitNode? head;
-            using (_stackLock.EnterScope())
+            _stackLock.Acquire();
+            head = _stack;
+            if (head != null)
             {
-                head = _stack;
-                if (head != null)
-                {
-                    _stack = head._next;
-                    head._next = null;
-                }
-                else
-                {
-                    _signals++;
-                }
+                _stack = head._next;
+                head._next = null;
+            }
+            else
+            {
+                _signals++;
             }
 
+            _stackLock.Release();
             head?.WakeOne();
         }
 
