@@ -337,26 +337,33 @@ namespace System.Threading
         [ThreadStatic]
         private static LifoWaitNode? t_blocker;
 
-        private bool Remove(LifoWaitNode node)
+        private bool TryRemove(LifoWaitNode node)
         {
             _stackLock.Acquire();
             LifoWaitNode? current = _stack;
+            bool removed = false;
             if (current == node)
             {
                 _stack = node._next;
-                _stackLock.Release();
-                return true;
+                removed = true;
             }
-
-            while (current != null && current._next != node)
+            else
             {
-                current = current._next;
-            }
+                while (current != null)
+                {
+                    if (current._next == node)
+                    {
+                        current._next = current._next!._next;
+                        removed = true;
+                        break;
+                    }
 
-            current?._next = current._next!._next;
+                    current = current._next;
+                }
+            }
 
             _stackLock.Release();
-            return false;
+            return removed;
         }
 
         private enum WaitResult
@@ -400,12 +407,12 @@ namespace System.Threading
             {
                 while (!blocker.TimedWait(timeoutMs))
                 {
-                    if (Remove(blocker))
+                    if (TryRemove(blocker))
                     {
                         return WaitResult.TimedOut;
                     }
 
-                    // We timed out but could not remove our water. Someone is going to signal it.
+                    // We timed out but could not remove our water. Someone is signaling it.
                     // We can't leave or the wake could be lost, let's wait again.
                 }
             }
