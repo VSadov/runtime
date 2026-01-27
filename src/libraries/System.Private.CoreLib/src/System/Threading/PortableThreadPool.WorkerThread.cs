@@ -121,6 +121,8 @@ namespace System.Threading
                         WorkerDoWork(threadPoolInstance);
                     }
 
+                    Internal.Console.Write("#");
+
                     // We've timed out waiting on the semaphore. Time to exit.
                     // In rare cases we may be asked to keep running/waiting.
                     if (ShouldExitWorker(threadPoolInstance, threadAdjustmentLock))
