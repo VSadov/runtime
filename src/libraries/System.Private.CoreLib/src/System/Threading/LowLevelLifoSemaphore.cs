@@ -11,13 +11,32 @@ namespace System.Threading
     /// A LIFO semaphore.
     /// Waits on this semaphore are uninterruptible.
     /// </summary>
-    internal sealed partial class LowLevelLifoSemaphore : IDisposable
+    internal sealed partial class LowLevelLifoSemaphore
     {
         private CacheLineSeparatedCounts _separated;
 
         private readonly int _maximumSignalCount;
         private readonly uint _spinCount;
         private readonly Action _onWait;
+
+        // When we need to block threads we use a linked list of thread blockers.
+        // When we awake a worker, we pop the topmost blocker and release it.
+        private sealed class LifoWaitNode : LowLevelThreadBlocker
+        {
+            internal LifoWaitNode? _next;
+        }
+
+        private readonly LowLevelLock _stackLock = new LowLevelLock();
+        private LifoWaitNode? _stack;
+
+        // Sometimes due to races we see no blockers to wake.
+        // That happens if a thread that added itself to waiter count, has not yet blocked.
+        // In such case we increment _unpostedSignals and the waiter will simply
+        // decrement the counter and return without blocking.
+        private int _unpostedSignals;
+
+        [ThreadStatic]
+        private static LifoWaitNode? t_blocker;
 
         public LowLevelLifoSemaphore(int maximumSignalCount, uint spinCount, Action onWait)
         {
@@ -29,8 +48,6 @@ namespace System.Threading
             _maximumSignalCount = maximumSignalCount;
             _spinCount = spinCount;
             _onWait = onWait;
-
-            Create(maximumSignalCount);
         }
 
         public bool Wait(int timeoutMs)
@@ -119,17 +136,17 @@ namespace System.Threading
 
             _onWait();
 
+            SpinWait sw = default;
             while (true)
             {
-                int startWaitTicks = timeoutMs != -1 ? Environment.TickCount : 0;
-                if (timeoutMs == 0 || !WaitCore(timeoutMs))
+                long startWaitTicks = timeoutMs != -1 ? Environment.TickCount64 : 0;
+                WaitResult waitResult = WaitCore(timeoutMs);
+                if (waitResult == WaitResult.TimedOut)
                 {
-                    // Unregister the waiter. The wait subsystem used above guarantees that a thread that wakes due to a timeout does
-                    // not observe a signal to the object being waited upon.
+                    // Unregister the waiter, but do not decrement wake count, the thread did not observe a wake.
                     _separated._counts.InterlockedDecrementWaiterCount();
                     return false;
                 }
-                int endWaitTicks = timeoutMs != -1 ? Environment.TickCount : 0;
 
                 uint collisionCount = 0;
                 while (true)
@@ -138,13 +155,27 @@ namespace System.Threading
                     Counts newCounts = counts;
 
                     Debug.Assert(counts.WaiterCount != 0);
-                    Debug.Assert(counts.CountOfWaitersSignaledToWake != 0);
 
-                    newCounts.DecrementCountOfWaitersSignaledToWake();
+                    // if consumed a wake, decrement the count
+                    if (waitResult == WaitResult.Woken)
+                    {
+                        Debug.Assert(counts.CountOfWaitersSignaledToWake != 0);
+                        newCounts.DecrementCountOfWaitersSignaledToWake();
+                    }
+
+                    // If there is a signal, try claiming it and stop waiting.
                     if (newCounts.SignalCount != 0)
                     {
                         newCounts.DecrementSignalCount();
                         newCounts.DecrementWaiterCount();
+                    }
+
+                    if (newCounts == counts)
+                    {
+                        // No signals. And we could not enter blocking wait.
+                        // This is possible if many threads are out of work and try to block at once.
+                        // We will try again after a pause, and will check for signals again too.
+                        break;
                     }
 
                     Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
@@ -156,20 +187,29 @@ namespace System.Threading
                             return true;
                         }
 
-                        // we've consumed a wake, but there was no signal, we will wait again.
+                        // We've consumed a wake, but there was no signal,
+                        // This was a spurious/stolen wake. The semaphore is unfair and this can happen.
+                        // We will have to wait again.
+                        sw = default;
                         break;
                     }
 
-                    // collision, try again.
+                    // CAS collision, try again.
                     Backoff.Exponential(collisionCount++);
                 }
 
-                // we will wait again, reduce timeout
+                // There is no signal and we are trying to block, so far unsuccessfully.
+                // Spin a bit and eventually start yielding before retrying.
+                sw.SpinOnce(sleep1Threshold: -1);
+
+                // We will wait again, reduce timeout by the current wait.
                 if (timeoutMs != -1)
                 {
-                    int waitMs = endWaitTicks - startWaitTicks;
-                    if (waitMs >= 0 && waitMs < timeoutMs)
-                        timeoutMs -= waitMs;
+                    long endWaitTicks = Environment.TickCount64;
+                    long waitMs = endWaitTicks - startWaitTicks;
+                    Debug.Assert(waitMs >= 0);
+                    if (waitMs < (long)timeoutMs)
+                        timeoutMs -= (int)waitMs;
                     else
                         timeoutMs = 0;
                 }
@@ -209,6 +249,121 @@ namespace System.Threading
                 Backoff.Exponential(collisionCount++);
 
                 counts = _separated._counts;
+            }
+        }
+
+        private bool TryRemove(LifoWaitNode node)
+        {
+            _stackLock.Acquire();
+            LifoWaitNode? current = _stack;
+            bool removed = false;
+            if (current == node)
+            {
+                _stack = node._next;
+                removed = true;
+            }
+            else
+            {
+                while (current != null)
+                {
+                    if (current._next == node)
+                    {
+                        current._next = current._next!._next;
+                        removed = true;
+                        break;
+                    }
+
+                    current = current._next;
+                }
+            }
+
+            _stackLock.Release();
+            return removed;
+        }
+
+        private enum WaitResult
+        {
+            Retry,
+            Woken,
+            TimedOut,
+        }
+
+        private WaitResult WaitCore(int timeoutMs)
+        {
+            Debug.Assert(timeoutMs >= -1);
+
+            LifoWaitNode? blocker = t_blocker;
+            if (blocker == null)
+            {
+                t_blocker = blocker = new LifoWaitNode();
+            }
+
+            if (_stackLock.TryAcquire())
+            {
+                if (_unpostedSignals != 0)
+                {
+                    Debug.Assert(_stack == null);
+                    _unpostedSignals--;
+                    blocker = null;
+                }
+                else
+                {
+                    blocker._next = _stack;
+                    _stack = blocker;
+                }
+
+                _stackLock.Release();
+            }
+            else
+            {
+                return WaitResult.Retry;
+            }
+
+            if (blocker != null)
+            {
+                while (!blocker.TimedWait(timeoutMs))
+                {
+                    if (TryRemove(blocker))
+                    {
+                        return WaitResult.TimedOut;
+                    }
+
+                    // We timed out but our water is already popped. Someone is signaling it.
+                    // We can't leave or the wake could be lost, let's wait again.
+                    // Give it some extra time.
+                    timeoutMs = 10;
+                }
+            }
+
+            return WaitResult.Woken;
+        }
+
+        private void WakeOne()
+        {
+            LifoWaitNode? head;
+            _stackLock.Acquire();
+            head = _stack;
+            if (head != null)
+            {
+                _stack = head._next;
+                head._next = null;
+            }
+            else
+            {
+                _unpostedSignals++;
+            }
+
+            _stackLock.Release();
+            head?.WakeOne();
+        }
+
+        private void ReleaseCore(int count)
+        {
+            Debug.Assert(count > 0);
+
+            for (int i = 0; i < count; i++)
+            {
+                WakeOne();
             }
         }
 
