@@ -106,25 +106,8 @@ namespace System.Threading
 
 #else
 
-        private const int spins = 1000;
-
         internal void Wait()
         {
-            // Last chance for the waking thread to wake us before we block, so lets spin briefly.
-            // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < spins; i++)
-            {
-                int originalState = *_pState;
-                if (originalState != 0 &&
-                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
-                {
-                    return;
-                }
-
-                //                Backoff.Exponential((uint)i);
-                Thread.SpinWait(1);
-            }
-
             while (true)
             {
                 int originalState = *_pState;
@@ -144,22 +127,6 @@ namespace System.Threading
         internal bool TimedWait(int timeoutMs)
         {
             long deadline = Environment.TickCount64 + timeoutMs;
-
-            // Last chance for the waking thread to wake us before we block, so lets spin briefly.
-            // The number of spins is somewhat arbitrary. (approx 1-5 usec)
-            for (int i = 0; i < spins; i++)
-            {
-                int originalState = *_pState;
-                if (originalState != 0 &&
-                    Interlocked.CompareExchange(ref *_pState, originalState - 1, originalState) == originalState)
-                {
-                    return true;
-                }
-
-                //                Backoff.Exponential((uint)i);
-                Thread.SpinWait(1);
-            }
-
             while (true)
             {
                 int originalState = *_pState;
