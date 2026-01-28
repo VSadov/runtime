@@ -325,7 +325,7 @@ namespace System.Threading
                 // The spinning in this case will be on a per-thread private state and will
                 // not cause extra memory traffic. Thus we do not care about backoffs
                 // or randomizing.
-                while (!blocker.TimedWait(timeoutMs, (int)_spinCount))
+                while (!blocker.TimedWait(timeoutMs, (int)_spinCount / 2))
                 {
                     if (TryRemove(blocker))
                     {
