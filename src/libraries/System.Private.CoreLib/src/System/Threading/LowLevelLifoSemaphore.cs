@@ -321,7 +321,7 @@ namespace System.Threading
 
             if (blocker != null)
             {
-                while (!blocker.TimedWait(timeoutMs))
+                while (!blocker.TimedWait(timeoutMs, 1024))
                 {
                     if (TryRemove(blocker))
                     {

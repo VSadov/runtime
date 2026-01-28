@@ -179,5 +179,15 @@ namespace System.Threading
             LowLevelFutex.WakeByAddressSingle(_pState);
         }
 #endif
+
+        internal bool TimedWait(int timeoutMs, int spinCount)
+        {
+            for (int i = 0; i < spinCount && *_pState == 0; i++)
+            {
+                Thread.SpinWait(1);
+            }
+
+            return TimedWait(timeoutMs);
+        }
     }
 }
