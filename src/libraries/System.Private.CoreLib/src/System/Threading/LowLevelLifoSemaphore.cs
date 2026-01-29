@@ -352,9 +352,9 @@ namespace System.Threading
 
             if (blocker != null)
             {
-                // We do the last round of spinning in the blocker,
-                // but only as long as it is the top one.
-                while (!blocker.TimedWait(timeoutMs, 1024))
+                // The top waiter will do another round of spinning before blocking.
+                // The spinning also stops if it is no longer the top one.
+                while (!blocker.TimedWait(timeoutMs, 2 * (int)_spinCount))
                 {
                     if (TryRemove(blocker))
                     {
