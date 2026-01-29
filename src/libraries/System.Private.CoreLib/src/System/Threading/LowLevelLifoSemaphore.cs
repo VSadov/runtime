@@ -19,6 +19,8 @@ namespace System.Threading
         private readonly uint _spinCount;
         private readonly Action _onWait;
 
+        private int lastID;
+
         // When we need to block threads we use a linked list of thread blockers.
         // When we awake a worker, we pop the topmost blocker and release it.
         private sealed unsafe class LifoWaitNode : LowLevelThreadBlocker
@@ -97,6 +99,8 @@ namespace System.Threading
 
         private bool WaitSlow(int timeoutMs)
         {
+            int threadID = Environment.CurrentManagedThreadId;
+            lastID = threadID;
             // Now spin briefly with exponential backoff.
             // We use random exponential backoff because:
             // - we do not know how soon a signal appears, but with exponential backoff we will not be more than 2x off the ideal guess
@@ -107,6 +111,9 @@ namespace System.Threading
             for (uint iteration = 0; iteration < attempts; iteration++)
             {
                 Backoff.Exponential(iteration);
+
+                if (lastID != threadID)
+                    break;
 
                 Counts counts = _separated._counts;
                 if (counts.SignalCount != 0)
@@ -354,7 +361,7 @@ namespace System.Threading
             {
                 // The top waiter will do another round of spinning before blocking.
                 // The spinning also stops if it is no longer the top one.
-                while (!blocker.TimedWait(timeoutMs, 2 * (int)_spinCount))
+                while (!blocker.TimedWait(timeoutMs)) //, 2 * (int)_spinCount))
                 {
                     if (TryRemove(blocker))
                     {
