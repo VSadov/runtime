@@ -22,13 +22,12 @@ namespace System.Threading
     /// We count Wakes, while Wait consumes them or blocks until wake count is != 0.
     /// Waking policy is as fair as provided by the underlying APIs. That is typically
     /// FIFO or close to FIFO, but rarely documented explicitly.
-    /// The overloads that take spin count trade fairness for throughput when wait can be avoided.
     /// When OS provides a compare-and-wait API, such as futex, we use that.
     /// Otherwise we fallback to a heavier, but more portable condvar/mutex implementation.
     /// </summary>
     internal unsafe class LowLevelThreadBlocker : IDisposable
     {
-        private int* _pState;
+        protected int* _pState;
 
 #if USE_MONITOR
         private LowLevelMonitor _monitor;
@@ -180,25 +179,5 @@ namespace System.Threading
             LowLevelFutex.WakeByAddressSingle(_pState);
         }
 #endif
-
-        internal void Wait(int spinCount)
-        {
-            for (int i = 0; i < spinCount && *_pState == 0; i++)
-            {
-                Thread.SpinWait(1);
-            }
-
-            Wait();
-        }
-
-        internal bool TimedWait(int timeoutMs, int spinCount)
-        {
-            for (int i = 0; i < spinCount && *_pState == 0; i++)
-            {
-                Thread.SpinWait(1);
-            }
-
-            return TimedWait(timeoutMs);
-        }
     }
 }

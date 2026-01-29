@@ -24,6 +24,26 @@ namespace System.Threading
         private sealed class LifoWaitNode : LowLevelThreadBlocker
         {
             internal LifoWaitNode? _next;
+            internal bool isTop;
+
+            // The spinning in this case will be on a per-thread private state and will
+            // not cause extra memory traffic. Thus we do not care about backoffs
+            // or randomizing.
+            internal unsafe bool TimedWait(int timeoutMs, int spinCount)
+            {
+                for (int i = 0; i < spinCount; i++)
+                {
+                    if (*_pState != 0)
+                        break;
+
+                    if (!isTop)
+                        break;
+
+                    Thread.SpinWait(1);
+                }
+
+                return TimedWait(timeoutMs);
+            }
         }
 
         private readonly LowLevelLock _stackLock = new LowLevelLock();
@@ -298,6 +318,7 @@ namespace System.Threading
                 t_blocker = blocker = new LifoWaitNode();
             }
 
+            blocker.isTop = true;
             if (_stackLock.TryAcquire())
             {
                 if (_unpostedSignals != 0)
@@ -308,7 +329,13 @@ namespace System.Threading
                 }
                 else
                 {
-                    blocker._next = _stack;
+                    LifoWaitNode? top = _stack;
+                    if (top != null)
+                    {
+                        top.isTop = false;
+                        blocker._next = top;
+                    }
+
                     _stack = blocker;
                 }
 
@@ -321,11 +348,9 @@ namespace System.Threading
 
             if (blocker != null)
             {
-                // We do the last round of spinning in the blocker.
-                // The spinning in this case will be on a per-thread private state and will
-                // not cause extra memory traffic. Thus we do not care about backoffs
-                // or randomizing.
-                while (!blocker.TimedWait(timeoutMs))
+                // We do the last round of spinning in the blocker,
+                // but only as long as it is the top one.
+                while (!blocker.TimedWait(timeoutMs, 1024))
                 {
                     if (TryRemove(blocker))
                     {
@@ -344,13 +369,12 @@ namespace System.Threading
 
         private void WakeOne()
         {
-            LifoWaitNode? head;
+            LifoWaitNode? top;
             _stackLock.Acquire();
-            head = _stack;
-            if (head != null)
+            top = _stack;
+            if (top != null)
             {
-                _stack = head._next;
-                head._next = null;
+                _stack = top._next;
             }
             else
             {
@@ -358,7 +382,7 @@ namespace System.Threading
             }
 
             _stackLock.Release();
-            head?.WakeOne();
+            top?.WakeOne();
         }
 
         private void ReleaseCore(int count)
