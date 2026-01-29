@@ -20,16 +20,19 @@ namespace System.Threading
 
         internal static unsafe void Exponential(uint attempt)
         {
-            attempt = Math.Min(attempt + 1, MaxExponentialBackoffBits);
-            // We will backoff for some random number of spins that roughly grows as attempt^2
-            // No need for much randomness here, randomness is "good to have", we could do without it,
-            // so we will just cheaply hash in the stack location.
-            uint rand = (uint)&attempt * 2654435769u;
-            // Set the highmost bit to ensure minimum number of spins is exponentially increasing.
-            // It basically guarantees that we spin at least 0, 1, 2, 4, 8, 16, times, and so on
-            rand |= (1u << 31);
-            uint spins = rand >> (byte)(32 - attempt);
-            Thread.SpinWait((int)spins);
+            if (attempt > 0)
+            {
+                attempt = Math.Min(attempt, MaxExponentialBackoffBits);
+                // We will backoff for some random number of spins that roughly grows as attempt^2
+                // No need for much randomness here, randomness is "good to have", we could do without it,
+                // so we will just cheaply hash in the stack location.
+                uint rand = (uint)&attempt * 2654435769u;
+                // Set the highmost bit to ensure minimum number of spins is exponentially increasing.
+                // It basically guarantees that we spin at least 0, 1, 2, 4, 8, 16, times, and so on
+                rand |= (1u << 31);
+                uint spins = rand >> (byte)(32 - attempt);
+                Thread.SpinWait((int)spins);
+            }
         }
     }
 }
