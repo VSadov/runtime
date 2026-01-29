@@ -21,22 +21,22 @@ namespace System.Threading
 
         // When we need to block threads we use a linked list of thread blockers.
         // When we awake a worker, we pop the topmost blocker and release it.
-        private sealed class LifoWaitNode : LowLevelThreadBlocker
+        private sealed unsafe class LifoWaitNode : LowLevelThreadBlocker
         {
             internal LifoWaitNode? _next;
-            internal bool isTop;
+            internal ref bool IsTop => ref *(bool*)(_pState + sizeof(int));
 
             // The spinning in this case will be on a per-thread private state and will
             // not cause extra memory traffic. Thus we do not care about backoffs
             // or randomizing.
-            internal unsafe bool TimedWait(int timeoutMs, int spinCount)
+            internal bool TimedWait(int timeoutMs, int spinCount)
             {
                 for (int i = 0; i < spinCount; i++)
                 {
                     if (*_pState != 0)
                         break;
 
-                    if (!isTop)
+                    if (!IsTop)
                         break;
 
                     Thread.SpinWait(1);
@@ -318,7 +318,7 @@ namespace System.Threading
                 t_blocker = blocker = new LifoWaitNode();
             }
 
-            blocker.isTop = true;
+            blocker.IsTop = true;
             if (_stackLock.TryAcquire())
             {
                 if (_unpostedSignals != 0)
@@ -336,7 +336,7 @@ namespace System.Threading
                     }
                     else
                     {
-                        top.isTop = false;
+                        top.IsTop = false;
                         blocker._next = top;
                     }
 
