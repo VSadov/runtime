@@ -330,7 +330,11 @@ namespace System.Threading
                 else
                 {
                     LifoWaitNode? top = _stack;
-                    if (top != null)
+                    if (top == null)
+                    {
+                        blocker._next = null;
+                    }
+                    else
                     {
                         top.isTop = false;
                         blocker._next = top;
