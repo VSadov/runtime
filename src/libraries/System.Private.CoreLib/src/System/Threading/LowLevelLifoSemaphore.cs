@@ -340,13 +340,12 @@ namespace System.Threading
 
         private void WakeOne()
         {
-            LifoWaitNode? head;
+            LifoWaitNode? top;
             _stackLock.Acquire();
-            head = _stack;
-            if (head != null)
+            top = _stack;
+            if (top != null)
             {
-                _stack = head._next;
-                head._next = null;
+                _stack = top._next;
             }
             else
             {
@@ -354,7 +353,7 @@ namespace System.Threading
             }
 
             _stackLock.Release();
-            head?.WakeOne();
+            top?.WakeOne();
         }
 
         private void ReleaseCore(int count)
