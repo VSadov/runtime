@@ -46,7 +46,7 @@ namespace System.Threading
 
             _separated = default;
             _maximumSignalCount = maximumSignalCount;
-            _spinCount = spinCount;
+            _spinCount = Environment.IsSingleProcessor ? 0 : spinCount;
             _onWait = onWait;
         }
 
@@ -83,8 +83,8 @@ namespace System.Threading
             // - it gives mild preference to the most recent spinners. We want LIFO here so that hot(er) threads keep running.
             // - it is possible that spinning workers prevent non-pool threads from submitting more work to the pool,
             //   so we want some workers to sleep earlier than others.
-            uint spinCount = Environment.IsSingleProcessor ? 0 : _spinCount;
-            for (uint iteration = 0; iteration < spinCount; iteration++)
+            uint attempts = (uint)Numerics.BitOperations.Log2(_spinCount); ;
+            for (uint iteration = 0; iteration < attempts; iteration++)
             {
                 Backoff.Exponential(iteration);
 
