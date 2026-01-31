@@ -19,7 +19,7 @@ namespace System.Threading
             // Spinning in the threadpool semaphore is not always useful.
             // For example the new workitems may be produced by non-pool threads and could only arrive if pool threads start blocking.
             // We will limit spinning to roughly 512 spinwaits, each taking 35-50ns. That should be under 50 usec total.
-            // For reference the wakeup latency of a futex/event with threads queued up is reported to be in 5-50 usec range. (year 2025)
+            // For reference the average wakeup latency of a futex/event with threads queued up is in 10-30 usec range. (year 2026)
             private const int SemaphoreSpinCountDefault = 512;
 
             // This value represents an assumption of how much uncommitted stack space a worker thread may use in the future.
