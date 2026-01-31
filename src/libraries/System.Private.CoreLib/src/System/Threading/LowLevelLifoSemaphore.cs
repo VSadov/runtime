@@ -80,7 +80,7 @@ namespace System.Threading
             // Now spin briefly with exponential backoff.
             // We use random exponential backoff because:
             // - we do not know how soon a signal appears, but with exponential backoff we will not be more than 2x off the ideal guess
-            // - it gives mild preference to the most recent spinners. We want LIFO here so that hot(er) threads keep running.
+            // - it gives mild preference to the most recent spinners. We want LIFO here so that recently running threads keep running.
             // - it is possible that spinning workers prevent non-pool threads from submitting more work to the pool,
             //   so we want some workers to sleep earlier than others.
             uint attempts = (uint)Numerics.BitOperations.Log2(_spinCount); ;
@@ -321,7 +321,7 @@ namespace System.Threading
 
             if (blocker != null)
             {
-                while (!blocker.TimedWait(timeoutMs))
+                while (!blocker.TimedWait(timeoutMs, (int)_spinCount))
                 {
                     if (TryRemove(blocker))
                     {
