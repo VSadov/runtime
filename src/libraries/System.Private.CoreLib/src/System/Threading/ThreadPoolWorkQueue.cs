@@ -1079,7 +1079,7 @@ namespace System.Threading
                                 }
 
                                 // unlock the slot for enqueuing by making the slot empty in the next generation
-            s_assignableWorkItemQueueCount > 0 ? new int[s_assignableWorkItemQueueCount] : Array.Empty<int>();
+                                Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
 
                                 if (item == null)
                                 {
@@ -1582,7 +1582,7 @@ namespace System.Threading
         {
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
             bool missedSteal = false;
-            object? workItem = DequeueWithPriorityAlternation(workQueue, tl, out bool missedSteal);
+            object? workItem = workQueue.Dequeue(ref missedSteal);
             if (workItem == null)
             {
                 // Missing a steal means there may be an item that we were unable to get.
