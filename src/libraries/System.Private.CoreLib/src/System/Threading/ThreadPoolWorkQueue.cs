@@ -1019,6 +1019,7 @@ namespace System.Threading
                         // If the slot is empty (in the next generation) or in Dequeue state,
                         // then we have reached the dequeuing end of the segment.
                         // At this point in time, the segment is empty.
+                        // TODO: VS CHECK
                         if (diff == 1 + _slotsMask ) // || diff == Dequeue)
                         {
                             return null;
