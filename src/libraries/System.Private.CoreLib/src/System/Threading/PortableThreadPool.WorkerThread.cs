@@ -244,6 +244,7 @@ namespace System.Threading
                     oldCounts = threadPoolInstance._separated.counts;
                     newCounts = oldCounts;
                     incremented = newCounts.TryIncrementProcessingWork();
+                    // TODO: VS CHECK
                     //if (newCounts == oldCounts)
                     //{
                     //    return;
