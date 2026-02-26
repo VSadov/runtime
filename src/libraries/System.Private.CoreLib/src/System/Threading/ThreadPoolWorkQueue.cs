@@ -1068,10 +1068,12 @@ namespace System.Threading
                             if (diff == Full)
                             {
                                 object? item;
-                                var enqPos = _queueEnds.Enqueue;
-                                if (enqPos - position < MoveThreshold ||
-                                    // "this" is a sentinel for a failed Move attempt
-                                    (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
+
+                                // TODO: VS CHECK
+                                //var enqPos = _queueEnds.Enqueue;
+                                //if (enqPos - position < MoveThreshold ||
+                                //    // "this" is a sentinel for a failed Move attempt
+                                //    (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
