@@ -1626,12 +1626,15 @@ namespace System.Threading
             {
                 if (workItem == null)
                 {
-                    missedSteal = false;
-                    workItem = workQueue.Dequeue(ref missedSteal);
-                    if (workItem == null)
-                    {
-                        return true;
-                    }
+                    // TODO: VS CHECK
+                    //missedSteal = false;
+                    //workItem = workQueue.Dequeue(ref missedSteal);
+                    //if (workItem == null)
+                    //{
+                    //    return true;
+                    //}
+
+                    return true;
                 }
 
                 if (workQueue._loggingEnabled && FrameworkEventSource.Log.IsEnabled())
