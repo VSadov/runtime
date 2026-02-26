@@ -1685,6 +1685,7 @@ namespace System.Threading
 
                 // The quantum expired, do any necessary periodic activities
 
+                // TODO: VS CHECK
                 // Once in a while try stealing from a random workstealing queue, even if fifo queues have items.
                 // This is just to make sure that if a worker thread get preempted/busy for too long its workitems
                 // will be eventually stolen.
