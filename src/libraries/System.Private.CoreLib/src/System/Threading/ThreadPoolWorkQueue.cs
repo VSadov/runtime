@@ -67,6 +67,7 @@ namespace System.Threading
             // The index of the current queue in a group of similar queues.
             internal readonly uint _queueIndex;
 
+            [StructLayout(LayoutKind.Sequential)]
             internal struct PaddedQueueEnds
             {
                 internal PaddingFor32 _pad0;
