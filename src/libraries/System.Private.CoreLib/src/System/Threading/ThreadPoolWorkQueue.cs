@@ -1512,10 +1512,7 @@ namespace System.Threading
                 }
             }
 
-            // Try stealing from all local queues, except localWsQueue.
-            // When we tried to pop from it, the localWsQueue was empty.
-            // It may be not empty right now, but either way
-            // we do not need or want to steal from it.
+            // Try stealing from all local queues.
             WorkStealingQueue[] wsQueues = _WorkStealingQueues;
             n = (uint)wsQueues.Length;
             mask = n - 1;
@@ -1523,11 +1520,6 @@ namespace System.Threading
             {
                 uint idx = (start + i * stride) & mask;
                 WorkStealingQueue? wsQueue = wsQueues[idx];
-                //if (wsQueue == localWsQueue)
-                //{
-                //    continue;
-                //}
-
                 workItem = wsQueue?.TrySteal(ref missedSteal);
                 if (workItem != null)
                 {
