@@ -905,13 +905,13 @@ namespace System.Threading
                                         _queueEnds.Enqueue = position + 1;
 
                                         // make the slot appear full in the current generation.
-                                        // since the slot on the left is still locked, only poppers/enqueuers can use current slot,
-                                        // but can use immediately.
+                                        // the slot can be used immediately by pop/enqueue/steal.
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
 
+                                        // TODO: VS
                                         // unlock prev slot
                                         // must be after we moved enq to the next slot, or someone may pop prev and break continuity of full slots.
-                                        prevSlot.SequenceNumber = prevSequenceNumber;
+                                        Volatile.Write(ref prevSlot.SequenceNumber, prevSequenceNumber);
                                         return true;
                                     }
 
@@ -1021,7 +1021,7 @@ namespace System.Threading
                         // then we have reached the dequeuing end of the segment.
                         // At this point in time, the segment is empty.
                         // TODO: VS CHECK
-                        if (diff == 1 + _slotsMask ) // || diff == Dequeue)
+                        if (diff == 1 + _slotsMask) // || diff == Dequeue)
                         {
                             return null;
                         }
@@ -1095,15 +1095,16 @@ namespace System.Threading
                             }
                         }
 
-                        if (diff == 0)
+                        if (!missedSteal)
                         {
-                            // Reached an empty slot. Since full slots are contiguous, finding an empty slot means that
-                            // for our purposes and for the moment the segment is empty.
-                        }
-                        else
-                        {
-                            // Contention with other thread. Must check this segment again later.
-                            missedSteal = true;
+                            // TODO: VS need a volatile.ReadBarrier somewhere here? (also check order of cost)
+                            // If the segment is truly empty then:
+                            // - the current slot is empty,
+                            // - the slot to the left is empty in the next gen and
+                            // - enq == deq
+                            int enq = _queueEnds.Enqueue;
+                            missedSteal = diff != Empty ||
+                                (enq != position && enq != position + FreezeOffset);
                         }
 
                         return null;
