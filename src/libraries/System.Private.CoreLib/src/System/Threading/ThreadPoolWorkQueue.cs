@@ -764,7 +764,9 @@ namespace System.Threading
             /// </summary>
             internal object? TryPop()
             {
-                return _enqSegment.TryPop();
+                // TODO: VS no popping
+                _ = this;
+                return null; // _enqSegment.TryPop();
             }
 
             internal bool CanPop => _enqSegment.CanPop;
@@ -1069,6 +1071,9 @@ namespace System.Threading
                             diff = Interlocked.CompareExchange(ref slot.SequenceNumber, position + Dequeue, sequenceNumber) - position;
                             if (diff == Full)
                             {
+                                // dequeue moves only forward. we cannot be ahead.
+                                Debug.Assert(position == _queueEnds.Dequeue);
+
                                 object? item;
 
                                 // TODO: VS CHECK
@@ -1098,13 +1103,7 @@ namespace System.Threading
                         if (!missedSteal)
                         {
                             // TODO: VS need a volatile.ReadBarrier somewhere here? (also check order of cost)
-                            // If the segment is truly empty then:
-                            // - the current slot is empty,
-                            // - the slot to the left is empty in the next gen and
-                            // - enq == deq
-                            int enq = _queueEnds.Enqueue;
-                            missedSteal = diff != Empty ||
-                                (enq != position && enq != position + FreezeOffset);
+                            missedSteal = diff != Empty || position != _queueEnds.Dequeue;
                         }
 
                         return null;
