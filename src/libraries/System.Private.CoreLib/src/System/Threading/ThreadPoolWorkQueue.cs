@@ -1103,7 +1103,18 @@ namespace System.Threading
                         if (!missedSteal)
                         {
                             // TODO: VS need a volatile.ReadBarrier somewhere here? (also check order of cost)
-                            missedSteal = diff != Empty || position != _queueEnds.Dequeue;
+                            if (diff != Empty)
+                            {
+                                missedSteal = true;
+                            }
+                            else
+                            {
+                                Interlocked.MemoryBarrier();
+                                if (_queueEnds.Dequeue != position)
+                                {
+                                    missedSteal = true;
+                                }
+                            }
                         }
 
                         return null;
@@ -2336,8 +2347,11 @@ namespace System.Threading
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(Task workItem)
         {
+            // TODO: VS suppress remove
+            _ = workItem;
+
             Debug.Assert(null != workItem);
-            return s_workQueue.TryRemove(workItem);
+            return false; // s_workQueue.TryRemove(workItem);
         }
 
         // Get all workitems.  Called by TaskScheduler in its debugger hooks.
