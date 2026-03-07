@@ -898,21 +898,24 @@ namespace System.Threading
                                     int sequenceNumber = slot.SequenceNumber;
                                     if (sequenceNumber == position)
                                     {
+                                        // Noone can use the current slot right now, since its state is Empty and the prev slot is locked.
+                                        // But once we advance Enqueue, the slot can be locked as a prev.
+                                        // We do not want that until we mark the slot as Full. So mark the slot as Changing.
+                                        // It does not need to be a CAS, but must happen before updating the Enqueue end.
+                                        slot.SequenceNumber = position + Change;
+
+                                        // Update Enqueue (must be done before marking the slot as full and after marking the slot as changing)
+                                        Volatile.Write(ref _queueEnds.Enqueue, position + 1);
+
+                                        // Fill the slot (must be done before the slot is marked as Full, ordering with above writes is unimportant)
                                         slot.Item = item;
 
-                                        // update Enqueue - must do before marking the slot as full.
-                                        // The order of updating Enqueue vs. inserting the item is irrelevant.
-                                        // We update the Enqueue after inserting. No operation on the Enqueue end
-                                        // can succeed until we mark the slot Full anyways.
-                                        _queueEnds.Enqueue = position + 1;
-
-                                        // make the slot appear full in the current generation.
-                                        // the slot can be used immediately by pop/enqueue/steal.
+                                        // Mark the slot as Full in the current generation.
+                                        // the slot can be used immediately by other threads.
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
 
-                                        // TODO: VS
-                                        // unlock prev slot
-                                        // must be after we moved enq to the next slot, or someone may pop prev and break continuity of full slots.
+                                        // Unlock the prev slot
+                                        // (must be after marking current as Full, can't allow both slots be Empty while write is in progress).
                                         Volatile.Write(ref prevSlot.SequenceNumber, prevSequenceNumber);
                                         return true;
                                     }
@@ -1022,8 +1025,7 @@ namespace System.Threading
                         // If the slot is empty (in the next generation) or in Dequeue state,
                         // then we have reached the dequeuing end of the segment.
                         // At this point in time, the segment is empty.
-                        // TODO: VS CHECK
-                        if (diff == 1 + _slotsMask) // || diff == Dequeue)
+                        if (diff == 1 + _slotsMask || diff == Dequeue)
                         {
                             return null;
                         }
@@ -1046,14 +1048,11 @@ namespace System.Threading
                     {
                         int position = _queueEnds.Dequeue;
 
-                        // if prev is not empty (in next generation), there might be more work in the segment.
-                        // NB: Enqueues are initiated by CAS-locking the prev slot.
-                        //     The write that activated the current worker should have done such CAS before we come here.
-                        //     It is possible though, that we will arrive here and see only the results of the CAS,
-                        //     while all other changes are still write-buffered in the other core.
-                        //     Thus, if prev slot was inconsistent prior to a failed attempt to dequeue,
-                        //     we cannot claim that the slot that we are responsible for is empty, and should treat
-                        //     this as a missed steal.
+                        // The emptiness criteria for steal is finding dequeue end pointing to a
+                        // slot that is empty in current generation (thus all subsequent slots are empty), and
+                        // prev is empty in the new generation. We need to check the prev slot before checking the current.
+                        // NB: while slots that are prev to dequeue end cannot become Full,they can be locked if
+                        //     the current slot is being filled up. In such case we cannot consider the current slot as empty.
                         if (!missedSteal)
                         {
                             missedSteal = Volatile.Read(ref this[position - 1].SequenceNumber) != (position + _slotsMask);
@@ -1076,7 +1075,7 @@ namespace System.Threading
 
                                 object? item;
 
-                                // TODO: VS CHECK
+                                // TODO: VS Check and enable
                                 //var enqPos = _queueEnds.Enqueue;
                                 //if (enqPos - position < MoveThreshold ||
                                 //    // "this" is a sentinel for a failed Move attempt
@@ -1100,21 +1099,9 @@ namespace System.Threading
                             }
                         }
 
-                        if (!missedSteal)
+                        if (diff != Empty)
                         {
-                            // TODO: VS need a volatile.ReadBarrier somewhere here? (also check order of cost)
-                            if (diff != Empty)
-                            {
-                                missedSteal = true;
-                            }
-                            else
-                            {
-                                Interlocked.MemoryBarrier();
-                                if (_queueEnds.Dequeue != position)
-                                {
-                                    missedSteal = true;
-                                }
-                            }
+                            missedSteal = true;
                         }
 
                         return null;
@@ -1478,6 +1465,7 @@ namespace System.Threading
             if (workItem != null)
             {
                 localWsQueue.Enqueue(workItem);
+                ThreadPool.EnsureWorkerRequested();
             }
         }
 
@@ -1638,8 +1626,10 @@ namespace System.Threading
             {
                 if (workItem == null)
                 {
-                    // TODO: VS CHECK
-                    //missedSteal = false;
+                    // TODO: VS Enable
+
+                    //// set missedSteal because we do not care here.
+                    //missedSteal = true;
                     //workItem = workQueue.Dequeue(ref missedSteal);
                     //if (workItem == null)
                     //{
@@ -1694,9 +1684,9 @@ namespace System.Threading
                     continue;
                 }
 
-                // The quantum expired, do any necessary periodic activities
+                // The quantum expired, do some per-quantum activities
 
-                // TODO: VS CHECK
+                // TODO: VS Does this help with any real scenario?
                 // Once in a while try stealing from a random workstealing queue, even if fifo queues have items.
                 // This is just to make sure that if a worker thread get preempted/busy for too long its workitems
                 // will be eventually stolen.
@@ -2347,7 +2337,7 @@ namespace System.Threading
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(Task workItem)
         {
-            // TODO: VS suppress remove
+            // TODO: VS Check and enable
             _ = workItem;
 
             Debug.Assert(null != workItem);

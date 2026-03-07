@@ -244,11 +244,10 @@ namespace System.Threading
                     oldCounts = threadPoolInstance._separated.counts;
                     newCounts = oldCounts;
                     incremented = newCounts.TryIncrementProcessingWork();
-                    // TODO: VS CHECK
-                    //if (newCounts == oldCounts)
-                    //{
-                    //    return;
-                    //}
+                    if (newCounts == oldCounts)
+                    {
+                        return;
+                    }
 
                     newCounts.NumExistingThreads = Math.Max(newCounts.NumProcessingWork, newCounts.NumExistingThreads);
                     if (threadPoolInstance._separated.counts.InterlockedCompareExchange(newCounts, oldCounts) == oldCounts)
