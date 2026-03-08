@@ -1446,27 +1446,6 @@ namespace System.Threading
             return false;
         }
 
-        public void TryStealFromRandom()
-        {
-            WorkStealingQueue? localWsQueue = GetPreferredWorkStealingQueue();
-            // only continue if there is a local queue and it is empty.
-            if (localWsQueue?.CanPop != false)
-            {
-                return;
-            }
-
-            uint rnd = localWsQueue.NextRnd();
-            WorkStealingQueue[] wsQueues = _WorkStealingQueues;
-            WorkStealingQueue? otherWsQueue = wsQueues[rnd & (wsQueues.Length - 1)];
-            bool missedSteal = false;
-            object? workItem = otherWsQueue?.TrySteal(ref missedSteal);
-            if (workItem != null)
-            {
-                localWsQueue.Enqueue(workItem);
-                ThreadPool.EnsureWorkerRequested();
-            }
-        }
-
         public object? Dequeue(ref bool missedSteal)
         {
             // Check for local work items
@@ -1624,17 +1603,13 @@ namespace System.Threading
             {
                 if (workItem == null)
                 {
-                    // TODO: VS Enable
-
-                    //// set missedSteal because we do not care here.
-                    //missedSteal = true;
-                    //workItem = workQueue.Dequeue(ref missedSteal);
-                    //if (workItem == null)
-                    //{
-                    //    return true;
-                    //}
-
-                    return true;
+                    // Set missedSteal so that we do not compute/track it. It is not actionable here.
+                    missedSteal = true;
+                    workItem = workQueue.Dequeue(ref missedSteal);
+                    if (workItem == null)
+                    {
+                        return true;
+                    }
                 }
 
                 if (workQueue._loggingEnabled && FrameworkEventSource.Log.IsEnabled())
@@ -1681,15 +1656,6 @@ namespace System.Threading
                 {
                     continue;
                 }
-
-                // The quantum expired, do some per-quantum activities
-
-                // TODO: VS Does this help with any real scenario?
-                // Once in a while try stealing from a random workstealing queue, even if fifo queues have items.
-                // This is just to make sure that if a worker thread get preempted/busy for too long its workitems
-                // will be eventually stolen.
-                // Typically we see enough stealing happening naturally that nothing happens here.
-                workQueue.TryStealFromRandom();
 
                 // Notify the threadpool that we executed through a quantum.
                 // This is also our opportunity to ask whether Hill Climbing wants
