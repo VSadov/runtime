@@ -67,14 +67,13 @@ namespace System.Threading
             // The index of the current queue in a group of similar queues.
             internal readonly uint _queueIndex;
 
-            [StructLayout(LayoutKind.Sequential)]
+            [StructLayout(LayoutKind.Explicit, Size = Internal.PaddingHelpers.CACHE_LINE_SIZE * 3)]
             internal struct PaddedQueueEnds
             {
-                internal PaddingFor32 _pad0;
+                [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 1)]
                 public int Dequeue;
-                internal PaddingFor32 _pad1;
+                [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 2)]
                 public int Enqueue;
-                internal PaddingFor32 _pad2;
             }
 
             internal WorkQueueBase(int index)
@@ -84,9 +83,6 @@ namespace System.Threading
 
             internal class QueueSegmentBase
             {
-                // Segment design is inspired by the algorithm outlined at:
-                // http://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
-
                 /// <summary>The array of items in this queue.  Each slot contains the item in that slot and its "sequence number".</summary>
                 internal readonly Slot[] _slots;
 
