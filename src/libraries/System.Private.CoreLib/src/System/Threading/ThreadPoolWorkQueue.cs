@@ -764,9 +764,7 @@ namespace System.Threading
             /// </summary>
             internal object? TryPop()
             {
-                // TODO: VS no popping
-                _ = this;
-                return null; // _enqSegment.TryPop();
+                return _enqSegment.TryPop();
             }
 
             internal bool CanPop => _enqSegment.CanPop;
@@ -1235,7 +1233,7 @@ namespace System.Threading
                                     if (slot.Item == callback)
                                     {
                                         slot.Item = null;
-
+                                        Internal.Console.Write("#");
                                         // unlock the slot.
                                         // must happen after setting slot to null
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
@@ -2337,11 +2335,8 @@ namespace System.Threading
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(Task workItem)
         {
-            // TODO: VS Check and enable
-            _ = workItem;
-
             Debug.Assert(null != workItem);
-            return false; // s_workQueue.TryRemove(workItem);
+            return s_workQueue.TryRemove(workItem);
         }
 
         // Get all workitems.  Called by TaskScheduler in its debugger hooks.
