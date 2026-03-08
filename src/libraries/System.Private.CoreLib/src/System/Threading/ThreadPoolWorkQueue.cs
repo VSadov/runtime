@@ -1069,11 +1069,10 @@ namespace System.Threading
 
                                 object? item;
 
-                                // TODO: VS Check and enable
-                                //var enqPos = _queueEnds.Enqueue;
-                                //if (enqPos - position < MoveThreshold ||
-                                //    // "this" is a sentinel for a failed Move attempt
-                                //    (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
+                                var enqPos = _queueEnds.Enqueue;
+                                if (enqPos - position < MoveThreshold ||
+                                    // "this" is a sentinel for a failed Move attempt
+                                    (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
@@ -1175,16 +1174,17 @@ namespace System.Threading
                                         // to make sure that poppers cannot see Moved slots as still incorrectly full when moving to the left of half.
                                         Volatile.Write(ref halfSlot.SequenceNumber, halfPosition + Full);
 
-                                        // advance the other enq, must be done before unlocking other prev slot, or someone could pop prev once unlocked.
-                                        // enables enq/pop
-                                        other._queueEnds.Enqueue = j;
+                                        // advance the other enq, enables enq/pop
+                                        // must be done before unlocking other prev slot, or someone could pop prev once unlocked.
+                                        // must be done after the enq slot are full, or someone may try locking slots while/before we mark them full.
+                                        Volatile.Write(ref other._queueEnds.Enqueue, j);
 
                                         // advance Dequeue, must be after halfSlot is restored - someone could immediately start Moving.
                                         Volatile.Write(ref _queueEnds.Dequeue, i);
 
                                         // unlock other prev slot
                                         // must be after we moved other enq to the next slot, or someone may pop prev and break continuity of full slots.
-                                        enqPrevSlot.SequenceNumber = prevSequenceNumber;
+                                        Volatile.Write(ref enqPrevSlot.SequenceNumber, prevSequenceNumber);
                                         return result;
                                     }
 
@@ -1229,7 +1229,6 @@ namespace System.Threading
                                     if (slot.Item == callback)
                                     {
                                         slot.Item = null;
-                                        Internal.Console.Write("#");
                                         // unlock the slot.
                                         // must happen after setting slot to null
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
