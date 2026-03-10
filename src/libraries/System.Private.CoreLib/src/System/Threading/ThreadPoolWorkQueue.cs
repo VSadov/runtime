@@ -966,7 +966,10 @@ namespace System.Threading
                 // Spin until we can be sure of one case or another.
                 internal object? TryPop()
                 {
-                    // Retry in a case of finding a removed item.
+                    // Retry in cases like contention or finding a removed item.
+                    // Contention is rare here, since this is "our" queue, but we may accidentally share
+                    // or have interference from stealing.
+                    SpinWait sw = default;
                     while (true)
                     {
                         int position = _queueEnds.Enqueue - 1;
@@ -1022,10 +1025,8 @@ namespace System.Threading
                             return null;
                         }
 
-                        // Contention. Not sure if current queue has items or not.
-                        // We can steal and execute somebody else's items, but that would not be in the context of the current queue.
-                        t_localQueue = null;
-                        return null;
+                        // Contention, we should try again after a delay
+                        sw.SpinOnce(sleep1Threshold: -1);
                     }
                 }
 
