@@ -1069,6 +1069,8 @@ namespace System.Threading
 
                                 object? item;
 
+                                // if we have a local queue (it is likely that we have and that it is empty) and
+                                // if the queue we are stealing from is "rich", try stealing half its items.
                                 var enqPos = _queueEnds.Enqueue;
                                 var localQueue = t_localQueue;
                                 if (localQueue == null ||
@@ -1076,6 +1078,7 @@ namespace System.Threading
                                     // "this" is a sentinel for a failed Move attempt
                                     (item = TryMove(localQueue._enqSegment, position, enqPos)) == this)
                                 {
+                                    // Move did not work out, so just take the item that we have reserved.
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
                                     slot.Item = null;
@@ -1433,11 +1436,9 @@ namespace System.Threading
             ThreadPool.EnsureWorkerRequested();
         }
 
-        internal bool TryRemove(Task callback)
+        internal static bool TryRemove(Task callback)
         {
-            // TODO: VS t_localQueue
-            WorkStealingQueue? WorkStealingQueue = GetPreferredWorkStealingQueue();
-            if (WorkStealingQueue != null && WorkStealingQueue.TryRemove(callback))
+            if (t_localQueue?.TryRemove(callback) == true)
             {
                 return true;
             }
@@ -1492,7 +1493,6 @@ namespace System.Threading
             }
 
             // Try stealing from all local queues.
-            // TODO: VS t_localQueue
             WorkStealingQueue[] wsQueues = _WorkStealingQueues;
             n = (uint)wsQueues.Length;
             mask = n - 1;
@@ -2305,7 +2305,7 @@ namespace System.Threading
         internal static bool TryPopCustomWorkItem(Task workItem)
         {
             Debug.Assert(null != workItem);
-            return s_workQueue.TryRemove(workItem);
+            return ThreadPoolWorkQueue.TryRemove(workItem);
         }
 
         // Get all workitems.  Called by TaskScheduler in its debugger hooks.
