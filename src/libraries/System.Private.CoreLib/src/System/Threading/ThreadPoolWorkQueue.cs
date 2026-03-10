@@ -1077,7 +1077,7 @@ namespace System.Threading
                                 if (localQueue == null ||
                                     enqPos - position < MoveThreshold ||
                                     // "this" is a sentinel for a failed Move attempt
-                                    (item = TryMove(localQueue._enqSegment, position, enqPos)) == this)
+                                    (item = TryMoveTo(localQueue._enqSegment, position, enqPos)) == this)
                                 {
                                     // Move did not work out, so just take the item that we have reserved.
                                     _queueEnds.Dequeue = position + 1;
@@ -1107,16 +1107,15 @@ namespace System.Threading
                     }
                 }
 
-                internal object? TryMove(QueueSegment other, int deqPosition, int enqPosition)
+                internal object? TryMoveTo(QueueSegment other, int deqPosition, int enqPosition)
                 {
                     // similar sequence as in TryEnqueue, since we will be adding items to the other queue.
                     int otherEnqPosition = other._queueEnds.Enqueue;
                     ref Slot enqPrevSlot = ref other[otherEnqPosition - 1];
                     int prevSequenceNumber = enqPrevSlot.SequenceNumber;
 
-                    var srcSlotsMask = _slotsMask;
                     // mask in case the segment is frozen and enqueue is inflated
-                    var count = (enqPosition - deqPosition) & srcSlotsMask;
+                    var count = (enqPosition - deqPosition) & _slotsMask;
                     int halfPosition = deqPosition + count / 2;
                     ref Slot halfSlot = ref this[halfPosition];
 
@@ -1139,42 +1138,39 @@ namespace System.Threading
                                     // make sure that half-way slot is still before enqueue
                                     // in fact give it more space - we do not want to Move all the items, especially if someone else popping them fast.
                                     var enq = deqPosition + ((_queueEnds.Enqueue - deqPosition) & _slotsMask);
+                                    var nextGenEmpty = _slotsMask + 1;
                                     if (enq - halfPosition > (MoveThreshold / 4))
                                     {
-                                        int i = deqPosition, j = otherEnqPosition;
-                                        ref Slot last = ref this[i++];
-
-                                        while (true)
+                                        int fromIdx = deqPosition, toIdx = otherEnqPosition;
+                                        // copy slots from "this" to "other", until the "other" is full or we reach the half-way point, whichever is first.
+                                        // the last "from" slot is not copied and returned instead.
+                                        ref Slot from = ref this[fromIdx++];
+                                        while (fromIdx < halfPosition)
                                         {
-                                            ref Slot next = ref this[i];
-                                            ref Slot to = ref other[j];
-
-                                            // the other slot must be empty
-                                            // next slot must be full
-                                            if (to.SequenceNumber != j || next.SequenceNumber != i + Full)
+                                            // the "to" slot must be empty. (not empty means no more space)
+                                            ref Slot to = ref other[toIdx];
+                                            if (to.SequenceNumber != toIdx)
                                             {
                                                 break;
                                             }
 
-                                            to.Item = last.Item;
+                                            to.Item = from.Item;
                                             // NB: the following enables "to" for dequeuing, which may immediately happen,
                                             // but not for popping, yet - since the other enq is locked.
-                                            Volatile.Write(ref to.SequenceNumber, j + Full);
+                                            Volatile.Write(ref to.SequenceNumber, toIdx + Full);
+                                            from.Item = null;
+                                            from = ref this[fromIdx];
+                                            // we are going to take from "from", one way or another, mark it empty
+                                            from.SequenceNumber = fromIdx + nextGenEmpty;
 
-                                            last.Item = null;
-
-                                            // we are going to take from next, mark it empty already
-                                            next.SequenceNumber = i + 1 + srcSlotsMask;
-                                            last = ref next;
-
-                                            i++;
-                                            j++;
+                                            fromIdx++;
+                                            toIdx++;
                                         }
 
                                         // return the last slot value
                                         // (it should already be marked empty, or will be, if it is at deqPosition)
-                                        var result = last.Item;
-                                        last.Item = null;
+                                        var result = from.Item;
+                                        from.Item = null;
 
                                         // restore the half slot, must be after all the full->empty slot transitioning
                                         // to make sure that poppers cannot see Moved slots as still incorrectly full when moving to the left of half.
@@ -1183,10 +1179,10 @@ namespace System.Threading
                                         // advance the other enq, enables enq/pop
                                         // must be done before unlocking other prev slot, or someone could pop prev once unlocked.
                                         // must be done after the enq slot are full, or someone may try locking slots while/before we mark them full.
-                                        Volatile.Write(ref other._queueEnds.Enqueue, j);
+                                        Volatile.Write(ref other._queueEnds.Enqueue, toIdx);
 
                                         // advance Dequeue, must be after halfSlot is restored - someone could immediately start Moving.
-                                        Volatile.Write(ref _queueEnds.Dequeue, i);
+                                        Volatile.Write(ref _queueEnds.Dequeue, fromIdx);
 
                                         // unlock other prev slot
                                         // must be after we moved other enq to the next slot, or someone may pop prev and break continuity of full slots.
