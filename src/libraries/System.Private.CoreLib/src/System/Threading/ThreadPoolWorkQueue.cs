@@ -760,6 +760,7 @@ namespace System.Threading
             /// </summary>
             internal object? TryPop()
             {
+                t_localQueue = this;
                 return _enqSegment.TryPop();
             }
 
@@ -965,10 +966,7 @@ namespace System.Threading
                 // Spin until we can be sure of one case or another.
                 internal object? TryPop()
                 {
-                    // Retry in cases like contention or finding a removed item.
-                    // Contention is rare here, since this is "our" queue, but we may accidentally share
-                    // or have interference from stealing.
-                    SpinWait sw = default;
+                    // Retry in a case of finding a removed item.
                     while (true)
                     {
                         int position = _queueEnds.Enqueue - 1;
@@ -1024,8 +1022,10 @@ namespace System.Threading
                             return null;
                         }
 
-                        // Contention, we should try again after a delay
-                        sw.SpinOnce(sleep1Threshold: -1);
+                        // Contention. Not sure if current queue has items or not.
+                        // We can steal and execute somebody else's items, but that would not be in the context of the current queue.
+                        t_localQueue = null;
+                        return null;
                     }
                 }
 
@@ -1070,9 +1070,11 @@ namespace System.Threading
                                 object? item;
 
                                 var enqPos = _queueEnds.Enqueue;
-                                if (enqPos - position < MoveThreshold ||
+                                var localQueue = t_localQueue;
+                                if (localQueue == null ||
+                                    enqPos - position < MoveThreshold ||
                                     // "this" is a sentinel for a failed Move attempt
-                                    (item = TryMove(ThreadPool.s_workQueue.GetOrAddWorkStealingQueue()._enqSegment, position, enqPos)) == this)
+                                    (item = TryMove(localQueue._enqSegment, position, enqPos)) == this)
                                 {
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
@@ -1286,6 +1288,9 @@ namespace System.Threading
         internal readonly WorkStealingQueue[] _WorkStealingQueues;
         internal readonly FifoWorkQueue[] _FifoQueues;
 
+        [ThreadStatic]
+        private static WorkStealingQueue? t_localQueue;
+
         public ThreadPoolWorkQueue()
         {
             uint queueCount = BitOperations.RoundUpToPowerOf2((uint)Environment.ProcessorCount);
@@ -1378,13 +1383,14 @@ namespace System.Threading
             if (_loggingEnabled && FrameworkEventSource.Log.IsEnabled())
                 FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            if (forceGlobal)
+            var localQueue = t_localQueue;
+            if (forceGlobal || localQueue == null)
             {
                 GetOrAddFifoQueue().Enqueue(callback);
             }
             else
             {
-                GetOrAddWorkStealingQueue().Enqueue(callback);
+                localQueue.Enqueue(callback);
             }
 
             ThreadPool.EnsureWorkerRequested();
@@ -1429,6 +1435,7 @@ namespace System.Threading
 
         internal bool TryRemove(Task callback)
         {
+            // TODO: VS t_localQueue
             WorkStealingQueue? WorkStealingQueue = GetPreferredWorkStealingQueue();
             if (WorkStealingQueue != null && WorkStealingQueue.TryRemove(callback))
             {
@@ -1444,8 +1451,8 @@ namespace System.Threading
         public object? Dequeue(ref bool missedSteal)
         {
             // Check for local work items
-            WorkStealingQueue? localWsQueue = GetPreferredWorkStealingQueue();
-            object? workItem = localWsQueue?.TryPop();
+            WorkStealingQueue localWsQueue = GetOrAddWorkStealingQueue();
+            object? workItem = localWsQueue.TryPop();
             if (workItem != null)
             {
                 return workItem;
@@ -1485,6 +1492,7 @@ namespace System.Threading
             }
 
             // Try stealing from all local queues.
+            // TODO: VS t_localQueue
             WorkStealingQueue[] wsQueues = _WorkStealingQueues;
             n = (uint)wsQueues.Length;
             mask = n - 1;
