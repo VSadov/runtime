@@ -910,7 +910,7 @@ namespace System.Threading
                                         Volatile.Write(ref slot.SequenceNumber, position + Full);
 
                                         // Unlock the prev slot
-                                        // (must be after marking current as Full, can't allow both slots be Empty while write is in progress).
+                                        // (must be after marking current as Full, can't allow both current and prev slots be Empty while write is in progress).
                                         Volatile.Write(ref prevSlot.SequenceNumber, prevSequenceNumber);
                                         return true;
                                     }
@@ -961,9 +961,8 @@ namespace System.Threading
                     }
                 }
 
-                // Returns null if determined that the segment is empty.
-                // Otherwise returns an item.
-                // Spin until we can be sure of one case or another.
+                // Returns the most recently added item, if there is one and we can pop it.
+                // Returns null if we should start stealing instead.
                 internal object? TryPop()
                 {
                     // Retry in cases like contention or finding a removed item.
@@ -1019,13 +1018,15 @@ namespace System.Threading
 
                         // If the slot is empty (in the next generation) or in Dequeue state,
                         // then we have reached the dequeuing end of the segment.
-                        // At this point in time, the segment is empty.
-                        if (diff == 1 + _slotsMask || diff == Dequeue)
+                        // Note: "Move" may not take all the elements that it wanted, so segment is not definitely empty,
+                        //       but it is still a good enough indication that we should start stealing.
+                        if (diff == 1 + _slotsMask || diff == Dequeue || _frozenForEnqueues)
                         {
                             return null;
                         }
 
                         // Contention, we should try again after a delay
+                        //                        Internal.Console.Write($"#{diff}# ");
                         sw.SpinOnce(sleep1Threshold: -1);
                     }
                 }
@@ -1070,14 +1071,14 @@ namespace System.Threading
 
                                 object? item;
 
-                                // if we have a local queue (it is likely that we have and that it is empty) and
-                                // if the queue we are stealing from is "rich", try stealing half its items.
-                                var enqPos = _queueEnds.Enqueue;
-                                var localQueue = t_localQueue;
-                                if (localQueue == null ||
-                                    enqPos - position < MoveThreshold ||
-                                    // "this" is a sentinel for a failed Move attempt
-                                    (item = TryMoveTo(localQueue._enqSegment, position, enqPos)) == this)
+                                // if we have a local queue (it is likely that we have it and that it is empty),
+                                // and if the queue we are stealing from is "rich", try stealing half its items.
+                                //var enqPos = _queueEnds.Enqueue;
+                                //var localQueue = t_localQueue;
+                                //if (localQueue == null ||
+                                //    enqPos - position < MoveThreshold ||
+                                //    // "this" is a sentinel for a failed Move attempt
+                                //    (item = TryMoveTo(localQueue._enqSegment, position, enqPos)) == this)
                                 {
                                     // Move did not work out, so just take the item that we have reserved.
                                     _queueEnds.Dequeue = position + 1;
@@ -1131,12 +1132,13 @@ namespace System.Threading
                             // it is uncommon, but we may see another Pop or Enqueue on the same segment.
                             if (other._queueEnds.Enqueue == otherEnqPosition)
                             {
-                                // lock the halfSlot, it must be full
-                                if (Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Change, halfPosition + Full) == halfPosition + Full)
+                                // Lock the halfSlot, it must be full
+                                // We use Dequeue state here as indication that items to the left will likely be not available for popping.
+                                if (Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Dequeue, halfPosition + Full) == halfPosition + Full)
                                 {
                                     // our enqueue could have changed before we locked half
                                     // make sure that half-way slot is still before enqueue
-                                    // in fact give it more space - we do not want to Move all the items, especially if someone else popping them fast.
+                                    // in fact give it more space - we do not want to Move all remaining items, especially if someone else popping them fast.
                                     var enq = deqPosition + ((_queueEnds.Enqueue - deqPosition) & _slotsMask);
                                     var nextGenEmpty = _slotsMask + 1;
                                     if (enq - halfPosition > (MoveThreshold / 4))
@@ -1173,7 +1175,7 @@ namespace System.Threading
                                         from.Item = null;
 
                                         // restore the half slot, must be after all the full->empty slot transitioning
-                                        // to make sure that poppers cannot see Moved slots as still incorrectly full when moving to the left of half.
+                                        // to make sure that poppers cannot see Moved slots as still incorrectly full.
                                         Volatile.Write(ref halfSlot.SequenceNumber, halfPosition + Full);
 
                                         // advance the other enq, enables enq/pop
@@ -1190,13 +1192,13 @@ namespace System.Threading
                                         return result;
                                     }
 
-                                    // failed to lock the half-way slot.
+                                    // failed to lock the actual half-way slot.
                                     // restore via CAS, in case target slot has been Moved to
-                                    Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Full, halfPosition + Change);
+                                    Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Full, halfPosition + Dequeue);
                                 }
                             }
 
-                            // failed to lock actual enqueue end, restore with CAS, in case target slot has been Moved to/from
+                            // failed to lock the actual enqueue end, restore with CAS, in case target slot has been Moved to/from
                             Interlocked.CompareExchange(ref enqPrevSlot.SequenceNumber, prevSequenceNumber, prevSequenceNumber + Change);
                         }
                     }
@@ -1383,8 +1385,8 @@ namespace System.Threading
             if (_loggingEnabled && FrameworkEventSource.Log.IsEnabled())
                 FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            var localQueue = t_localQueue;
-            if (forceGlobal || localQueue == null)
+            WorkStealingQueue? localQueue;
+            if (forceGlobal || (localQueue = t_localQueue) == null)
             {
                 GetOrAddFifoQueue().Enqueue(callback);
             }
