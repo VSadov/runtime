@@ -1026,7 +1026,6 @@ namespace System.Threading
                         }
 
                         // Contention, we should try again after a delay
-                        //                        Internal.Console.Write($"#{diff}# ");
                         sw.SpinOnce(sleep1Threshold: -1);
                     }
                 }
