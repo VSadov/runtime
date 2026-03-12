@@ -171,7 +171,7 @@ namespace System.Threading
                         // If the queue is not quiescent, races are unavoidable and the result is approximation.
                         // Read the dequeue first, so that overestimating is more likely than underestimating.
                         int deq = Volatile.Read(ref _queueEnds.Dequeue);
-                        return _queueEnds.Enqueue - deq;
+                        return (_queueEnds.Enqueue - deq) & _slotsMask;
                     }
                 }
 
