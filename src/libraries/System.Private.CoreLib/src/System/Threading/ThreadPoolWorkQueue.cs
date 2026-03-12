@@ -1073,12 +1073,10 @@ namespace System.Threading
 
                                 // if we have a local queue (it is likely that we have it and that it is empty),
                                 // and if the queue we are stealing from is "rich", try stealing half its items.
-                                //var enqPos = _queueEnds.Enqueue;
-                                //var localQueue = t_localQueue;
-                                //if (localQueue == null ||
-                                //    enqPos - position < MoveThreshold ||
-                                //    // "this" is a sentinel for a failed Move attempt
-                                //    (item = TryMoveTo(localQueue._enqSegment, position, enqPos)) == this)
+                                var enqPos = _queueEnds.Enqueue;
+                                if (enqPos - position < MoveThreshold ||
+                                    // "this" is a sentinel for a failed Move attempt
+                                    (item = TryMove(t_localQueue!._enqSegment, position, enqPos)) == this)
                                 {
                                     // Move did not work out, so just take the item that we have reserved.
                                     _queueEnds.Dequeue = position + 1;
@@ -1108,15 +1106,22 @@ namespace System.Threading
                     }
                 }
 
-                internal object? TryMoveTo(QueueSegment other, int deqPosition, int enqPosition)
+                internal object? TryMove(QueueSegment other, int deqPosition, int enqPosition)
                 {
                     // similar sequence as in TryEnqueue, since we will be adding items to the other queue.
                     int otherEnqPosition = other._queueEnds.Enqueue;
                     ref Slot enqPrevSlot = ref other[otherEnqPosition - 1];
                     int prevSequenceNumber = enqPrevSlot.SequenceNumber;
 
-                    // mask in case the segment is frozen and enqueue is inflated
+                    // Mask the count in case the segment is frozen and enqueue is inflated.
                     var count = (enqPosition - deqPosition) & _slotsMask;
+                    // Recheck after masking. The outer check does not mask for simplicity.
+                    if (count < MoveThreshold)
+                    {
+                        // fail
+                        return this;
+                    }
+
                     int halfPosition = deqPosition + count / 2;
                     ref Slot halfSlot = ref this[halfPosition];
 
@@ -1147,23 +1152,28 @@ namespace System.Threading
                                         // copy slots from "this" to "other", until the "other" is full or we reach the half-way point, whichever is first.
                                         // the last "from" slot is not copied and returned instead.
                                         ref Slot from = ref this[fromIdx++];
-                                        while (fromIdx < halfPosition)
+                                        while (true)
                                         {
-                                            // the "to" slot must be empty. (not empty means no more space)
+                                            ref Slot next = ref this[fromIdx];
                                             ref Slot to = ref other[toIdx];
-                                            if (to.SequenceNumber != toIdx)
+
+                                            // the "to" slot must be empty. (not empty means no more space)
+                                            // the "next" slot must be full (any write must be completed, this also takes care of stopping at halfSlot)
+                                            if (Volatile.Read(ref to.SequenceNumber) != toIdx ||
+                                                Volatile.Read(ref next.SequenceNumber) != fromIdx + Full)
                                             {
                                                 break;
                                             }
 
                                             to.Item = from.Item;
-                                            // NB: the following enables "to" for dequeuing, which may immediately happen,
+                                            // Note: the following enables "to" for dequeuing, which may immediately happen,
                                             // but not for popping, yet - since the other enq is locked.
                                             Volatile.Write(ref to.SequenceNumber, toIdx + Full);
                                             from.Item = null;
-                                            from = ref this[fromIdx];
-                                            // we are going to take from "from", one way or another, mark it empty
-                                            from.SequenceNumber = fromIdx + nextGenEmpty;
+
+                                            // we are going to take from next, mark it empty already
+                                            next.SequenceNumber = fromIdx + nextGenEmpty;
+                                            from = ref next;
 
                                             fromIdx++;
                                             toIdx++;
@@ -1198,7 +1208,7 @@ namespace System.Threading
                                 }
                             }
 
-                            // failed to lock the actual enqueue end, restore with CAS, in case target slot has been Moved to/from
+                            // failed to lock actual enqueue end, restore with CAS, in case target slot has been Moved to/from
                             Interlocked.CompareExchange(ref enqPrevSlot.SequenceNumber, prevSequenceNumber, prevSequenceNumber + Change);
                         }
                     }
