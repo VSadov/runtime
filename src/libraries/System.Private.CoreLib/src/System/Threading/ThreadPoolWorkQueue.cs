@@ -1146,7 +1146,7 @@ namespace System.Threading
                                     // in fact give it more space - we do not want to Move all remaining items, especially if someone else popping them fast.
                                     var enq = deqPosition + ((_queueEnds.Enqueue - deqPosition) & _slotsMask);
                                     var nextGenEmpty = _slotsMask + 1;
-                                    if (enq - halfPosition > (MoveThreshold / 4))
+                                    if (enq - halfPosition > (count / 4))
                                     {
                                         int fromIdx = deqPosition, toIdx = otherEnqPosition;
                                         // copy slots from "this" to "other", until the "other" is full or we reach the half-way point, whichever is first.
@@ -1171,7 +1171,7 @@ namespace System.Threading
                                             Volatile.Write(ref to.SequenceNumber, toIdx + Full);
                                             from.Item = null;
 
-                                            // we are going to take from next, mark it empty already
+                                            // We are going to take from next, mark it empty.
                                             next.SequenceNumber = fromIdx + nextGenEmpty;
                                             from = ref next;
 
