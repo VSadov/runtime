@@ -14,10 +14,12 @@ public class CovariantReturns
         Test1().Wait();
     }
 
-    [Fact]
-    public static void Test2EntryPoint()
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task Test0()
     {
-        Test2().Wait();
+        Base b = new Base();
+        await b.M1();
+        Assert.Equal("Base.M1;", b.Trace);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
