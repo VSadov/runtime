@@ -111,13 +111,12 @@ namespace System.Threading
             return WaitSlow(timeoutMs, activeThreadCount);
         }
 
-        private bool WaitSlow(int timeoutMs, short activeThreadCount)
+        private bool WaitSlow(int timeoutMs, short totalThreadCount)
         {
             // Now spin briefly with exponential backoff.
             // We estimate availability of CPU resources and limit spin count accordingly.
             // See comments on DefaultSemaphoreSpinCountLimit for more details.
-            // Count current thread as active for the duration of spinning.
-            int active = activeThreadCount + 1;
+            int active = totalThreadCount - _separated._counts.WaiterCount;
             int available = _procCount - active;
             int spinStep = _maxSpinCount * 2 / _procCount;
             // With activeThreadCount arbitrarily large and _procCount arbitrarily small
@@ -127,12 +126,18 @@ namespace System.Threading
             // clamp to [0, _maxSpinCount] range.
             int spinsRemaining = (int)Math.Clamp(spinsRemainingLong, 0, _maxSpinCount);
 
+            ushort progressCountAtStart = _separated._counts.ProgressCount;
             uint iteration = 0;
             while (spinsRemaining > 0)
             {
                 spinsRemaining -= Backoff.Exponential(iteration++);
 
                 Counts counts = _separated._counts;
+                if (counts.ProgressCount != progressCountAtStart)
+                {
+                    break;
+                }
+
                 if (counts.SignalCount != 0)
                 {
                     Counts newCounts = counts;
@@ -430,6 +435,7 @@ namespace System.Threading
             private const byte SignalCountShift = 0;
             private const byte WaiterCountShift = 16;
             private const byte CountOfWaitersSignaledToWakeShift = 32;
+            private const byte ProgressCountShift = 48;
 
             private ulong _data;
 
@@ -440,6 +446,11 @@ namespace System.Threading
             public ushort SignalCount
             {
                 get => GetUInt16Value(SignalCountShift);
+            }
+
+            public ushort ProgressCount
+            {
+                get => GetUInt16Value(ProgressCountShift);
             }
 
             public Counts InterlockedIncrementSignalCount()
@@ -453,6 +464,7 @@ namespace System.Threading
             {
                 Debug.Assert(SignalCount != 0);
                 _data -= (ulong)1 << SignalCountShift;
+                _data += (ulong)1 << ProgressCountShift;
             }
 
             public ushort WaiterCount
