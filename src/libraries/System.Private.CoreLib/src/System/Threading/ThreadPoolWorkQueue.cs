@@ -1573,6 +1573,7 @@ namespace System.Threading
                 // We need to make sure someone will do another pass.
                 if (missedSteal)
                 {
+                    Thread.Sleep(1);
                     ThreadPool.EnsureWorkerRequested();
                 }
 
