@@ -7948,7 +7948,7 @@ MethodDesc* MethodTable::GetParallelMethodDesc(MethodDesc* pDefMD, AsyncVariantL
     }
     CONTRACTL_END;
 
-    if (pDefMD->AsyncVariantKind() == asyncVariantLookup)
+    if (pDefMD->MatchesAsyncVariantLookup(asyncVariantLookup))
     {
         return GetParallelMethodDesc(pDefMD);
     }
@@ -7964,7 +7964,7 @@ MethodDesc* MethodTable::GetParallelMethodDesc(MethodDesc* pDefMD, AsyncVariantL
             MethodDesc* pMD = it.GetMethodDesc();
             if (pMD->GetMemberDef() == tkMethod
                 && pMD->GetModule() == mod
-                && (pMD->AsyncVariantKind() == asyncVariantLookup))
+                && (pMD->MatchesAsyncVariantLookup(asyncVariantLookup)))
             {
                 return pMD;
             }
