@@ -871,6 +871,12 @@ MethodTableBuilder::MethodSignature::SignaturesEquivalent(
 {
     STANDARD_VM_CONTRACT;
 
+    //if (sig1.m_asyncVariantKind != AsyncVariantKind::None ||
+    //    sig2.m_asyncVariantKind != AsyncVariantKind::None)
+    //{
+    //    allowCovariantReturn = false;
+    //}
+
     return !!MetaSig::CompareMethodSigs(
         sig1.GetSignature(), static_cast<DWORD>(sig1.GetSignatureLength()), sig1.GetModule(), sig1.GetSubstitution(),
         sig2.GetSignature(), static_cast<DWORD>(sig2.GetSignatureLength()), sig2.GetModule(), sig2.GetSubstitution(),
@@ -2698,7 +2704,8 @@ MethodTableBuilder::EnumerateClassMethods()
     // as each async method may have two variants.
     // The method count is typically a modest number though.
     // We will reserve twice the size for the builder, up to the max, just in case.
-    DWORD cMethUpperBound = cMethAndGaps * 2;
+    // TODO: VS "3" only if has covariant returns (or methodimpls?), otherwise 2.
+    DWORD cMethUpperBound = cMethAndGaps * 3;
     if ((DWORD)MAX_SLOT_INDEX <= cMethUpperBound)
     {
         cMethUpperBound = MAX_SLOT_INDEX - 1;
@@ -2782,10 +2789,11 @@ MethodTableBuilder::EnumerateClassMethods()
         SigParser sig(pMemberSignature, cMemberSignature);
 
         ULONG offsetOfAsyncDetails = 0;
+        ULONG elementTypeLength = 0;
         bool returnsValueTask = false;
         MethodReturnKind returnKind = IsDelegate() ?
             MethodReturnKind::NormalMethod :
-            ClassifyMethodReturnKind(sig, GetModule(), &offsetOfAsyncDetails, &returnsValueTask);
+            ClassifyMethodReturnKind(sig, GetModule(), &offsetOfAsyncDetails, &elementTypeLength, &returnsValueTask);
 
         bool hasGenericMethodArgsComputed = false;
         bool hasGenericMethodArgs = this->GetModule()->m_pMethodIsGenericMap->IsGeneric(tok, &hasGenericMethodArgsComputed);
@@ -3338,7 +3346,7 @@ MethodTableBuilder::EnumerateClassMethods()
         // Create a new bmtMDMethod representing this method and add it to the
         // declared method list.
         //
-        for (int insertCount = 0; insertCount < 2; insertCount++)
+        for (int insertCount = 0; insertCount < 3; insertCount++)
         {
             if (bmtMethod->m_cDeclaredMethods >= bmtMethod->m_cMaxDeclaredMethods)
             {
@@ -3410,20 +3418,37 @@ MethodTableBuilder::EnumerateClassMethods()
                 if (!IsMiAsync(dwImplFlags))
                     asyncFlags |= AsyncMethodFlags::Thunk;
 
+                if (insertCount == 2)
+                    asyncFlags |= (AsyncMethodFlags::Thunk | AsyncMethodFlags::ReturnDroppingThunk);
+
                 // Here we construct the signature of async call variant given its task-returning counterpart.
                 // It is basically just removing the Task/ValueTask part of the return type and keeping
                 // the token for T or inserting void instead.
                 // The rest of the signature stays exactly the same.
-                ULONG tokenLen = 0;
-                if (returnKind == MethodReturnKind::NonGenericTaskReturningMethod)
+                ULONG taskTokenLen = 0;
+
+                if (insertCount == 2)
+                {
+                    // from ". . . Task<tk> . . . Method(args);"    we construct
+                    //      ". . .    void  . . . Method(args);"
+
+                    taskTokenOffsetFromAsyncDetailsOffset = 2;
+                    taskTokenLen = CorSigUncompressedDataSize(&pMemberSignature[offsetOfAsyncDetails + taskTokenOffsetFromAsyncDetailsOffset]);
+
+                    taskTypePrefixSize = 2 + taskTokenLen + 1 + elementTypeLength; // E_T_GENERICINST E_T_CLASS/E_T_VALUETYPE <TokenOfTask> 1 <elementType>
+                    taskTypePrefixReplacementSize = 1;                             // ELEMENT_TYPE_VOID
+
+                    cAsyncThunkMemberSignature = cMemberSignature - taskTypePrefixSize + taskTypePrefixReplacementSize;
+                }
+                else if (returnKind == MethodReturnKind::NonGenericTaskReturningMethod)
                 {
                     // from ". . . Task . . . Method(args);"        we construct
                     //      ". . . void . . . Method(args);"
 
                     taskTokenOffsetFromAsyncDetailsOffset = 1;
-                    tokenLen = CorSigUncompressedDataSize(&pMemberSignature[offsetOfAsyncDetails + taskTokenOffsetFromAsyncDetailsOffset]);
+                    taskTokenLen = CorSigUncompressedDataSize(&pMemberSignature[offsetOfAsyncDetails + taskTokenOffsetFromAsyncDetailsOffset]);
 
-                    taskTypePrefixSize = 1 + tokenLen;     // E_T_CLASS/E_T_VALUETYPE <TokenOfTask>
+                    taskTypePrefixSize = 1 + taskTokenLen; // E_T_CLASS/E_T_VALUETYPE <TokenOfTask>
                     taskTypePrefixReplacementSize = 1;     // ELEMENT_TYPE_VOID
 
                     cAsyncThunkMemberSignature = cMemberSignature - taskTypePrefixSize + taskTypePrefixReplacementSize;
@@ -3434,9 +3459,9 @@ MethodTableBuilder::EnumerateClassMethods()
                     //      ". . .      tk  . . . Method(args);"
 
                     taskTokenOffsetFromAsyncDetailsOffset = 2;
-                    tokenLen = CorSigUncompressedDataSize(&pMemberSignature[offsetOfAsyncDetails + taskTokenOffsetFromAsyncDetailsOffset]);
+                    taskTokenLen = CorSigUncompressedDataSize(&pMemberSignature[offsetOfAsyncDetails + taskTokenOffsetFromAsyncDetailsOffset]);
 
-                    taskTypePrefixSize = 2 + tokenLen + 1; // E_T_GENERICINST E_T_CLASS/E_T_VALUETYPE <TokenOfTask> 1
+                    taskTypePrefixSize = 2 + taskTokenLen + 1; // E_T_GENERICINST E_T_CLASS/E_T_VALUETYPE <TokenOfTask> 1
                     taskTypePrefixReplacementSize = 0;
 
                     cAsyncThunkMemberSignature = cMemberSignature - taskTypePrefixSize + taskTypePrefixReplacementSize;
@@ -3458,7 +3483,7 @@ MethodTableBuilder::EnumerateClassMethods()
                 _ASSERTE((cMemberSignature - originalRemainingSigOffset) == (cAsyncThunkMemberSignature - newRemainingSigOffset));
                 memcpy(pNewMemberSignature + newRemainingSigOffset, pMemberSignature + originalRemainingSigOffset, cMemberSignature - originalRemainingSigOffset);
 
-                if (returnKind == MethodReturnKind::NonGenericTaskReturningMethod)
+                if (returnKind == MethodReturnKind::NonGenericTaskReturningMethod || insertCount == 2)
                 {
                     pNewMemberSignature[newRemainingSigOffset - 1] = ELEMENT_TYPE_VOID;
                 }
@@ -3514,6 +3539,34 @@ MethodTableBuilder::EnumerateClassMethods()
             // Normal methods only insert a single method
             if (!IsTaskReturning(returnKind))
             {
+                break;
+            }
+
+            if (insertCount == 1)
+            {
+                // if we return Task<T>
+                if (!returnsValueTask &&
+                    returnKind == MethodReturnKind::GenericTaskReturningMethod &&
+                    !this->IsValueClass() &&
+                    !IsMdAbstract(dwMemberAttrs) &&
+                    IsMdVirtual(dwMemberAttrs))
+                {
+                    //// also this is a methodimpl
+                    //if (pNewMethod->GetMethodImplType() == METHOD_IMPL)
+                    //{
+                    //    // check if "need to check for covariance" and add void returning variant
+
+                    //    // TODO: base may be Object-returning, then we do not care. Probably ok.
+
+                    //    // for starters add void returning variant always.
+
+                    //    // void returning should classify as IsAsyncVariant. It is always a thunk.
+
+                    //    // when matching to base we should either require return match for variants or skip/overwrite when see void returning.
+                    //}
+                    continue;
+                }
+
                 break;
             }
         }
