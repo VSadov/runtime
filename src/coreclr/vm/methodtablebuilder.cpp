@@ -871,12 +871,6 @@ MethodTableBuilder::MethodSignature::SignaturesEquivalent(
 {
     STANDARD_VM_CONTRACT;
 
-    //if (sig1.m_asyncVariantKind != AsyncVariantKind::None ||
-    //    sig2.m_asyncVariantKind != AsyncVariantKind::None)
-    //{
-    //    allowCovariantReturn = false;
-    //}
-
     return !!MetaSig::CompareMethodSigs(
         sig1.GetSignature(), static_cast<DWORD>(sig1.GetSignatureLength()), sig1.GetModule(), sig1.GetSubstitution(),
         sig2.GetSignature(), static_cast<DWORD>(sig2.GetSignatureLength()), sig2.GetModule(), sig2.GetSubstitution(),
@@ -6058,7 +6052,8 @@ MethodTableBuilder::ProcessMethodImpls()
                                 declMethod = FindDeclMethodOnClassInHierarchy(it, pDeclMT, declSig, asyncVariantOfDeclToFind);
                             }
 
-                            if (declMethod.IsNull() && asyncVariantOfDeclToFind == AsyncVariantLookup::Async)
+                            if (asyncVariantOfDeclToFind == AsyncVariantLookup::Async &&
+                                (declMethod.IsNull() || !MethodSignature::SignaturesEquivalent(declMethod.GetMethodSignature(), it->GetMethodSignature(), FALSE)))
                             {
                                 // when implementing/overriding, we may see a Task-returning method
                                 // which matches a T-returning method in the interface/base, which would not have variants.
