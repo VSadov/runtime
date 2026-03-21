@@ -1743,7 +1743,7 @@ public:
 
     MethodDesc* GetAsyncVariant(BOOL allowInstParam = TRUE)
     {
-        _ASSERT(!IsAsyncVariantMethod());
+        _ASSERT(!IsAsyncVariantMethod() || IsReturnDroppingThunk());
         return FindOrCreateAssociatedMethodDesc(this, GetMethodTable(), FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Async, FALSE, TRUE);
     }
 
@@ -2030,6 +2030,16 @@ public:
         return hasAsyncFlags(asyncFlags, AsyncMethodFlags::IsAsyncVariant);
     }
 
+    inline bool IsReturnDroppingThunk() const
+    {
+        LIMITED_METHOD_DAC_CONTRACT;
+        if (!HasAsyncMethodData())
+            return false;
+
+        AsyncMethodFlags asyncFlags = GetAddrOfAsyncMethodData()->flags;
+        return hasAsyncFlags(asyncFlags, AsyncMethodFlags::ReturnDroppingThunk);
+    }
+
     inline bool MatchesAsyncVariantLookup(AsyncVariantLookup lookup) const
     {
         LIMITED_METHOD_DAC_CONTRACT;
@@ -2257,7 +2267,9 @@ private:
     bool TryGenerateUnsafeAccessor(DynamicResolver** resolver, COR_ILMETHOD_DECODER** methodILDecoder);
     void EmitTaskReturningThunk(MethodDesc* pAsyncCallVariant, MetaSig& thunkMsig, ILStubLinker* pSL);
     void EmitAsyncMethodThunk(MethodDesc* pTaskReturningVariant, MetaSig& msig, ILStubLinker* pSL);
+    void EmitReturnDroppingThunk(MethodDesc* pAsyncOtherVariant, MetaSig& msig, ILStubLinker* pSL);
     SigPointer GetAsyncThunkResultTypeSig();
+    int GetTokenForThunkTarget(ILCodeStream* pCode, MethodDesc* md);
     int GetTokenForGenericMethodCallWithAsyncReturnType(ILCodeStream* pCode, MethodDesc* md);
     int GetTokenForGenericTypeMethodCallWithAsyncReturnType(ILCodeStream* pCode, MethodDesc* md);
 public:
