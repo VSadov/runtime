@@ -1743,26 +1743,30 @@ public:
 
     MethodDesc* GetOrdinaryVariant(BOOL allowInstParam = TRUE)
     {
-        return FindOrCreateAssociatedMethodDesc(this, GetMethodTable(), FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Ordinary, FALSE, TRUE);
+        MethodTable* mt = GetMethodTable();
+        return FindOrCreateAssociatedMethodDesc(this, mt, FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Ordinary, FALSE, TRUE, mt->GetLoadLevel());
     }
 
     // same as above, but with allowCreate = FALSE
     // for rare cases where we cannot allow GC, but we know that the other variant is already created.
     MethodDesc* GetOrdinaryVariantNoCreate(BOOL allowInstParam = TRUE)
     {
-        return FindOrCreateAssociatedMethodDesc(this, GetMethodTable(), FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Ordinary, FALSE, FALSE);
+        MethodTable* mt = GetMethodTable();
+        return FindOrCreateAssociatedMethodDesc(this, mt, FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Ordinary, FALSE, FALSE, mt->GetLoadLevel());
     }
 
     MethodDesc* GetAsyncVariant(BOOL allowInstParam = TRUE)
     {
-        return FindOrCreateAssociatedMethodDesc(this, GetMethodTable(), FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Async, FALSE, TRUE);
+        MethodTable* mt = GetMethodTable();
+        return FindOrCreateAssociatedMethodDesc(this, mt, FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Async, FALSE, TRUE, mt->GetLoadLevel());
     }
 
     // same as above, but with allowCreate = FALSE
     // for rare cases where we cannot allow GC, but we know that the other variant is already created.
     MethodDesc* GetAsyncVariantNoCreate(BOOL allowInstParam = TRUE)
     {
-        return FindOrCreateAssociatedMethodDesc(this, GetMethodTable(), FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Async, FALSE, FALSE);
+        MethodTable* mt = GetMethodTable();
+        return FindOrCreateAssociatedMethodDesc(this, mt, FALSE, GetMethodInstantiation(), allowInstParam, AsyncVariantLookup::Async, FALSE, FALSE, mt->GetLoadLevel());
     }
 
     // True if a MD is an funny BoxedEntryPointStub (not from the method table) or
