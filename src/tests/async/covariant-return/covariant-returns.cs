@@ -134,11 +134,14 @@ namespace AsyncMicro
 {
     public class Program
     {
+        internal static string Trace;
+
         [Fact]
         public static void TestPrRepro()
         {
             Derived2 test = new();
             Test(test).GetAwaiter().GetResult();
+            Assert.Equal("Task<int> Derived2.Foo;Task<int> Derived.Foo;", Trace);
         }
 
         private static async Task Test(Base b)
@@ -150,7 +153,7 @@ namespace AsyncMicro
         {
             public virtual async Task Foo()
             {
-                Console.WriteLine("Task Base.Foo");
+                Trace += "Task Base.Foo;";
             }
         }
 
@@ -158,7 +161,7 @@ namespace AsyncMicro
         {
             public override async Task<int> Foo()
             {
-                Console.WriteLine("Task<int> Derived.Foo");
+                Trace += "Task<int> Derived.Foo;";
                 return 123;
             }
         }
@@ -167,7 +170,7 @@ namespace AsyncMicro
         {
             public override async Task<int> Foo()
             {
-                Console.WriteLine("Task<int> Derived2.Foo");
+                Trace += "Task<int> Derived2.Foo;";
                 return await base.Foo();
             }
         }
