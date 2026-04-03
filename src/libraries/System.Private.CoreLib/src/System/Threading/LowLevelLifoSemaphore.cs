@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Internal;
 
 namespace System.Threading
 {
@@ -12,29 +13,65 @@ namespace System.Threading
     /// A LIFO semaphore.
     /// Waits on this semaphore are uninterruptible.
     /// </summary>
-    internal sealed partial class LowLevelLifoSemaphore : IDisposable
+    internal sealed partial class LowLevelLifoSemaphore
     {
+        // Spinning in the threadpool semaphore is not always useful and benefits vary greatly by scenario.
+        //
+        // Example1: An app periodically with rough time span T runs a task and waits for task`s completion.
+        //           The app would benefit if a threadpool worker spins for longer than T as worker would not need to be woken up.
+        //
+        // Example2: The new workitems may be produced by non-pool threads and could only arrive if pool threads start blocking.
+        //           For this scenario, once pool is out of work, we benefit from promptly releasing cores.
+        //
+        // Intuitively, when a threadpool has a lot of active threads, they can absorb an occasional extra task, thus benefits from
+        // spinning could be less, while danger of starving non-threadpool threads is higher.
+        //
+        // Based on the above we use the following heuristic (certainly open to improvements):
+        // * We will limit spinning to roughly 256 spinwaits, each taking ~35-40ns. That should be under 10 usec total.
+        //    For reference the wakeup latency of a futex/event with threads queued up is in 4-20 usec range. (year 2026)
+        // * We will dial spin count according to the number of available cores. (i.e. proc_num - active_workers).
+        //                                               |    _ |
+        // * We will use a "hard sigmoid" function like: |   /  | that will map "available cores" to spin count.
+        //                                               | _/   |
+        //    - when threadpool threads use more than 3/4 cores, we do not spin
+        //    - when threadpool occupies 1/4 cores or less we spin to the max,
+        //    - in between we have a linear gain.
+        //    all should be smoothed somewhat by the randomness of individual spin iterations.
+
+        private const int DefaultSemaphoreSpinCountLimit = 256;
+
         private CacheLineSeparatedCounts _separated;
 
         private readonly int _maximumSignalCount;
-        private readonly uint _spinCount;
+        private readonly int _maxSpinCount;
         private readonly Action _onWait;
+        private readonly int _procCount;
 
-        public LowLevelLifoSemaphore(int maximumSignalCount, uint spinCount, Action onWait)
+        public LowLevelLifoSemaphore(int maximumSignalCount, Action onWait)
         {
             Debug.Assert(maximumSignalCount > 0);
             Debug.Assert(maximumSignalCount <= short.MaxValue);
-            Debug.Assert(spinCount >= 0);
 
             _separated = default;
             _maximumSignalCount = maximumSignalCount;
-            _spinCount = spinCount;
             _onWait = onWait;
+            _procCount = Environment.ProcessorCount;
 
             Create(maximumSignalCount);
+
+            _maxSpinCount = AppContextConfigHelper.GetInt32ComPlusOrDotNetConfig(
+                "System.Threading.ThreadPool.UnfairSemaphoreSpinLimit",
+                "ThreadPool_UnfairSemaphoreSpinLimit",
+                DefaultSemaphoreSpinCountLimit,
+                false);
+
+            // Do not accept unreasonably huge _maxSpinCount value to prevent overflows.
+            // Also, 1+ minute spins do not make sense.
+            if (_maxSpinCount > 1000000)
+                _maxSpinCount = DefaultSemaphoreSpinCountLimit;
         }
 
-        public bool Wait(int timeoutMs)
+        public bool Wait(int timeoutMs, short tpThreadCount)
         {
             Debug.Assert(timeoutMs >= -1);
 
@@ -54,21 +91,33 @@ namespace System.Threading
 
             RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
 
-            return WaitSlow(timeoutMs);
+            return WaitSlow(timeoutMs, tpThreadCount);
         }
 
-        private bool WaitSlow(int timeoutMs)
+        private bool WaitSlow(int timeoutMs, short tpThreadCount)
         {
-            // Now spin briefly with exponential backoff.
-            // We use random exponential backoff because:
-            // - we do not know how soon a signal appears, but with exponential backoff we will not be more than 2x off the ideal guess
-            // - it gives mild preference to the most recent spinners. We want LIFO here so that hot(er) threads keep running.
-            // - it is possible that spinning workers prevent non-pool threads from submitting more work to the pool,
-            //   so we want some workers to sleep earlier than others.
-            uint spinCount = Environment.IsSingleProcessor ? 0 : _spinCount;
-            for (uint iteration = 0; iteration < spinCount; iteration++)
+            _ = tpThreadCount;
+
+            //// Now spin briefly with exponential backoff.
+            //// We estimate availability of CPU resources and limit spin count accordingly.
+            //// See comments on DefaultSemaphoreSpinCountLimit for more details.
+            //// Count current thread as active for the duration of spinning.
+            //int active = tpThreadCount - _separated._counts.WaiterCount;
+            //int available = _procCount - active;
+            //int spinStep = _maxSpinCount * 2 / _procCount;
+            //// With activeThreadCount arbitrarily large and _procCount arbitrarily small
+            //// we can, in theory, overflow int, so just use long here.
+            //long spinsRemainingLong = (available - _procCount / 4) * (long)spinStep;
+
+            //// clamp to [0, _maxSpinCount] range.
+            //int spinsRemaining = (int)Math.Clamp(spinsRemainingLong, 0, _maxSpinCount);
+
+            int spinsRemaining = _maxSpinCount;
+
+            uint iteration = 0;
+            while (spinsRemaining > 0)
             {
-                Backoff.Exponential(iteration);
+                spinsRemaining -= Backoff.Exponential(iteration++);
 
                 Counts counts = _separated._counts;
                 if (counts.SignalCount != 0)
@@ -84,6 +133,11 @@ namespace System.Threading
                 }
             }
 
+            return WaitNoSpin(timeoutMs);
+        }
+
+        public bool WaitNoSpin(int timeoutMs)
+        {
             // Now we will try registering as a waiter and wait.
             // If signaled before that, we have to acquire as this can be the last thread that could take that signal.
             // The difference with spinning above is that we are not waiting for a signal. We should immediately succeed
@@ -105,14 +159,14 @@ namespace System.Threading
                 Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
                 if (countsBeforeUpdate == counts)
                 {
-                    return counts.SignalCount != 0 || WaitForSignal(timeoutMs);
+                    return counts.SignalCount != 0 || WaitAsWaiter(timeoutMs);
                 }
 
                 Backoff.Exponential(collisionCount++);
             }
         }
 
-        private bool WaitForSignal(int timeoutMs)
+        private bool WaitAsWaiter(int timeoutMs)
         {
             Debug.Assert(timeoutMs > 0 || timeoutMs == -1);
 
@@ -120,7 +174,6 @@ namespace System.Threading
 
             while (true)
             {
-                int startWaitTicks = timeoutMs != -1 ? Environment.TickCount : 0;
                 if (timeoutMs == 0 || !WaitCore(timeoutMs))
                 {
                     // Unregister the waiter. The wait subsystem used above guarantees that a thread that wakes due to a timeout does
@@ -128,7 +181,6 @@ namespace System.Threading
                     _separated._counts.InterlockedDecrementWaiterCount();
                     return false;
                 }
-                int endWaitTicks = timeoutMs != -1 ? Environment.TickCount : 0;
 
                 uint collisionCount = 0;
                 while (true)
@@ -161,16 +213,6 @@ namespace System.Threading
 
                     // collision, try again.
                     Backoff.Exponential(collisionCount++);
-                }
-
-                // we will wait again, reduce timeout
-                if (timeoutMs != -1)
-                {
-                    int waitMs = endWaitTicks - startWaitTicks;
-                    if (waitMs >= 0 && waitMs < timeoutMs)
-                        timeoutMs -= waitMs;
-                    else
-                        timeoutMs = 0;
                 }
             }
         }
@@ -222,8 +264,6 @@ namespace System.Threading
             private Counts(ulong data) => _data = data;
 
             private ushort GetUInt16Value(byte shift) => (ushort)(_data >> shift);
-            private void SetUInt16Value(ushort value, byte shift) =>
-                _data = (_data & ~((ulong)ushort.MaxValue << shift)) | ((ulong)value << shift);
 
             public ushort SignalCount
             {
@@ -295,12 +335,11 @@ namespace System.Threading
             public override int GetHashCode() => (int)_data + (int)(_data >> 32);
         }
 
-        [StructLayout(LayoutKind.Sequential)]
+        [StructLayout(LayoutKind.Explicit, Size = 2 * PaddingHelpers.CACHE_LINE_SIZE)]
         private struct CacheLineSeparatedCounts
         {
-            private readonly Internal.PaddingFor32 _pad1;
+            [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
             public Counts _counts;
-            private readonly Internal.PaddingFor32 _pad2;
         }
     }
 }
