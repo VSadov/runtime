@@ -3546,12 +3546,12 @@ MethodTableBuilder::EnumerateClassMethods()
             // Thus we try to filter closer to the cases when the thunk most certainly will be used.
             if (insertCount == 1)
             {
-                if (implType != METHOD_IMPL ||
+                if (!bmtMetaData->fHasCovariantOverride ||
+                    implType != METHOD_IMPL ||
                     returnsValueTask ||
                     returnKind != MethodReturnKind::GenericTaskReturningMethod ||
                     this->IsValueClass() ||
-                    !IsMdVirtual(dwMemberAttrs) ||
-                    !bmtMetaData->fHasCovariantOverride)
+                    !IsMdVirtual(dwMemberAttrs))
                 {
                     // No need for another variant
                     break;
