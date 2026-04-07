@@ -217,7 +217,7 @@ namespace System.Runtime.CompilerServices
             // to one of these notifiers.
             public ICriticalNotifyCompletion? CriticalNotifier;
             public INotifyCompletion? Notifier;
-            public IValueTaskSourceNotifier? ValueTaskSourceNotifier;
+            public ValueTaskSourceNotifier? ValueTaskSourceNotifier;
             public Task? TaskNotifier;
 
             public ExecutionContext? ExecutionContext;
@@ -310,7 +310,7 @@ namespace System.Runtime.CompilerServices
             }
             else
             {
-                state.ValueTaskSourceNotifier = (IValueTaskSourceNotifier)o;
+                state.ValueTaskSourceNotifier = (ValueTaskSourceNotifier)o;
             }
 
             state.CaptureContexts();
@@ -366,7 +366,7 @@ namespace System.Runtime.CompilerServices
 
                 ICriticalNotifyCompletion? critNotifier = state.CriticalNotifier;
                 INotifyCompletion? notifier = state.Notifier;
-                IValueTaskSourceNotifier? vtsNotifier = state.ValueTaskSourceNotifier;
+                ValueTaskSourceNotifier? vtsNotifier = state.ValueTaskSourceNotifier;
                 Task? taskNotifier = state.TaskNotifier;
 
                 state.CriticalNotifier = null;
