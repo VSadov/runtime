@@ -179,9 +179,13 @@ namespace System.Threading.Tasks
                 GetTaskForValueTaskSource(Unsafe.As<IValueTaskSource>(obj));
         }
 
-        private static readonly Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> onCompleted =
-            (object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
-                Unsafe.As<IValueTaskSource>(obj).OnCompleted(continuation, state, token, flags);
+        // A class to not have a static initializer directly on ValueTask
+        private static class OnCompleted
+        {
+            internal static readonly Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> s_action =
+                static (object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
+                   Unsafe.As<IValueTaskSource>(obj).OnCompleted(continuation, state, token, flags);
+        }
 
         internal object AsTaskOrNotifier()
         {
@@ -189,7 +193,7 @@ namespace System.Threading.Tasks
             Debug.Assert(obj is Task || obj is IValueTaskSource);
             return
                 obj as Task ??
-                (object)ValueTaskSourceNotifier.GetInstance(obj, onCompleted, _token);
+                (object)ValueTaskSourceNotifier.GetInstance(obj, OnCompleted.s_action, _token);
         }
 
         /// <summary>Gets a <see cref="ValueTask"/> that may be used at any point in the future.</summary>
@@ -601,9 +605,13 @@ namespace System.Threading.Tasks
             return GetTaskForValueTaskSource(Unsafe.As<IValueTaskSource<TResult>>(obj));
         }
 
-        private static readonly Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> onCompleted =
-            (object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
-                Unsafe.As<IValueTaskSource<TResult>>(obj).OnCompleted(continuation, state, token, flags);
+        // A class to not have a static initializer directly on ValueTask<T>
+        private static class OnCompleted
+        {
+            internal static readonly Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> s_action =
+                static (object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
+                    Unsafe.As<IValueTaskSource<TResult>>(obj).OnCompleted(continuation, state, token, flags);
+        }
 
         internal object AsTaskOrNotifier()
         {
@@ -611,7 +619,7 @@ namespace System.Threading.Tasks
             Debug.Assert(obj is Task<TResult> || obj is IValueTaskSource<TResult>);
             return
                 obj as Task ??
-                (object)ValueTaskSourceNotifier.GetInstance(obj, onCompleted, _token);
+                (object)ValueTaskSourceNotifier.GetInstance(obj, OnCompleted.s_action, _token);
         }
 
         /// <summary>Gets a <see cref="ValueTask{TResult}"/> that may be used at any point in the future.</summary>
