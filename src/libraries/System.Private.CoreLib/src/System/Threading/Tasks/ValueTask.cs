@@ -179,21 +179,19 @@ namespace System.Threading.Tasks
                 GetTaskForValueTaskSource(Unsafe.As<IValueTaskSource>(obj));
         }
 
-        // A class to not have a static initializer directly on ValueTask
-        private static class OnCompleted
-        {
-            internal static readonly Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> s_action =
-                static (object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
-                   Unsafe.As<IValueTaskSource>(obj).OnCompleted(continuation, state, token, flags);
-        }
+        /// <summary>
+        /// Helper to invoke IValueTaskSource.OnCompleted from a caller that does not know the actual type of the source.
+        /// </summary>
+        private static void OnCompleted(object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
+                Unsafe.As<IValueTaskSource>(obj).OnCompleted(continuation, state, token, flags);
 
-        internal object AsTaskOrNotifier()
+        internal unsafe object AsTaskOrNotifier()
         {
             object? obj = _obj;
             Debug.Assert(obj is Task || obj is IValueTaskSource);
             return
                 obj as Task ??
-                (object)ValueTaskSourceNotifier.GetInstance(obj, OnCompleted.s_action, _token);
+                (object)ValueTaskSourceNotifier.GetInstance(obj, &OnCompleted, _token);
         }
 
         /// <summary>Gets a <see cref="ValueTask"/> that may be used at any point in the future.</summary>
@@ -605,21 +603,19 @@ namespace System.Threading.Tasks
             return GetTaskForValueTaskSource(Unsafe.As<IValueTaskSource<TResult>>(obj));
         }
 
-        // A class to not have a static initializer directly on ValueTask<T>
-        private static class OnCompleted
-        {
-            internal static readonly Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> s_action =
-                static (object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
-                    Unsafe.As<IValueTaskSource<TResult>>(obj).OnCompleted(continuation, state, token, flags);
-        }
+        /// <summary>
+        /// Helper to invoke IValueTaskSource.OnCompleted from a caller that does not know the actual type of the source.
+        /// </summary>
+        private static void OnCompleted(object obj, Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) =>
+                Unsafe.As<IValueTaskSource<TResult>>(obj).OnCompleted(continuation, state, token, flags);
 
-        internal object AsTaskOrNotifier()
+        internal unsafe object AsTaskOrNotifier()
         {
             object? obj = _obj;
             Debug.Assert(obj is Task<TResult> || obj is IValueTaskSource<TResult>);
             return
                 obj as Task ??
-                (object)ValueTaskSourceNotifier.GetInstance(obj, OnCompleted.s_action, _token);
+                (object)ValueTaskSourceNotifier.GetInstance(obj, &OnCompleted, _token);
         }
 
         /// <summary>Gets a <see cref="ValueTask{TResult}"/> that may be used at any point in the future.</summary>
@@ -883,7 +879,7 @@ namespace System.Threading.Tasks
         }
     }
 
-    internal sealed class ValueTaskSourceNotifier
+    internal unsafe sealed class ValueTaskSourceNotifier
     {
         // ValueTaskSourceNotifier is used only during suspension sequence, thus
         // a given thread will never need more than one instance.
@@ -892,12 +888,12 @@ namespace System.Threading.Tasks
         private static ValueTaskSourceNotifier? t_instance;
 
         private object _source;
-        private Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> _onCompleted;
+        private delegate* managed<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags, void> _onCompleted;
         private short _token;
 
         private ValueTaskSourceNotifier(
             object source,
-            Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> onCompleted,
+            delegate* managed<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags, void> onCompleted,
             short token)
         {
             _source = source;
@@ -907,7 +903,7 @@ namespace System.Threading.Tasks
 
         public static ValueTaskSourceNotifier GetInstance(
             object source,
-            Action<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags> onCompleted,
+            delegate* managed<object, Action<object?>, object?, short, ValueTaskSourceOnCompletedFlags, void> onCompleted,
             short token)
         {
             ValueTaskSourceNotifier? instance = t_instance;
@@ -928,9 +924,8 @@ namespace System.Threading.Tasks
             _onCompleted(_source, continuation, state, _token, flags);
 
             // The data that we store is effectively single-use.
-            // Once used, clear the fields to not retain unknown data.
-            _source = _onCompleted = null!;
-            _token = 0;
+            // Once used, clear the _source to not retain unknown data.
+            _source = null!;
         }
     }
 }
