@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 
@@ -92,6 +93,11 @@ namespace System.Threading.Channels
         /// </remarks>
         private protected short _currentId;
 
+        /// <summary>Typical latency between rearming the source and completing it.</summary>
+        private protected long _avgLatencyTicks;
+        /// <summary>Ticks at time of rearming the source.</summary>
+        private protected long _startTicks;
+
         /// <summary>Initializes the interactor.</summary>
         /// <param name="runContinuationsAsynchronously">true if continuations should be forced to run asynchronously; otherwise, false.</param>
         /// <param name="cancellationToken">The cancellation token used to cancel the operation.</param>
@@ -139,7 +145,43 @@ namespace System.Threading.Channels
 #endif
 
         /// <summary>Gets whether the operation has completed.</summary>
-        internal bool IsCompleted => ReferenceEquals(_continuation, s_completedSentinel);
+        private protected bool IsCompleted()
+        {
+            if (Volatile.Read(ref _continuation) == (object)s_completedSentinel)
+            {
+                return true;
+            }
+
+            // Note: long reads can be torn on 32bit,
+            // but since this is a statistical approximation it does not matter.
+            long avgLatency = _avgLatencyTicks;
+            if (avgLatency == 0 || avgLatency > (Stopwatch.Frequency * 2 / 1000000))
+            {
+                return false;
+            }
+
+            long start = _startTicks;
+            long spinUntil = start + avgLatency * 2;
+            do
+            {
+                // Note: reading _continuation will not be hoisted out of the loop because
+                // we make an opaque SpinWait call.
+                if (_continuation == (object)s_completedSentinel)
+                {
+                    return true;
+                }
+
+                Thread.SpinWait(1);
+            }
+            while (Stopwatch.GetTimestamp() < spinUntil);
+
+            return false;
+        }
+
+        private protected bool CheckIsCompleted()
+        {
+            return Volatile.Read(ref _continuation) == (object)s_completedSentinel;
+        }
 
         /// <summary>Completes the operation with a failed state and the specified error.</summary>
         /// <param name="exception">The error.</param>
@@ -202,6 +244,12 @@ namespace System.Threading.Channels
             // then they've already reserved completion, so the cancellation callback (which starts with a TrySetCanceled) will
             // be a nop, as its TrySetCanceled will return false and the callback will exit without doing further work.
             Unregister(_cancellationRegistration);
+
+            if (_startTicks != 0)
+            {
+                long latencyTicks = Stopwatch.GetTimestamp() - _startTicks;
+                _avgLatencyTicks = (_avgLatencyTicks + latencyTicks) / 2;
+            }
 
             // NB: Assigning _continuation happens after assigning continuation dependencies (_capturedContext, _continuationState)
             //     and effectively "commits" the entire continuation state as ready for invocation.
@@ -364,7 +412,7 @@ namespace System.Threading.Channels
                 // If the set failed because there's already a delegate in _continuation, but that delegate is
                 // something other than s_completedSentinel, something went wrong, which should only happen if
                 // the instance was erroneously used, likely to hook up multiple continuations.
-                Debug.Assert(IsCompleted, $"Expected IsCompleted");
+                Debug.Assert(CheckIsCompleted(), $"Expected IsCompleted");
                 if (!ReferenceEquals(prevContinuation, s_completedSentinel))
                 {
                     Debug.Assert(prevContinuation != s_availableSentinel, "Continuation was the available sentinel.");
@@ -444,11 +492,17 @@ namespace System.Threading.Channels
                 ThrowIncorrectCurrentIdException();
             }
 
+            if (!IsCompleted())
+            {
+                return ValueTaskSourceStatus.Pending;
+            }
+
             return
-                !IsCompleted ? ValueTaskSourceStatus.Pending :
-                _error is null ? ValueTaskSourceStatus.Succeeded :
-                _error.SourceException is OperationCanceledException ? ValueTaskSourceStatus.Canceled :
-                ValueTaskSourceStatus.Faulted;
+                _error is null ?
+                    ValueTaskSourceStatus.Succeeded :
+                    _error.SourceException is OperationCanceledException ?
+                        ValueTaskSourceStatus.Canceled :
+                        ValueTaskSourceStatus.Faulted;
         }
 
         /// <summary>Gets the result of the operation.</summary>
@@ -460,7 +514,7 @@ namespace System.Threading.Channels
                 ThrowIncorrectCurrentIdException();
             }
 
-            if (!IsCompleted)
+            if (!CheckIsCompleted())
             {
                 ThrowIncompleteOperationException();
             }
@@ -504,7 +558,7 @@ namespace System.Threading.Channels
                 ThrowIncorrectCurrentIdException();
             }
 
-            if (!IsCompleted)
+            if (!CheckIsCompleted())
             {
                 ThrowIncompleteOperationException();
             }
@@ -533,6 +587,7 @@ namespace System.Threading.Channels
                 _result = default;
                 _error = null;
                 _capturedContext = null;
+                _startTicks = Stopwatch.GetTimestamp();
                 return true;
             }
 
