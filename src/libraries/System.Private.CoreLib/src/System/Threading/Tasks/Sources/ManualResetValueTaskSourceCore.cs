@@ -83,7 +83,7 @@ namespace System.Threading.Tasks.Sources
 
         private bool IsCompleted()
         {
-            if (Volatile.Read(ref _continuation) == (object)ManualResetValueTaskSourceCoreShared.s_sentinel)
+            if (CheckIsCompleted())
             {
                 return true;
             }
@@ -96,13 +96,13 @@ namespace System.Threading.Tasks.Sources
                 return false;
             }
 
-            long start = _startTicks;
-            long spinUntil = start + avgLatency * 2;
+            // torn read is not a concern here because _startTicks is set as a part of
+            // rearming the source, before possible publishing to other threads.
+            long startTicks = _startTicks;
+            long spinUntil = startTicks + avgLatency * 2;
             do
             {
-                // Note: reading _continuation will not be hoisted out of the loop because
-                // we make an opaque SpinWait call.
-                if (_continuation == (object)ManualResetValueTaskSourceCoreShared.s_sentinel)
+                if (CheckIsCompleted())
                 {
                     return true;
                 }
@@ -219,9 +219,9 @@ namespace System.Threading.Tasks.Sources
             }
 
             // Operation already completed, so we need to queue the supplied callback.
-            // At this point the storedContinuation should be the sentinal; if it's not, the instance was misused.
+            // At this point the storedContinuation should be the sentinel; if it's not, the instance was misused.
             Debug.Assert(storedContinuation is not null, $"{nameof(storedContinuation)} is null");
-            if (!CheckIsCompleted())
+            if (storedContinuation != (object)ManualResetValueTaskSourceCoreShared.s_sentinel)
             {
                 ThrowHelper.ThrowInvalidOperationException();
             }
@@ -261,9 +261,12 @@ namespace System.Threading.Tasks.Sources
                 ThrowHelper.ThrowInvalidOperationException();
             }
 
-            if (_startTicks != 0)
+            // torn read is not a concern here because _startTicks is set as a part of
+            // rearming the source, before possible publishing to other threads.
+            long startTicks = _startTicks;
+            if (startTicks != 0)
             {
-                long latencyTicks = Stopwatch.GetTimestamp() - _startTicks;
+                long latencyTicks = Stopwatch.GetTimestamp() - startTicks;
                 _avgLatencyTicks = (_avgLatencyTicks + latencyTicks) / 2;
             }
 

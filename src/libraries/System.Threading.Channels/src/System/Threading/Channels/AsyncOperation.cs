@@ -147,7 +147,7 @@ namespace System.Threading.Channels
         /// <summary>Gets whether the operation has completed.</summary>
         private protected bool IsCompleted()
         {
-            if (Volatile.Read(ref _continuation) == (object)s_completedSentinel)
+            if (CheckIsCompleted())
             {
                 return true;
             }
@@ -160,13 +160,13 @@ namespace System.Threading.Channels
                 return false;
             }
 
-            long start = _startTicks;
-            long spinUntil = start + avgLatency * 2;
+            // torn read is not a concern here because _startTicks is set as a part of
+            // rearming the source, before possible publishing to other threads.
+            long startTicks = _startTicks;
+            long spinUntil = startTicks + avgLatency * 2;
             do
             {
-                // Note: reading _continuation will not be hoisted out of the loop because
-                // we make an opaque SpinWait call.
-                if (_continuation == (object)s_completedSentinel)
+                if (CheckIsCompleted())
                 {
                     return true;
                 }
@@ -245,9 +245,12 @@ namespace System.Threading.Channels
             // be a nop, as its TrySetCanceled will return false and the callback will exit without doing further work.
             Unregister(_cancellationRegistration);
 
-            if (_startTicks != 0)
+            // torn read is not a concern here because _startTicks is set as a part of
+            // rearming the source, before possible publishing to other threads.
+            long startTicks = _startTicks;
+            if (startTicks != 0)
             {
-                long latencyTicks = Stopwatch.GetTimestamp() - _startTicks;
+                long latencyTicks = Stopwatch.GetTimestamp() - startTicks;
                 _avgLatencyTicks = (_avgLatencyTicks + latencyTicks) / 2;
             }
 
