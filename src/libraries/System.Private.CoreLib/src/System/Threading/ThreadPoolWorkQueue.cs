@@ -683,16 +683,16 @@ namespace System.Threading
             /// Returns null if the queue is empty or if there is a contention.
             /// missedSteal is set to true if attempt failed due to contention while the queue may be not empty.
             /// </summary>
-            internal object? TrySteal(ref bool missedSteal)
+            internal object? TrySteal(WorkStealingQueue localWsQueue, ref bool missedSteal)
             {
                 var currentSegment = _deqSegment;
-                object? result = currentSegment.TrySteal(ref missedSteal);
+                object? result = currentSegment.TrySteal(localWsQueue, ref missedSteal);
 
                 // Note: we check the next segment even if we had a missed steal as that
                 // helps with retiring the current segment.
                 if (result == null && currentSegment._nextSegment != null)
                 {
-                    return TryStealSlow(currentSegment, ref missedSteal);
+                    return TryStealSlow(localWsQueue, currentSegment, ref missedSteal);
                 }
 
                 return result;
@@ -701,7 +701,7 @@ namespace System.Threading
             /// <summary>
             /// Tries to dequeue an item, removing frozen segments as needed.
             /// </summary>
-            private object? TryStealSlow(QueueSegment currentSegment, ref bool missedSteal)
+            private object? TryStealSlow(WorkStealingQueue localWsQueue, QueueSegment currentSegment, ref bool missedSteal)
             {
                 object? result;
                 while (true)
@@ -714,7 +714,7 @@ namespace System.Threading
 
                     // we must know for sure the segment is quiescent and empty before removing it
                     bool localMissedSteal = false;
-                    result = currentSegment.TrySteal(ref localMissedSteal);
+                    result = currentSegment.TrySteal(localWsQueue, ref localMissedSteal);
                     if (result != null)
                     {
                         return result;
@@ -739,7 +739,7 @@ namespace System.Threading
                     currentSegment = _deqSegment;
 
                     // Try to dequeue.  If we're successful, we're done.
-                    result = currentSegment.TrySteal(ref missedSteal);
+                    result = currentSegment.TrySteal(localWsQueue, ref missedSteal);
                     if (result != null)
                     {
                         return result;
@@ -760,7 +760,8 @@ namespace System.Threading
             /// </summary>
             internal object? TryPop()
             {
-                t_localQueue = this;
+                // we save current index + 1, because 0 means "uninitialized.
+                t_localQueueIdx = this._queueIndex + 1;
                 return _enqSegment.TryPop();
             }
 
@@ -1037,7 +1038,7 @@ namespace System.Threading
                 /// That generally happens when another thread did or is doing modifications and we do not see all the changes.
                 /// We could spin here until we see a consistent state, but it makes more sense to service other queues.
                 /// </summary>
-                internal object? TrySteal(ref bool missedSteal)
+                internal object? TrySteal(WorkStealingQueue localWsQueue, ref bool missedSteal)
                 {
                     while (true)
                     {
@@ -1075,7 +1076,7 @@ namespace System.Threading
                                 var enqPos = _queueEnds.Enqueue;
                                 if (enqPos - position < MoveThreshold ||
                                     // "this" is a sentinel for a failed Move attempt
-                                    (item = TryMove(t_localQueue!._enqSegment, position, enqPos)) == this)
+                                    (item = TryMoveTo(localWsQueue._enqSegment, position, enqPos)) == this)
                                 {
                                     // Move did not work out, so just take the item that we have reserved.
                                     _queueEnds.Dequeue = position + 1;
@@ -1105,7 +1106,7 @@ namespace System.Threading
                     }
                 }
 
-                internal object? TryMove(QueueSegment other, int deqPosition, int enqPosition)
+                internal object? TryMoveTo(QueueSegment other, int deqPosition, int enqPosition)
                 {
                     // similar sequence as in TryEnqueue, since we will be adding items to the other queue.
                     int otherEnqPosition = other._queueEnds.Enqueue;
@@ -1299,8 +1300,12 @@ namespace System.Threading
         internal readonly WorkStealingQueue[] _WorkStealingQueues;
         internal readonly FifoWorkQueue[] _FifoQueues;
 
+        // The purpose of this index is that if a currently executing task decomposes into
+        // subtasks, they go into the original local queue.
+        // We save the index with +1 offset so that 0 means "uninitialized", which
+        // for most purposes is the same as "not a threadpool thread".
         [ThreadStatic]
-        private static WorkStealingQueue? t_localQueue;
+        private static uint t_localQueueIdx;
 
         public ThreadPoolWorkQueue()
         {
@@ -1394,13 +1399,14 @@ namespace System.Threading
             if (_loggingEnabled && FrameworkEventSource.Log.IsEnabled())
                 FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
-            WorkStealingQueue? localQueue;
-            if (forceGlobal || (localQueue = t_localQueue) == null)
+            uint localQueueIdx;
+            if (forceGlobal || (localQueueIdx = t_localQueueIdx) == 0)
             {
                 GetOrAddFifoQueue().Enqueue(callback);
             }
             else
             {
+                WorkStealingQueue localQueue = _WorkStealingQueues[localQueueIdx - 1]!;
                 localQueue.Enqueue(callback);
             }
 
@@ -1444,11 +1450,16 @@ namespace System.Threading
             ThreadPool.EnsureWorkerRequested();
         }
 
-        internal static bool TryRemove(Task callback)
+        internal bool TryRemove(Task callback)
         {
-            if (t_localQueue?.TryRemove(callback) == true)
+            uint localQueueIdx;
+            if ((localQueueIdx = t_localQueueIdx) != 0)
             {
-                return true;
+                WorkStealingQueue localQueue = _WorkStealingQueues[localQueueIdx - 1]!;
+                if (localQueue.TryRemove(callback))
+                {
+                    return true;
+                }
             }
 
             // We could also search through other local queues, but it seems to be an overkill.
@@ -1470,13 +1481,13 @@ namespace System.Threading
             return DequeueAll(localWsQueue, ref missedSteal);
         }
 
-        public object? DequeueAll(WorkStealingQueue? localWsQueue, ref bool missedSteal)
+        public object? DequeueAll(WorkStealingQueue localWsQueue, ref bool missedSteal)
         {
             object? workItem;
             FifoWorkQueue[] ffQueues = _FifoQueues;
 
             // For fairness we will traverse fifo queues starting from a random index.
-            uint start = localWsQueue?.NextRnd() ?? this.NextRnd();
+            uint start = localWsQueue.NextRnd();
 
             // To decorrelate traversal patterns in different workers we will
             // do traversal with an odd stride derived from localWsq index.
@@ -1485,7 +1496,7 @@ namespace System.Threading
             // of the length.
             // Compute the stride by mixing up the start and the queue index and
             // force the result to be odd.
-            uint stride = ((localWsQueue?._queueIndex ?? 0 + start) * 1664525u) | 1;
+            uint stride = (localWsQueue._queueIndex + start) * 1664525u | 1;
 
             uint n = (uint)ffQueues.Length;
             uint mask = n - 1;
@@ -1508,7 +1519,7 @@ namespace System.Threading
             {
                 uint idx = (start + i * stride) & mask;
                 WorkStealingQueue? wsQueue = wsQueues[idx];
-                workItem = wsQueue?.TrySteal(ref missedSteal);
+                workItem = wsQueue?.TrySteal(localWsQueue, ref missedSteal);
                 if (workItem != null)
                 {
                     return workItem;
@@ -2349,7 +2360,7 @@ namespace System.Threading
         internal static bool TryPopCustomWorkItem(Task workItem)
         {
             Debug.Assert(null != workItem);
-            return ThreadPoolWorkQueue.TryRemove(workItem);
+            return s_workQueue.TryRemove(workItem);
         }
 
         // Get all workitems.  Called by TaskScheduler in its debugger hooks.
