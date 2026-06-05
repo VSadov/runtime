@@ -29,7 +29,6 @@
 #endif // FEATURE_COMINTEROP
 
 #include "request_common.h"
-#include "conditionalweaktable.h"
 
 #ifndef USE_DAC_TABLE_RVA
 extern "C" bool TryGetSymbol(ICorDebugDataTarget* dataTarget, uint64_t baseAddress, const char* symbolName, uint64_t* symbolAddress);
@@ -6100,15 +6099,26 @@ HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::EnumerateMonitorEventWaitList(VMP
         if(psb == NULL)
             return hr;
 
-        FieldDesc* pConditionTableField = (&g_CoreLib)->GetField(FIELD__MONITOR__CONDITION_TABLE);
-        CONDITIONAL_WEAK_TABLE_REF conditionTable = *(DPTR(CONDITIONAL_WEAK_TABLE_REF))PTR_TO_TADDR(pConditionTableField->GetStaticAddressHandle(pConditionTableField->GetBase()));
-
-
-        OBJECTREF condition = NULL;
-        if (!conditionTable->TryGetValue(OBJECTREF(pObj), &condition))
-        {
+        // The managed Lock (if any) for this object is referenced from the sync block.
+        // If there is no Lock, there can be no Condition installed on it and therefore no waiters.
+        OBJECTHANDLE lockHandle = psb->GetLockIfExists();
+        if (lockHandle == (OBJECTHANDLE)NULL)
             return hr;
-        }
+
+        OBJECTREF lockObj = ObjectFromHandle(lockHandle);
+        if (lockObj == NULL)
+            return hr;
+
+        // Lock._waitEventOrCondition holds either an AutoResetEvent or a Condition. Only when a
+        // Condition has been installed does the Lock have a Monitor wait list to enumerate.
+        FieldDesc* pWaitEventOrConditionField = (&g_CoreLib)->GetField(FIELD__LOCK__WAIT_EVENT_OR_CONDITION);
+        OBJECTREF condition = pWaitEventOrConditionField->GetRefValue(lockObj);
+        if (condition == NULL)
+            return hr;
+
+        PTR_MethodTable pConditionMT = CoreLibBinder::GetExistingClass(CLASS__CONDITION);
+        if (condition->GetMethodTable() != pConditionMT)
+            return hr;
 
         MapSHash<TADDR, Thread*> waiterToThreadMap;
         FieldDesc* pConditionWaiterField = (&g_CoreLib)->GetField(FIELD__CONDITION__WAITERS_HEAD);
