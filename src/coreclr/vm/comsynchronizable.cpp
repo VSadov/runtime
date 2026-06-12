@@ -639,7 +639,7 @@ FCIMPL0(FC_BOOL_RET, ThreadNative::CatchAtSafePoint)
 {
     FCALL_CONTRACT;
 
-    FC_RETURN_BOOL(GetThread()->CatchAtSafePoint());
+    FC_RETURN_BOOL(g_TrapReturningThreads & 1 || GetThread()->CatchAtSafePoint());
 }
 FCIMPLEND
 
