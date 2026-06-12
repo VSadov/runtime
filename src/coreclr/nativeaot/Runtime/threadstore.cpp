@@ -26,7 +26,10 @@
 #include "SignalSafeThreadMap.h"
 
 EXTERN_C volatile uint32_t RhpTrapThreads;
-volatile uint32_t RhpTrapThreads = (uint32_t)TrapThreadsFlags::None;
+
+alignas(128)
+volatile uint32_t RhpTrapThreads;
+uint32_t padForTrapReturningThreads[128 / sizeof(uint32_t) - 1] = { 0 };
 
 GVAL_IMPL_INIT(PTR_Thread, RhpSuspendingThread, 0);
 
