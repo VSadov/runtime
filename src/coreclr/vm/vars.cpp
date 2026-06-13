@@ -20,6 +20,8 @@ const char g_psBaseLibrary[]      = CoreLibName_IL_A;
 const char g_psBaseLibraryName[]  = CoreLibName_A;
 const char g_psBaseLibrarySatelliteAssemblyName[]  = CoreLibSatelliteName_A;
 
+// g_TrapReturningThreads is probably the most read global variable.
+// Make sure it sits in its own cache line.
 alignas(128)
 volatile int32_t g_TrapReturningThreads;
 int32_t padForTrapReturningThreads[128/sizeof(int32_t) - 1] = { 0 };

@@ -27,6 +27,8 @@
 
 EXTERN_C volatile uint32_t RhpTrapThreads;
 
+// RhpTrapThreads is probably the most read global variable.
+// Make sure it sits in its own cache line.
 alignas(128)
 volatile uint32_t RhpTrapThreads;
 uint32_t padForTrapReturningThreads[128 / sizeof(uint32_t) - 1] = { 0 };
