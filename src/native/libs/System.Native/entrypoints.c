@@ -256,6 +256,7 @@ static const Entry s_sysNative[] =
     DllImportEntry(SystemNative_LowLevelFutex_WaitOnAddress)
     DllImportEntry(SystemNative_LowLevelFutex_WaitOnAddressTimeout)
     DllImportEntry(SystemNative_LowLevelFutex_WakeByAddressSingle)
+    DllImportEntry(SystemNative_SuppressCurrentThreadWakePreemption)
 #endif
     DllImportEntry(SystemNative_LoadLibrary)
     DllImportEntry(SystemNative_GetLoadLibraryError)

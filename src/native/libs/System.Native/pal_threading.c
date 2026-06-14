@@ -297,6 +297,30 @@ void SystemNative_LowLevelFutex_WakeByAddressSingle(int32_t* address)
 
 #endif  // defined(TARGET_LINUX)
 
+#if defined(TARGET_LINUX)
+// Switches the scheduling policy of the current thread to suppress (or restore)
+// the wake-up preemption bonus that the CFS scheduler normally applies when a
+// thread is unblocked. SCHED_BATCH tells the kernel that the thread is a batch
+// workload, which disables the interactive wake-up bonus that would otherwise
+// cause the woken thread to preempt running threads. Both SCHED_BATCH and
+// SCHED_OTHER run at static priority 0 and do not require privileges; the
+// thread's nice value is preserved across the policy switch.
+// Returns 0 on success; -1 on failure (errno is set).
+int32_t SystemNative_SuppressCurrentThreadWakePreemption(int32_t suppress)
+{
+    struct sched_param param = { 0 };
+    int policy = suppress ? SCHED_BATCH : SCHED_OTHER;
+    return sched_setscheduler(0, policy, &param);
+}
+#else // defined(TARGET_LINUX)
+int32_t SystemNative_SuppressCurrentThreadWakePreemption(int32_t suppress)
+{
+    (void)suppress; // unused
+    // No equivalent wake-time preemption knob on this platform; treat as a no-op.
+    return 0;
+}
+#endif // defined(TARGET_LINUX)
+
 int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter)
 {
     bool result = false;

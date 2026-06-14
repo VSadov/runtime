@@ -29,6 +29,8 @@ PALEXPORT int32_t SystemNative_LowLevelFutex_WaitOnAddressTimeout(int32_t* addre
 
 PALEXPORT void SystemNative_LowLevelFutex_WakeByAddressSingle(int32_t* address);
 
+PALEXPORT int32_t SystemNative_SuppressCurrentThreadWakePreemption(int32_t suppress);
+
 PALEXPORT int32_t SystemNative_CreateThread(uintptr_t stackSize, void *(*startAddress)(void*), void *parameter);
 
 PALEXPORT int32_t SystemNative_SchedGetCpu(void);

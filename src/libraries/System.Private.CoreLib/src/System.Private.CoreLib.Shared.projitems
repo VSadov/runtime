@@ -2617,6 +2617,9 @@
     <Compile Include="$(CommonPath)Interop\Unix\System.Native\Interop.Stat.Span.cs">
       <Link>Common\Interop\Unix\System.Native\Interop.Stat.Span.cs</Link>
     </Compile>
+    <Compile Include="$(CommonPath)Interop\Unix\System.Native\Interop.SuppressWakePreemption.cs">
+      <Link>Common\Interop\Unix\System.Native\Interop.SuppressWakePreemption.cs</Link>
+    </Compile>
     <Compile Include="$(CommonPath)Interop\Unix\System.Native\Interop.SymLink.cs">
       <Link>Common\Interop\Unix\System.Native\Interop.SymLink.cs</Link>
     </Compile>
