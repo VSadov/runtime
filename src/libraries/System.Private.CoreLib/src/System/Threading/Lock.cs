@@ -272,10 +272,10 @@ namespace System.Threading
         public bool TryEnter(TimeSpan timeout) => TryEnter_Outlined(WaitHandle.ToTimeoutMilliseconds(timeout));
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        internal bool TryEnter_Outlined(int timeoutMs) => TryEnter_Inlined(timeoutMs) != UninitializedThreadId;
+        private bool TryEnter_Outlined(int timeoutMs) => TryEnter_Inlined(timeoutMs) != UninitializedThreadId;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int TryEnter_Inlined(int timeoutMs)
+        internal int TryEnter_Inlined(int timeoutMs)
         {
             Debug.Assert(timeoutMs >= -1);
 

@@ -177,7 +177,7 @@ namespace System.Threading
             }
 
             Lock lck = GetLockObject(obj);
-            return lck.TryEnter_Outlined(millisecondsTimeout);
+            return lck.TryEnter_Inlined(millisecondsTimeout) != Lock.UninitializedThreadId;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -219,7 +219,8 @@ namespace System.Threading
                 TryAcquireUncommon(obj, false) != HeaderLockResult.Success)
             {
                 Lock lck = GetLockObject(obj);
-                lck.Enter();
+                int currentThreadId = lck.TryEnter_Inlined(timeoutMs: -1);
+                Debug.Assert(currentThreadId != Lock.UninitializedThreadId);
             }
         }
 

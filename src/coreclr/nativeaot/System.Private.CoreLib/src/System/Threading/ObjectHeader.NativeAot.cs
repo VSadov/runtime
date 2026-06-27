@@ -341,7 +341,7 @@ namespace System.Threading
                 ObjectHeader.GetLockObject(obj) :
                 SyncTable.GetLockObject(resultOrIndex);
 
-            return lck.TryEnter_Outlined(millisecondsTimeout);
+            return lck.TryEnter_Inlined(millisecondsTimeout) != Lock.UninitializedThreadId;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -388,7 +388,8 @@ namespace System.Threading
                     ObjectHeader.GetLockObject(obj) :
                     SyncTable.GetLockObject(resultOrIndex);
 
-                lck.TryEnter_Outlined(Timeout.Infinite);
+                int currentThreadId = lck.TryEnter_Inlined(timeoutMs: -1);
+                Debug.Assert(currentThreadId != Lock.UninitializedThreadId);
             }
         }
 
