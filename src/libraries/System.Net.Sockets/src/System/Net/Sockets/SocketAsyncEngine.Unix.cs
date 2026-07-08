@@ -286,7 +286,7 @@ namespace System.Net.Sockets
             }
         }
 
-        private class SocketIOEvent : IThreadPoolWorkItem
+        private sealed class SocketIOEvent : IThreadPoolWorkItem
         {
             private readonly ConcurrentQueue<SocketIOEvent> _queue;
 
