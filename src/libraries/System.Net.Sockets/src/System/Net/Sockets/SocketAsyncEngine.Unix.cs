@@ -275,14 +275,14 @@ namespace System.Net.Sockets
 
                             if (events != Interop.Sys.SocketEvents.None)
                             {
-                                SocketIOEvent ev = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
+                                SocketIOEvent newEvent = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
                                     existingEvent :
                                     new SocketIOEvent(_eventQueue);
 
-                                ev = ev.With(context, events);
+                                newEvent = newEvent.With(context, events);
 
-                                ev._next = asyncEvents;
-                                asyncEvents = ev;
+                                newEvent._next = asyncEvents;
+                                asyncEvents = newEvent;
                             }
                         }
                     }
@@ -303,6 +303,12 @@ namespace System.Net.Sockets
             public SocketAsyncContext? _context;
             public Interop.Sys.SocketEvents _events;
 
+            // Assuming that SocketIOEvent + overhead of a queue slot takes ~ 64bytes
+            // we will limit the number of events in the pool to 1MB / 64bytes = 16k
+            // to prevent degenerate cases.
+            // The count of events in flight per engine should normally be much less than this.
+            private const int MaxEventPoolCount = 1024 * 1024 / 64;
+
             public SocketIOEvent(ConcurrentQueue<SocketIOEvent> queue)
             {
                 _queue = queue;
@@ -317,7 +323,6 @@ namespace System.Net.Sockets
 
             void IThreadPoolWorkItem.Execute()
             {
-
                 SocketIOEvent? next = _next;
                 while (next != null)
                 {
@@ -331,10 +336,13 @@ namespace System.Net.Sockets
                 SocketAsyncContext context = _context!;
                 Interop.Sys.SocketEvents events = _events;
 
-                _context = null;
-                _events = Interop.Sys.SocketEvents.None;
-                _next = null;
-                _queue.Enqueue(this);
+                if (_queue.Count < MaxEventPoolCount)
+                {
+                    _context = null;
+                    _events = Interop.Sys.SocketEvents.None;
+                    _next = null;
+                    _queue.Enqueue(this);
+                }
 
                 context.HandleEvents(events);
             }
