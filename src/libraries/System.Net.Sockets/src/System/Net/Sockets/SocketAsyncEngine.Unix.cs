@@ -253,6 +253,7 @@ namespace System.Net.Sockets
             [MethodImpl(MethodImplOptions.NoInlining)]
             public void HandleSocketEvents(int numEvents)
             {
+                SocketIOEvent? asyncEvents = null;
                 foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(Buffer, numEvents))
                 {
                     Debug.Assert((uint)socketEvent.Data < (uint)s_registeredContexts.Length);
@@ -278,10 +279,16 @@ namespace System.Net.Sockets
                                     existingEvent :
                                     new SocketIOEvent(_eventQueue);
 
-                                ThreadPool.UnsafeQueueUserWorkItem(ev.With(context, events), preferLocal: false);
+                                ev._next = asyncEvents;
+                                asyncEvents = ev;
                             }
                         }
                     }
+                }
+
+                if (asyncEvents is not null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
                 }
             }
         }
@@ -289,6 +296,7 @@ namespace System.Net.Sockets
         private sealed class SocketIOEvent : IThreadPoolWorkItem
         {
             private readonly ConcurrentQueue<SocketIOEvent> _queue;
+            public SocketIOEvent? _next;
 
             public SocketAsyncContext? _context;
             public Interop.Sys.SocketEvents _events;
@@ -307,11 +315,23 @@ namespace System.Net.Sockets
 
             void IThreadPoolWorkItem.Execute()
             {
-                SocketAsyncContext context = _context!;
-                _context = null;
 
+                SocketIOEvent? next = _next;
+                while ( next != null)
+                {
+                    SocketIOEvent cur = next;
+                    next = next._next;
+                    cur._next = null;
+
+                    ThreadPool.UnsafeQueueUserWorkItem(cur, preferLocal: true);
+                }
+
+                SocketAsyncContext context = _context!;
                 Interop.Sys.SocketEvents events = _events;
+
+                _context = null;
                 _events = Interop.Sys.SocketEvents.None;
+                _next = null;
 
                 _queue.Enqueue(this);
 
