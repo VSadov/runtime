@@ -279,6 +279,8 @@ namespace System.Net.Sockets
                                     existingEvent :
                                     new SocketIOEvent(_eventQueue);
 
+                                ev = ev.With(context, events);
+
                                 ev._next = asyncEvents;
                                 asyncEvents = ev;
                             }
@@ -317,10 +319,10 @@ namespace System.Net.Sockets
             {
 
                 SocketIOEvent? next = _next;
-                while ( next != null)
+                while (next != null)
                 {
                     SocketIOEvent cur = next;
-                    next = next._next;
+                    next = cur._next;
                     cur._next = null;
 
                     ThreadPool.UnsafeQueueUserWorkItem(cur, preferLocal: true);
@@ -332,7 +334,6 @@ namespace System.Net.Sockets
                 _context = null;
                 _events = Interop.Sys.SocketEvents.None;
                 _next = null;
-
                 _queue.Enqueue(this);
 
                 context.HandleEvents(events);
