@@ -253,10 +253,62 @@ namespace System.Net.Sockets
             [MethodImpl(MethodImplOptions.NoInlining)]
             public void HandleSocketEvents(int numEvents)
             {
+                Interop.Sys.SocketEvent* buffer = Buffer;
+
+                // first we look for async events and queue them to the thread pool to get them going,
+                // then we process the inline events.
                 SocketIOEvent? asyncEvents = null;
-                foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(Buffer, numEvents))
+                for (int i = 0; i < numEvents; i++)
                 {
+                    var socketEvent = buffer[i];
                     Debug.Assert((uint)socketEvent.Data < (uint)s_registeredContexts.Length);
+
+                    // The context may be null if the socket was unregistered right before the event was processed.
+                    // The slot in s_registeredContexts may have been reused by a different context, in which case the
+                    // incorrect socket will notice that no information is available yet and harmlessly retry, waiting for new events.
+                    SocketAsyncContext? context = s_registeredContexts[(uint)socketEvent.Data];
+
+                    if (context is null)
+                    {
+                        // mark as handled
+                        buffer[i].Data = -1;
+                        continue;
+                    }
+
+                    if (!context.PreferInlineCompletions)
+                    {
+                        Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
+
+                        if (events != Interop.Sys.SocketEvents.None)
+                        {
+                            SocketIOEvent newEvent = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
+                                existingEvent :
+                                new SocketIOEvent(_eventQueue);
+
+                            newEvent = newEvent.With(context, events);
+
+                            newEvent._next = asyncEvents;
+                            asyncEvents = newEvent;
+                        }
+
+                        // mark as handled
+                        buffer[i].Data = -1;
+                    }
+                }
+
+                if (asyncEvents is not null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
+                }
+
+                // second pass - pick up unhadled events and process them inline.
+                for (int i = 0; i < numEvents; i++)
+                {
+                    var socketEvent = buffer[i];
+                    if (socketEvent.Data == -1)
+                    {
+                        continue;
+                    }
 
                     // The context may be null if the socket was unregistered right before the event was processed.
                     // The slot in s_registeredContexts may have been reused by a different context, in which case the
@@ -265,32 +317,8 @@ namespace System.Net.Sockets
 
                     if (context is not null)
                     {
-                        if (context.PreferInlineCompletions)
-                        {
-                            context.HandleEventsInline(socketEvent.Events);
-                        }
-                        else
-                        {
-                            Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
-
-                            if (events != Interop.Sys.SocketEvents.None)
-                            {
-                                SocketIOEvent newEvent = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
-                                    existingEvent :
-                                    new SocketIOEvent(_eventQueue);
-
-                                newEvent = newEvent.With(context, events);
-
-                                newEvent._next = asyncEvents;
-                                asyncEvents = newEvent;
-                            }
-                        }
+                        context.HandleEventsInline(socketEvent.Events);
                     }
-                }
-
-                if (asyncEvents is not null)
-                {
-                    ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
                 }
             }
         }
