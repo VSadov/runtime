@@ -258,6 +258,7 @@ namespace System.Net.Sockets
                 // first we look for async events and queue them to the thread pool to get them going,
                 // then we process the inline events.
                 SocketIOEvent? asyncEvents = null;
+                int batchCount = 0;
                 for (int i = 0; i < numEvents; i++)
                 {
                     var socketEvent = buffer[i];
@@ -286,9 +287,16 @@ namespace System.Net.Sockets
                                 new SocketIOEvent(_eventQueue);
 
                             newEvent = newEvent.With(context, events);
-
                             newEvent._next = asyncEvents;
                             asyncEvents = newEvent;
+                            batchCount++;
+
+                            if (batchCount == 32)
+                            {
+                                ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
+                                asyncEvents = null;
+                                batchCount = 0;
+                            }
                         }
 
                         // mark as handled
@@ -352,6 +360,10 @@ namespace System.Net.Sockets
             void IThreadPoolWorkItem.Execute()
             {
                 SocketIOEvent? next = _next;
+
+                // Unpack all events except the first one into the local queue.
+                // We intend to execute the entire batch - unless other threads have
+                // nothing to do and steal our work.
                 while (next != null)
                 {
                     SocketIOEvent cur = next;
