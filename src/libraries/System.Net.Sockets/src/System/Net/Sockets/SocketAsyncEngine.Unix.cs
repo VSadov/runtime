@@ -361,9 +361,7 @@ namespace System.Net.Sockets
             {
                 SocketIOEvent? next = _next;
 
-                // Unpack all events except the first one into the local queue.
-                // We intend to execute the entire batch - unless other threads have
-                // nothing to do and steal our work.
+                // Unpack all events in the batch except the first one into the local queue.
                 while (next != null)
                 {
                     SocketIOEvent cur = next;
