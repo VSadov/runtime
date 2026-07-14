@@ -6,9 +6,9 @@ namespace System.Threading.Channels
     internal static partial class ChannelUtilities
     {
         internal static void UnsafeQueueUserWorkItem<TState>(Action<TState> action, TState state) =>
-            ThreadPool.UnsafeQueueUserWorkItem(action, state, preferLocal: false);
+            ThreadPool.UnsafeQueueUserWorkItem(action, state, preferLocal: true);
 
         internal static void QueueUserWorkItem(Action<object?> action, object? state) =>
-            ThreadPool.QueueUserWorkItem(action, state, preferLocal: false);
+            ThreadPool.QueueUserWorkItem(action, state, preferLocal: true);
     }
 }
