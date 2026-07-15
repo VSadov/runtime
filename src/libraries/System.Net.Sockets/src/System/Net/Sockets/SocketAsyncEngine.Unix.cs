@@ -76,6 +76,17 @@ namespace System.Net.Sockets
             return engines;
         }
 
+        private static readonly int s_batchSize = GetBatchSize();
+        private static int GetBatchSize()
+        {
+            if (uint.TryParse(Environment.GetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_BATCH_SIZE"), out uint batchSize))
+            {
+                return (int)batchSize;
+            }
+            return 32;
+        }
+
+
         /// <summary>
         /// Each <see cref="SocketAsyncContext"/> is assigned an index into this table while registered with a <see cref="SocketAsyncEngine"/>.
         /// <para>The index is used as the <see cref="Interop.Sys.SocketEvent.Data"/> to quickly map events to <see cref="SocketAsyncContext"/>s.</para>
@@ -291,7 +302,7 @@ namespace System.Net.Sockets
                             asyncEvents = newEvent;
                             batchCount++;
 
-                            if (batchCount == 32)
+                            if (batchCount >= s_batchSize)
                             {
                                 ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
                                 asyncEvents = null;
