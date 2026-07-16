@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Runtime.CompilerServices;
@@ -187,9 +188,21 @@ namespace System.Threading
                 1024;
 #endif
 
+            // We will schedule events to the thread pool in batches of this size,
+            // to reduce the number of work items queued at a given time.
+            // There is not a lot of sensitivity to the exact batch size.
+            private const int EventBatchSize =
+#if DEBUG
+                4;
+#else
+                32;
+#endif
+
             private readonly nint _port;
             private readonly Interop.Kernel32.OVERLAPPED_ENTRY* _nativeEvents;
-            private readonly ThreadPoolTypedWorkItemQueue? _events;
+
+            // Pool of reusable Event objects to avoid allocating one per completion.
+            private readonly ConcurrentQueue<Event>? _eventPool;
             private readonly Thread _thread;
 
             public IOCompletionPoller(nint port)
@@ -202,7 +215,7 @@ namespace System.Threading
                     _nativeEvents =
                         (Interop.Kernel32.OVERLAPPED_ENTRY*)
                         NativeMemory.Alloc(NativeEventCapacity, (nuint)sizeof(Interop.Kernel32.OVERLAPPED_ENTRY));
-                    _events = new ThreadPoolTypedWorkItemQueue();
+                    _eventPool = new ConcurrentQueue<Event>();
 
                     // These threads don't run user code, use a smaller stack size
                     _thread = new Thread(Poll, SmallStackSizeBytes);
@@ -237,7 +250,7 @@ namespace System.Threading
             private void Poll()
             {
                 Debug.Assert(_nativeEvents != null);
-                Debug.Assert(_events != null);
+                Debug.Assert(_eventPool != null);
 
                 while (
                     Interop.Kernel32.GetQueuedCompletionStatusEx(
@@ -251,16 +264,38 @@ namespace System.Threading
                     Debug.Assert(nativeEventCount > 0);
                     Debug.Assert(nativeEventCount <= NativeEventCapacity);
 
+                    // Build batches of events as linked lists and schedule them to the thread pool.
+                    // Each batch is unpacked to the worker's local queue when it is processed, which
+                    // avoids contending on a shared queue and lets other workers steal the work.
+                    Event? events = null;
+                    int batchCount = 0;
                     for (int i = 0; i < nativeEventCount; ++i)
                     {
                         Interop.Kernel32.OVERLAPPED_ENTRY* nativeEvent = &_nativeEvents[i];
                         if (nativeEvent->lpOverlapped != null) // shouldn't be null since null is not posted
                         {
-                            _events.BatchEnqueue(new Event(nativeEvent->lpOverlapped, nativeEvent->dwNumberOfBytesTransferred));
+                            Event newEvent = _eventPool.TryDequeue(out Event? existingEvent) ?
+                                existingEvent :
+                                new Event(_eventPool);
+
+                            newEvent = newEvent.With(nativeEvent->lpOverlapped, nativeEvent->dwNumberOfBytesTransferred);
+                            newEvent._next = events;
+                            events = newEvent;
+                            batchCount++;
+
+                            if (batchCount >= EventBatchSize)
+                            {
+                                ThreadPool.UnsafeQueueUserWorkItem(events, preferLocal: false);
+                                events = null;
+                                batchCount = 0;
+                            }
                         }
                     }
 
-                    _events.CompleteBatchEnqueue();
+                    if (events is not null)
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItem(events, preferLocal: false);
+                    }
                 }
 
                 ThrowHelper.ThrowApplicationException(Marshal.GetHRForLastWin32Error());
@@ -269,7 +304,7 @@ namespace System.Threading
             private void PollAndInlineCallbacks()
             {
                 Debug.Assert(_nativeEvents == null);
-                Debug.Assert(_events == null);
+                Debug.Assert(_eventPool == null);
 
                 while (true)
                 {
@@ -299,9 +334,61 @@ namespace System.Threading
                 }
             }
 
-            internal readonly partial struct Event
+            internal sealed partial class Event : IThreadPoolWorkItem
             {
-                public void Invoke()
+                private readonly ConcurrentQueue<Event> _pool;
+                public Event? _next;
+
+                public NativeOverlapped* nativeOverlapped;
+                public uint bytesTransferred;
+
+                // Assuming that Event + overhead of a queue slot takes ~ 64 bytes,
+                // we will limit the number of events in the pool to 1MB / 64bytes = 16k items
+                // to prevent unlimited growth in edge cases.
+                // The count of events in flight per poller should normally be much less than this.
+                private const int MaxEventPoolCount = 1024 * 1024 / 64;
+
+                public Event(ConcurrentQueue<Event> pool)
+                {
+                    _pool = pool;
+                }
+
+                public Event With(NativeOverlapped* nativeOverlapped, uint bytesTransferred)
+                {
+                    this.nativeOverlapped = nativeOverlapped;
+                    this.bytesTransferred = bytesTransferred;
+                    return this;
+                }
+
+                void IThreadPoolWorkItem.Execute()
+                {
+                    Event? next = _next;
+
+                    // Unpack all events in the batch except the first one into the local queue.
+                    while (next != null)
+                    {
+                        Event cur = next;
+                        next = cur._next;
+                        cur._next = null;
+
+                        ThreadPool.UnsafeQueueUserWorkItem(cur, preferLocal: true);
+                    }
+
+                    NativeOverlapped* nativeOverlapped = this.nativeOverlapped;
+                    uint bytesTransferred = this.bytesTransferred;
+
+                    if (_pool.Count < MaxEventPoolCount)
+                    {
+                        this.nativeOverlapped = null;
+                        this.bytesTransferred = 0;
+                        _next = null;
+                        _pool.Enqueue(this);
+                    }
+
+                    Invoke(nativeOverlapped, bytesTransferred);
+                }
+
+                private static void Invoke(NativeOverlapped* nativeOverlapped, uint bytesTransferred)
                 {
                     if (NativeRuntimeEventSource.Log.IsEnabled())
                     {
@@ -317,15 +404,6 @@ namespace System.Threading
                     }
 
                     IOCompletionCallbackHelper.PerformSingleIOCompletionCallback(errorCode, bytesTransferred, nativeOverlapped);
-                }
-
-                public readonly NativeOverlapped* nativeOverlapped;
-                public readonly uint bytesTransferred;
-
-                public Event(NativeOverlapped* nativeOverlapped, uint bytesTransferred)
-                {
-                    this.nativeOverlapped = nativeOverlapped;
-                    this.bytesTransferred = bytesTransferred;
                 }
             }
         }
