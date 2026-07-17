@@ -285,7 +285,7 @@ namespace System.Threading
 
                             if (batchCount >= EventBatchSize)
                             {
-                                ThreadPool.UnsafeQueueUserWorkItem(events, preferLocal: false);
+                                ThreadPool.UnsafeQueueUserWorkItemInternal(events, preferLocal: false);
                                 events = null;
                                 batchCount = 0;
                             }
@@ -294,7 +294,7 @@ namespace System.Threading
 
                     if (events is not null)
                     {
-                        ThreadPool.UnsafeQueueUserWorkItem(events, preferLocal: false);
+                        ThreadPool.UnsafeQueueUserWorkItemInternal(events, preferLocal: false);
                     }
                 }
 
@@ -365,13 +365,19 @@ namespace System.Threading
                     Event? next = _next;
 
                     // Unpack all events in the batch except the first one into the local queue.
-                    while (next != null)
+                    if (next != null)
                     {
-                        Event cur = next;
-                        next = cur._next;
-                        cur._next = null;
-
-                        ThreadPool.UnsafeQueueUserWorkItem(cur, preferLocal: true);
+                        using (ThreadPool.LocalBatchEnqueuer enq = new ThreadPool.LocalBatchEnqueuer())
+                        {
+                            do
+                            {
+                                Event cur = next;
+                                next = cur._next;
+                                cur._next = null;
+                                enq.Enqueue(cur);
+                            }
+                            while (next != null);
+                        }
                     }
 
                     NativeOverlapped* nativeOverlapped = this.nativeOverlapped;
