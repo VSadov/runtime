@@ -420,7 +420,7 @@ namespace System.Threading
             Environment.ProcessorCount <= 32 ? 0 :
                 (Environment.ProcessorCount + (ProcessorsPerAssignableWorkItemQueue - 1)) / ProcessorsPerAssignableWorkItemQueue;
 
-        internal bool _loggingEnabled;
+        private bool _loggingEnabled;
 
         // SOS's ThreadPool command depends on the following names
         internal readonly WorkQueue workItems = new WorkQueue();
@@ -1606,36 +1606,6 @@ namespace System.Threading
             s_workQueue.Enqueue(callBack, forceGlobal: !preferLocal);
         internal static void UnsafeQueueHighPriorityWorkItemInternal(IThreadPoolWorkItem callBack) =>
             s_workQueue.EnqueueAtHighPriority(callBack);
-
-        // This is a ref struct because the queue is thread-specific and
-        // also to ensure that it is not held for longer than the execution
-        // of the owner task.
-        internal ref struct LocalBatchEnqueuer : IDisposable
-        {
-            private readonly ThreadPoolWorkQueue.WorkStealingQueue _queue;
-
-            public LocalBatchEnqueuer()
-            {
-                ThreadPoolWorkQueueThreadLocals tl = ThreadPoolWorkQueueThreadLocals.threadLocals!;
-                // this should be called from a threadpool thread executing a workitem,
-                // thus threadLocals is already initialized.
-                Debug.Assert(tl != null);
-                _queue = tl.workStealingQueue;
-            }
-
-            public void Enqueue(object callback)
-            {
-                if (ThreadPool.s_workQueue._loggingEnabled)
-                    FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
-
-                _queue.LocalPush(callback);
-            }
-
-            public void Dispose()
-            {
-                ThreadPool.EnsureWorkerRequested();
-            }
-        }
 
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(object workItem)

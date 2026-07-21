@@ -378,19 +378,13 @@ namespace System.Threading
                     Event? left = _left;
                     Event? right = _right;
 
-                    if (left is not null || right is not null)
+                    if (left is not null)
                     {
-                        using (ThreadPool.LocalBatchEnqueuer enq = new ThreadPool.LocalBatchEnqueuer())
-                        {
-                            if (left is not null)
-                            {
-                                enq.Enqueue(left);
-                            }
-                            if (right is not null)
-                            {
-                                enq.Enqueue(right);
-                            }
-                        }
+                        ThreadPool.UnsafeQueueUserWorkItemInternal(left, preferLocal: true);
+                    }
+                    if (right is not null)
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItemInternal(right, preferLocal: true);
                     }
 
                     NativeOverlapped* nativeOverlapped = this.nativeOverlapped;
