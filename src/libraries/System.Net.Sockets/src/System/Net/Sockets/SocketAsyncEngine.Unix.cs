@@ -19,19 +19,6 @@ namespace System.Net.Sockets
             1024;
 #endif
 
-        // We will submit events to the thread pool in batches of this size,
-        // to reduce the number of work items queued at a given time.
-        // There is not a lot of sensitivity to the exact batch size.
-        // We pick sqrt(EventBufferCount), to minimize
-        // sum of queue lengths for either batched or unbatched events.
-        // It is not an extremely important number though.
-        private const int EventBatchSize =
-#if DEBUG
-            4;
-#else
-            32;
-#endif
-
         // Socket continuations are dispatched to the ThreadPool from the event thread.
         // This avoids continuations blocking the event handling.
         // Setting PreferInlineCompletions allows continuations to run directly on the event thread.
@@ -256,19 +243,25 @@ namespace System.Net.Sockets
             public Interop.Sys.SocketEvent* Buffer { get; }
             private readonly ConcurrentQueue<SocketIOEvent> _eventQueue;
 
+            // Reusable, preallocated scratch buffer to collect the async events produced by a
+            // single WaitForSocketEvents call before packing them into a balanced binary tree.
+            // The number of async events can never exceed the number of socket events, which is
+            // bounded by EventBufferCount, so this array never needs to grow.
+            private readonly SocketIOEvent[] _asyncEvents;
+
             public SocketEventHandler(SocketAsyncEngine engine)
             {
                 Buffer = engine._buffer;
                 _eventQueue = engine._eventQueue;
+                _asyncEvents = new SocketIOEvent[EventBufferCount];
             }
 
             [MethodImpl(MethodImplOptions.NoInlining)]
             public void HandleSocketEvents(int numEvents)
             {
-                Interop.Sys.SocketEvent* buffer = Buffer;
+                SocketIOEvent[] asyncEvents = _asyncEvents;
+                int count = 0;
 
-                SocketIOEvent? asyncEvents = null;
-                int batchCount = 0;
                 foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(Buffer, numEvents))
                 {
                     Debug.Assert((uint)socketEvent.Data < (uint)s_registeredContexts.Length);
@@ -294,33 +287,49 @@ namespace System.Net.Sockets
                                     existingEvent :
                                     new SocketIOEvent(_eventQueue);
 
-                                newEvent = newEvent.With(context, events);
-                                newEvent._next = asyncEvents;
-                                asyncEvents = newEvent;
-                                batchCount++;
-
-                                if (batchCount >= EventBatchSize)
-                                {
-                                    ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
-                                    asyncEvents = null;
-                                    batchCount = 0;
-                                }
+                                asyncEvents[count++] = newEvent.With(context, events);
                             }
                         }
                     }
                 }
 
-                if (asyncEvents is not null)
+                if (count > 0)
                 {
-                    ThreadPool.UnsafeQueueUserWorkItem(asyncEvents, preferLocal: false);
+                    // Pack all the events into a single balanced binary tree and post it to the
+                    // thread pool queue as one item. The tree is unpacked into the local
+                    // queues as the items execute.
+                    SocketIOEvent root = BuildTree(new ReadOnlySpan<SocketIOEvent>(asyncEvents, 0, count));
+
+                    // Clear the references so the scratch buffer doesn't keep contexts alive.
+                    Array.Clear(asyncEvents, 0, count);
+
+                    ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
                 }
+            }
+
+            // Builds a balanced binary tree out of the events in the span, returning its root.
+            private static SocketIOEvent BuildTree(ReadOnlySpan<SocketIOEvent> events)
+            {
+                Debug.Assert(!events.IsEmpty);
+
+                SocketIOEvent root = events[0];
+                ReadOnlySpan<SocketIOEvent> rest = events.Slice(1);
+
+                // Give the left side the extra element when the count is odd.
+                int leftCount = (rest.Length + 1) / 2;
+
+                root._left = leftCount > 0 ? BuildTree(rest.Slice(0, leftCount)) : null;
+                root._right = rest.Length > leftCount ? BuildTree(rest.Slice(leftCount)) : null;
+
+                return root;
             }
         }
 
         private sealed class SocketIOEvent : IThreadPoolWorkItem
         {
             private readonly ConcurrentQueue<SocketIOEvent> _queue;
-            public SocketIOEvent? _next;
+            public SocketIOEvent? _left;
+            public SocketIOEvent? _right;
 
             public SocketAsyncContext? _context;
             public Interop.Sys.SocketEvents _events;
@@ -345,16 +354,18 @@ namespace System.Net.Sockets
 
             void IThreadPoolWorkItem.Execute()
             {
-                SocketIOEvent? next = _next;
+                // Unpack the child subtrees into the local queue. Each of them will in turn
+                // unpack its own children when it executes.
+                SocketIOEvent? left = _left;
+                SocketIOEvent? right = _right;
 
-                // Unpack all events in the batch except the first one into the local queue.
-                while (next != null)
+                if (left is not null)
                 {
-                    SocketIOEvent cur = next;
-                    next = cur._next;
-                    cur._next = null;
-
-                    ThreadPool.UnsafeQueueUserWorkItem(cur, preferLocal: true);
+                    ThreadPool.UnsafeQueueUserWorkItem(left, preferLocal: true);
+                }
+                if (right is not null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(right, preferLocal: true);
                 }
 
                 SocketAsyncContext context = _context!;
@@ -364,7 +375,8 @@ namespace System.Net.Sockets
                 {
                     _context = null;
                     _events = Interop.Sys.SocketEvents.None;
-                    _next = null;
+                    _left = null;
+                    _right = null;
                     _queue.Enqueue(this);
                 }
 
