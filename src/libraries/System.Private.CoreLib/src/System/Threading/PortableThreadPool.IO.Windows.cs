@@ -188,21 +188,16 @@ namespace System.Threading
                 1024;
 #endif
 
-            // We will schedule events to the thread pool in batches of this size,
-            // to reduce the number of work items queued at a given time.
-            // There is not a lot of sensitivity to the exact batch size.
-            private const int EventBatchSize =
-#if DEBUG
-                4;
-#else
-                32;
-#endif
-
             private readonly nint _port;
             private readonly Interop.Kernel32.OVERLAPPED_ENTRY* _nativeEvents;
 
             // Pool of reusable Event objects to avoid allocating one per completion.
             private readonly ConcurrentQueue<Event>? _eventPool;
+
+            // Reusable, preallocated scratch buffer to collect the events produced by a single
+            // GetQueuedCompletionStatusEx call before packing them into a balanced binary tree.
+            // The number of events can never exceed NativeEventCapacity, so this array never needs to grow.
+            private readonly Event[]? _events;
             private readonly Thread _thread;
 
             public IOCompletionPoller(nint port)
@@ -216,6 +211,7 @@ namespace System.Threading
                         (Interop.Kernel32.OVERLAPPED_ENTRY*)
                         NativeMemory.Alloc(NativeEventCapacity, (nuint)sizeof(Interop.Kernel32.OVERLAPPED_ENTRY));
                     _eventPool = new ConcurrentQueue<Event>();
+                    _events = new Event[NativeEventCapacity];
 
                     // These threads don't run user code, use a smaller stack size
                     _thread = new Thread(Poll, SmallStackSizeBytes);
@@ -251,6 +247,7 @@ namespace System.Threading
             {
                 Debug.Assert(_nativeEvents != null);
                 Debug.Assert(_eventPool != null);
+                Debug.Assert(_events != null);
 
                 while (
                     Interop.Kernel32.GetQueuedCompletionStatusEx(
@@ -264,11 +261,8 @@ namespace System.Threading
                     Debug.Assert(nativeEventCount > 0);
                     Debug.Assert(nativeEventCount <= NativeEventCapacity);
 
-                    // Build batches of events as linked lists and schedule them to the thread pool.
-                    // Each batch is unpacked to the worker's local queue when it is processed, which
-                    // avoids contending on a shared queue and lets other workers steal the work.
-                    Event? events = null;
-                    int batchCount = 0;
+                    Event[] events = _events;
+                    int count = 0;
                     for (int i = 0; i < nativeEventCount; ++i)
                     {
                         Interop.Kernel32.OVERLAPPED_ENTRY* nativeEvent = &_nativeEvents[i];
@@ -278,33 +272,49 @@ namespace System.Threading
                                 existingEvent :
                                 new Event(_eventPool);
 
-                            newEvent = newEvent.With(nativeEvent->lpOverlapped, nativeEvent->dwNumberOfBytesTransferred);
-                            newEvent._next = events;
-                            events = newEvent;
-                            batchCount++;
-
-                            if (batchCount >= EventBatchSize)
-                            {
-                                ThreadPool.UnsafeQueueUserWorkItemInternal(events, preferLocal: false);
-                                events = null;
-                                batchCount = 0;
-                            }
+                            events[count++] = newEvent.With(nativeEvent->lpOverlapped, nativeEvent->dwNumberOfBytesTransferred);
                         }
                     }
 
-                    if (events is not null)
+                    if (count > 0)
                     {
-                        ThreadPool.UnsafeQueueUserWorkItemInternal(events, preferLocal: false);
+                        // Pack all the events into a single balanced binary tree and post it to the
+                        // thread pool queue as one item. The tree is unpacked into the local
+                        // queues as the items execute.
+                        Event root = BuildTree(new ReadOnlySpan<Event>(events, 0, count));
+
+                        // Clear the references so the scratch buffer doesn't keep the events alive.
+                        Array.Clear(events, 0, count);
+
+                        ThreadPool.UnsafeQueueUserWorkItemInternal(root, preferLocal: false);
                     }
                 }
 
                 ThrowHelper.ThrowApplicationException(Marshal.GetHRForLastWin32Error());
             }
 
+            // Builds a balanced binary tree out of the events in the span, returning its root.
+            private static Event BuildTree(ReadOnlySpan<Event> events)
+            {
+                Debug.Assert(!events.IsEmpty);
+
+                Event root = events[0];
+                ReadOnlySpan<Event> rest = events.Slice(1);
+
+                // Give the left side the extra element when the count is odd.
+                int leftCount = (rest.Length + 1) / 2;
+
+                root._left = leftCount > 0 ? BuildTree(rest.Slice(0, leftCount)) : null;
+                root._right = rest.Length > leftCount ? BuildTree(rest.Slice(leftCount)) : null;
+
+                return root;
+            }
+
             private void PollAndInlineCallbacks()
             {
                 Debug.Assert(_nativeEvents == null);
                 Debug.Assert(_eventPool == null);
+                Debug.Assert(_events == null);
 
                 while (true)
                 {
@@ -337,7 +347,8 @@ namespace System.Threading
             internal sealed partial class Event : IThreadPoolWorkItem
             {
                 private readonly ConcurrentQueue<Event> _pool;
-                public Event? _next;
+                public Event? _left;
+                public Event? _right;
 
                 public NativeOverlapped* nativeOverlapped;
                 public uint bytesTransferred;
@@ -362,21 +373,23 @@ namespace System.Threading
 
                 void IThreadPoolWorkItem.Execute()
                 {
-                    Event? next = _next;
+                    // Unpack the child subtrees into the local queue. Each of them will in turn
+                    // unpack its own children when it executes.
+                    Event? left = _left;
+                    Event? right = _right;
 
-                    // Unpack all events in the batch except the first one into the local queue.
-                    if (next != null)
+                    if (left is not null || right is not null)
                     {
                         using (ThreadPool.LocalBatchEnqueuer enq = new ThreadPool.LocalBatchEnqueuer())
                         {
-                            do
+                            if (left is not null)
                             {
-                                Event cur = next;
-                                next = cur._next;
-                                cur._next = null;
-                                enq.Enqueue(cur);
+                                enq.Enqueue(left);
                             }
-                            while (next != null);
+                            if (right is not null)
+                            {
+                                enq.Enqueue(right);
+                            }
                         }
                     }
 
@@ -387,7 +400,8 @@ namespace System.Threading
                     {
                         this.nativeOverlapped = null;
                         this.bytesTransferred = 0;
-                        _next = null;
+                        _left = null;
+                        _right = null;
                         _pool.Enqueue(this);
                     }
 
