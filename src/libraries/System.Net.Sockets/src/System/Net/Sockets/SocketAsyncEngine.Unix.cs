@@ -256,11 +256,19 @@ namespace System.Net.Sockets
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void HandleAndDispatchSocketEvents(int numEvents)
         {
-            SocketIOEvent? root = HandleSocketEvents(numEvents);
-            if (root is not null)
+            (SocketAsyncContext? rootContext, Interop.Sys.SocketEvents rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
+            if (rootContext is null)
             {
-                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+                Debug.Assert(children is null);
+                return;
             }
+
+            // The event thread must not run the completion itself, so the root needs a work item too.
+            SocketIOEvent root = RentEvent();
+            root.With(rootContext, rootEvents);
+            root._left = children;
+
+            ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
         }
 
         // Performs a non-blocking poll of the event port on a thread pool thread.
@@ -287,17 +295,24 @@ namespace System.Net.Sockets
                     return;
                 }
 
-                SocketIOEvent? root = HandleSocketEvents(numEvents);
-                if (root is null)
+                (SocketAsyncContext? rootContext, Interop.Sys.SocketEvents rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
+                if (rootContext is null)
                 {
                     // All the events were handled inline, keep scanning.
+                    Debug.Assert(children is null);
                     ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
                     return;
                 }
 
-                root.QueueChildren();
+                if (children is not null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(children, preferLocal: true);
+                }
+
                 ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
-                root.RunAndRecycle();
+
+                // Run the first event inline - no work item is needed for it.
+                rootContext.HandleEvents(rootEvents);
             }
             catch (Exception e)
             {
@@ -326,6 +341,11 @@ namespace System.Net.Sockets
             }
         }
 
+        // Handles the socket events currently in the buffer.
+        // The first async event is returned as a raw (context, events) pair, so that a caller that
+        // is going to run it inline does not need a SocketIOEvent for it at all. Any remaining async
+        // events are packed into a balanced binary tree, whose root is returned in <paramref name="children"/>.
+        //
         // The JIT is allowed to arbitrarily extend the lifetime of locals, which may retain SocketAsyncContext references,
         // indirectly preventing Socket instances to be finalized, despite being no longer referenced by user code.
         // To avoid this, the event handling logic is delegated to a non-inlined processing method so that the
@@ -333,9 +353,15 @@ namespace System.Net.Sockets
         // (potentially long) WaitForSocketEvents wait.
         // See discussion: https://github.com/dotnet/runtime/issues/37064
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private SocketIOEvent? HandleSocketEvents(int numEvents)
+        private (SocketAsyncContext? Context, Interop.Sys.SocketEvents Events) HandleSocketEvents(int numEvents, out SocketIOEvent? children)
         {
             SocketIOEvent[] asyncEvents = _asyncEvents;
+
+            // The first async event is kept in locals as a plain (context, events) pair.
+            // Only the subsequent ones need a SocketIOEvent and a slot in the scratch array, so the
+            // very common case of a single async event allocates nothing and touches no array.
+            SocketAsyncContext? rootContext = null;
+            Interop.Sys.SocketEvents rootEvents = Interop.Sys.SocketEvents.None;
             int count = 0;
 
             foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(_buffer, numEvents))
@@ -359,46 +385,80 @@ namespace System.Net.Sockets
 
                         if (events != Interop.Sys.SocketEvents.None)
                         {
-                            SocketIOEvent newEvent = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
-                                existingEvent :
-                                new SocketIOEvent(_eventQueue);
-
-                            asyncEvents[count++] = newEvent.With(context, events);
+                            if (rootContext is null)
+                            {
+                                rootContext = context;
+                                rootEvents = events;
+                            }
+                            else
+                            {
+                                SocketIOEvent newEvent = RentEvent();
+                                newEvent.With(context, events);
+                                asyncEvents[count++] = newEvent;
+                            }
                         }
                     }
                 }
             }
 
-            if (count > 0)
+            if (count == 0)
             {
-                // Pack all the events into a single balanced binary tree.
-                // The tree is unpacked into the local queues as the items execute.
-                SocketIOEvent root = BuildTree(new ReadOnlySpan<SocketIOEvent>(asyncEvents, 0, count));
-
-                // Clear the references so the scratch buffer doesn't keep contexts alive.
-                Array.Clear(asyncEvents, 0, count);
-
-                return root;
+                children = null;
+                return (rootContext, rootEvents);
             }
 
-            return null;
+            // Pack the remaining events into a balanced binary tree.
+            // The tree is unpacked into the local queues as the items execute.
+            SocketIOEvent root = asyncEvents[0];
+            LinkChildren(root, new ReadOnlySpan<SocketIOEvent>(asyncEvents, 1, count - 1));
+
+            // Clear the references so the scratch buffer doesn't keep contexts alive.
+            Array.Clear(asyncEvents, 0, count);
+
+            children = root;
+            return (rootContext, rootEvents);
         }
 
-        // Builds a balanced binary tree out of the events in the span, returning its root.
-        private static SocketIOEvent BuildTree(ReadOnlySpan<SocketIOEvent> events)
-        {
-            Debug.Assert(!events.IsEmpty);
+        private SocketIOEvent RentEvent() =>
+            _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
+                existingEvent :
+                new SocketIOEvent(_eventQueue);
 
-            SocketIOEvent root = events[0];
-            ReadOnlySpan<SocketIOEvent> rest = events.Slice(1);
+        // Arranges the events in the span into a balanced binary tree hanging off the given root.
+        private static void LinkChildren(SocketIOEvent root, ReadOnlySpan<SocketIOEvent> rest)
+        {
+            // Events are handed out with null children, either fresh or cleared when recycled.
+            Debug.Assert(root._left is null && root._right is null);
+
+            switch (rest.Length)
+            {
+                case 0:
+                    return;
+
+                case 1:
+                    root._left = rest[0];
+                    return;
+
+                case 2:
+                    root._left = rest[0];
+                    root._right = rest[1];
+                    return;
+            }
 
             // Give the left side the extra element when the count is odd.
             int leftCount = (rest.Length + 1) / 2;
 
-            root._left = leftCount > 0 ? BuildTree(rest.Slice(0, leftCount)) : null;
-            root._right = rest.Length > leftCount ? BuildTree(rest.Slice(leftCount)) : null;
+            ReadOnlySpan<SocketIOEvent> left = rest.Slice(0, leftCount);
+            ReadOnlySpan<SocketIOEvent> right = rest.Slice(leftCount);
 
-            return root;
+            root._left = left[0];
+            LinkChildren(left[0], left.Slice(1));
+
+            if (!right.IsEmpty)
+            {
+                root._right = right[0];
+                LinkChildren(right[0], right.Slice(1));
+            }
         }
 
         private sealed class SocketIOEvent : IThreadPoolWorkItem
@@ -421,23 +481,16 @@ namespace System.Net.Sockets
                 _queue = queue;
             }
 
-            public SocketIOEvent With(SocketAsyncContext context, Interop.Sys.SocketEvents events)
+            public void With(SocketAsyncContext context, Interop.Sys.SocketEvents events)
             {
                 _context = context;
                 _events = events;
-                return this;
             }
 
             void IThreadPoolWorkItem.Execute()
             {
-                QueueChildren();
-                RunAndRecycle();
-            }
-
-            // Unpack the child subtrees into the local queue. Each of them will in turn
-            // unpack its own children when it executes.
-            public void QueueChildren()
-            {
+                // Unpack the child subtrees into the local queue. Each of them will in turn
+                // unpack its own children when it executes.
                 SocketIOEvent? left = _left;
                 SocketIOEvent? right = _right;
 
@@ -449,10 +502,7 @@ namespace System.Net.Sockets
                 {
                     ThreadPool.UnsafeQueueUserWorkItem(right, preferLocal: true);
                 }
-            }
 
-            public void RunAndRecycle()
-            {
                 SocketAsyncContext context = _context!;
                 Interop.Sys.SocketEvents events = _events;
 
