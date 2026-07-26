@@ -93,6 +93,17 @@ namespace System.Net.Sockets
         // bounded by EventBufferCount, so this array never needs to grow.
         private readonly SocketIOEvent[] _asyncEvents = new SocketIOEvent[EventBufferCount];
 
+        // Work item that performs a non-blocking poll of the event port on a thread pool thread.
+        // At most one instance is in flight at any given time, and while it is in flight the
+        // dedicated event thread is blocked on _scanDoneEvent, so the native buffer above is
+        // never accessed concurrently.
+        // Not used when completions are inlined - the dedicated thread then does all the work itself.
+        private readonly ScanWorkItem? _scanWorkItem;
+
+        // Signaled by the scan work item when a non-blocking poll found no events, releasing the
+        // dedicated event thread to perform another blocking wait.
+        private readonly AutoResetEvent? _scanDoneEvent;
+
         //
         // Registers the Socket with a SocketAsyncEngine, and returns the associated engine.
         //
@@ -160,6 +171,12 @@ namespace System.Net.Sockets
         private SocketAsyncEngine()
         {
             _port = (IntPtr)(-1);
+            if (!InlineSocketCompletionsEnabled)
+            {
+                _scanWorkItem = new ScanWorkItem(this);
+                _scanDoneEvent = new AutoResetEvent(false);
+            }
+
             try
             {
                 //
@@ -213,13 +230,85 @@ namespace System.Net.Sockets
 
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
-                    HandleSocketEvents(numEvents);
+
+                    HandleAndDispatchSocketEvents(numEvents);
+
+                    if (!InlineSocketCompletionsEnabled)
+                    {
+                        // Hand the polling over to the thread pool and wait until it runs out of work.
+                        ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+                        _scanDoneEvent!.WaitOne();
+                    }
                 }
             }
             catch (Exception e)
             {
                 Environment.FailFast("Exception thrown from SocketAsyncEngine event loop: " + e.ToString(), e);
             }
+        }
+
+        // Keeps the SocketIOEvent (and the SocketAsyncContext references it holds) off the EventLoop
+        // frame, where the JIT could extend its lifetime across the following (potentially long) waits.
+        // See discussion: https://github.com/dotnet/runtime/issues/37064
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void HandleAndDispatchSocketEvents(int numEvents)
+        {
+            SocketIOEvent? root = HandleSocketEvents(numEvents);
+            if (root is not null)
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+            }
+        }
+
+        // Performs a non-blocking poll of the event port on a thread pool thread.
+        // If events are found, the child events are pushed to the local queue, another scan is
+        // scheduled to the global queue and the root event is executed inline.
+        // If no events are found, the dedicated event thread is released to block again.
+        private void Scan()
+        {
+            try
+            {
+                Debug.Assert(!InlineSocketCompletionsEnabled);
+
+                int numEvents = EventBufferCount;
+                Interop.Error err = Interop.Sys.TryGetSocketEvents(_port, _buffer, &numEvents);
+                if (err != Interop.Error.SUCCESS)
+                {
+                    throw new InternalException(err);
+                }
+
+                if (numEvents == 0)
+                {
+                    // Nothing left to do, let the dedicated thread do a blocking wait again.
+                    _scanDoneEvent!.Set();
+                    return;
+                }
+
+                SocketIOEvent? root = HandleSocketEvents(numEvents);
+                if (root is null)
+                {
+                    // All the events were handled inline, keep scanning.
+                    ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+                    return;
+                }
+
+                root.QueueChildren();
+                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+                root.RunAndRecycle();
+            }
+            catch (Exception e)
+            {
+                Environment.FailFast("Exception thrown from SocketAsyncEngine scan: " + e.ToString(), e);
+            }
+        }
+
+        private sealed class ScanWorkItem : IThreadPoolWorkItem
+        {
+            private readonly SocketAsyncEngine _engine;
+
+            public ScanWorkItem(SocketAsyncEngine engine) => _engine = engine;
+
+            void IThreadPoolWorkItem.Execute() => _engine.Scan();
         }
 
         private void FreeNativeResources()
@@ -241,7 +330,7 @@ namespace System.Net.Sockets
         // (potentially long) WaitForSocketEvents wait.
         // See discussion: https://github.com/dotnet/runtime/issues/37064
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private void HandleSocketEvents(int numEvents)
+        private SocketIOEvent? HandleSocketEvents(int numEvents)
         {
             SocketIOEvent[] asyncEvents = _asyncEvents;
             int count = 0;
@@ -279,16 +368,17 @@ namespace System.Net.Sockets
 
             if (count > 0)
             {
-                // Pack all the events into a single balanced binary tree and post it to the
-                // thread pool queue as one item. The tree is unpacked into the local
-                // queues as the items execute.
+                // Pack all the events into a single balanced binary tree.
+                // The tree is unpacked into the local queues as the items execute.
                 SocketIOEvent root = BuildTree(new ReadOnlySpan<SocketIOEvent>(asyncEvents, 0, count));
 
                 // Clear the references so the scratch buffer doesn't keep contexts alive.
                 Array.Clear(asyncEvents, 0, count);
 
-                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+                return root;
             }
+
+            return null;
         }
 
         // Builds a balanced binary tree out of the events in the span, returning its root.
@@ -337,8 +427,14 @@ namespace System.Net.Sockets
 
             void IThreadPoolWorkItem.Execute()
             {
-                // Unpack the child subtrees into the local queue. Each of them will in turn
-                // unpack its own children when it executes.
+                QueueChildren();
+                RunAndRecycle();
+            }
+
+            // Unpack the child subtrees into the local queue. Each of them will in turn
+            // unpack its own children when it executes.
+            public void QueueChildren()
+            {
                 SocketIOEvent? left = _left;
                 SocketIOEvent? right = _right;
 
@@ -350,7 +446,10 @@ namespace System.Net.Sockets
                 {
                     ThreadPool.UnsafeQueueUserWorkItem(right, preferLocal: true);
                 }
+            }
 
+            public void RunAndRecycle()
+            {
                 SocketAsyncContext context = _context!;
                 Interop.Sys.SocketEvents events = _events;
 

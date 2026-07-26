@@ -475,6 +475,14 @@ int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int
     return Error_ENOTSUP;
 }
 
+int32_t SystemNative_TryGetSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count)
+{
+    (void)port;
+    (void)buffer;
+    (void)count;
+    return Error_ENOTSUP;
+}
+
 int32_t SystemNative_PlatformSupportsDualModeIPv4PacketInfo(void)
 {
     return 0; // false

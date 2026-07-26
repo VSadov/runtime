@@ -3228,7 +3228,7 @@ static void ConvertEventEPollToSocketAsync(SocketEvent* sae, struct epoll_event*
     sae->Events = GetSocketEvents(events);
 }
 
-static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count)
+static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count, int32_t timeout)
 {
     assert(buffer != NULL);
     assert(count != NULL);
@@ -3236,18 +3236,18 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
 
     struct epoll_event* events = (struct epoll_event*)buffer;
     int numEvents;
-    while ((numEvents = epoll_wait(port, events, *count, -1)) < 0 && errno == EINTR);
+    while ((numEvents = epoll_wait(port, events, *count, timeout)) < 0 && errno == EINTR);
     if (numEvents == -1)
     {
         *count = 0;
         return SystemNative_ConvertErrorPlatformToPal(errno);
     }
 
-    // We should never see 0 events. Given an infinite timeout, epoll_wait will never return
+    // With an infinite timeout we should never see 0 events. epoll_wait will never return
     // 0 events even if there are no file descriptors registered with the epoll fd. In
     // that case, the wait will block until a file descriptor is added and an event occurs
     // on the added file descriptor.
-    assert(numEvents != 0);
+    assert(numEvents != 0 || timeout >= 0);
     assert(numEvents <= *count);
 
     if (sizeof(struct epoll_event) < sizeof(SocketEvent))
@@ -3382,26 +3382,29 @@ static int32_t TryChangeSocketEventRegistrationInner(
     return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
 }
 
-static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count)
+static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count, int32_t timeout)
 {
     assert(buffer != NULL);
     assert(count != NULL);
     assert(*count >= 0);
 
+    struct timespec zeroTimeout = { 0, 0 };
+    const struct timespec* timeoutPtr = timeout < 0 ? NULL : &zeroTimeout;
+
     struct kevent* events = (struct kevent*)buffer;
     int numEvents;
-    while ((numEvents = kevent(port, NULL, 0, events, GetKeventNchanges(*count), NULL)) < 0 && errno == EINTR);
+    while ((numEvents = kevent(port, NULL, 0, events, GetKeventNchanges(*count), timeoutPtr)) < 0 && errno == EINTR);
     if (numEvents == -1)
     {
         *count = -1;
         return SystemNative_ConvertErrorPlatformToPal(errno);
     }
 
-    // We should never see 0 events. Given an infinite timeout, kevent will never return
+    // With an infinite timeout we should never see 0 events. kevent will never return
     // 0 events even if there are no file descriptors registered with the kqueue fd. In
     // that case, the wait will block until a file descriptor is added and an event occurs
     // on the added file descriptor.
-    assert(numEvents != 0);
+    assert(numEvents != 0 || timeout >= 0);
     assert(numEvents <= *count);
 
     for (int i = 0; i < numEvents; i++)
@@ -3435,7 +3438,7 @@ uintptr_t data)
 {
     return Error_ENOSYS;
 }
-static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count)
+static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count, int32_t timeout)
 {
     return Error_ENOSYS;
 }
@@ -3622,7 +3625,19 @@ int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int
 
     int fd = ToFileDescriptor(port);
 
-    return WaitForSocketEventsInner(fd, buffer, count);
+    return WaitForSocketEventsInner(fd, buffer, count, -1);
+}
+
+int32_t SystemNative_TryGetSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count)
+{
+    if (buffer == NULL || count == NULL || *count < 0)
+    {
+        return Error_EFAULT;
+    }
+
+    int fd = ToFileDescriptor(port);
+
+    return WaitForSocketEventsInner(fd, buffer, count, 0);
 }
 
 int32_t SystemNative_PlatformSupportsDualModeIPv4PacketInfo(void)

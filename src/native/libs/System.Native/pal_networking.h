@@ -422,6 +422,10 @@ PALEXPORT int32_t SystemNative_TryChangeSocketEventRegistration(
 
 PALEXPORT int32_t SystemNative_WaitForSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count);
 
+// Non-blocking variant of SystemNative_WaitForSocketEvents. On success *count contains the number
+// of events retrieved, which may be zero if no events were pending.
+PALEXPORT int32_t SystemNative_TryGetSocketEvents(intptr_t port, SocketEvent* buffer, int32_t* count);
+
 PALEXPORT int32_t SystemNative_PlatformSupportsDualModeIPv4PacketInfo(void);
 
 PALEXPORT void SystemNative_GetDomainSocketSizes(int32_t* pathOffset, int32_t* pathSize, int32_t* addressSize);
