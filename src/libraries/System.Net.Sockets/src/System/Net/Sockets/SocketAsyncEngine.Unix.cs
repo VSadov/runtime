@@ -102,7 +102,9 @@ namespace System.Net.Sockets
 
         // Signaled by the scan work item when a non-blocking poll found no events, releasing the
         // dedicated event thread to perform another blocking wait.
-        private readonly AutoResetEvent? _scanDoneEvent;
+        // There is at most one waiter and one setter at a time, and the event is reset by the waiter
+        // before the next scan is scheduled, so it is effectively an auto-reset event.
+        private readonly ManualResetEventSlim? _scanDoneEvent;
 
         //
         // Registers the Socket with a SocketAsyncEngine, and returns the associated engine.
@@ -174,7 +176,7 @@ namespace System.Net.Sockets
             if (!InlineSocketCompletionsEnabled)
             {
                 _scanWorkItem = new ScanWorkItem(this);
-                _scanDoneEvent = new AutoResetEvent(false);
+                _scanDoneEvent = new ManualResetEventSlim(initialState: false);
             }
 
             try
@@ -237,7 +239,8 @@ namespace System.Net.Sockets
                     {
                         // Hand the polling over to the thread pool and wait until it runs out of work.
                         ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
-                        _scanDoneEvent!.WaitOne();
+                        _scanDoneEvent!.Wait();
+                        _scanDoneEvent.Reset();
                     }
                 }
             }
