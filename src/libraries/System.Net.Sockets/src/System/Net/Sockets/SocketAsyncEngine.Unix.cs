@@ -304,13 +304,12 @@ namespace System.Net.Sockets
                     return;
                 }
 
+                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+
                 if (children is not null)
                 {
                     ThreadPool.UnsafeQueueUserWorkItem(children, preferLocal: true);
                 }
-
-                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
-
                 // Run the first event inline - no work item is needed for it.
                 rootContext.HandleEvents(rootEvents);
             }
