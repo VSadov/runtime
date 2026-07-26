@@ -87,6 +87,12 @@ namespace System.Net.Sockets
         //
         private readonly ConcurrentQueue<SocketIOEvent> _eventQueue = new ConcurrentQueue<SocketIOEvent>();
 
+        // Reusable, preallocated scratch buffer used by the event loop to collect the async events produced by a
+        // single WaitForSocketEvents call before packing them into a balanced binary tree.
+        // The number of async events can never exceed the number of socket events, which is
+        // bounded by EventBufferCount, so this array never needs to grow.
+        private readonly SocketIOEvent[] _asyncEvents = new SocketIOEvent[EventBufferCount];
+
         //
         // Registers the Socket with a SocketAsyncEngine, and returns the associated engine.
         //
@@ -196,11 +202,10 @@ namespace System.Net.Sockets
         {
             try
             {
-                SocketEventHandler handler = new SocketEventHandler(this);
                 while (true)
                 {
                     int numEvents = EventBufferCount;
-                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, handler.Buffer, &numEvents);
+                    Interop.Error err = Interop.Sys.WaitForSocketEvents(_port, _buffer, &numEvents);
                     if (err != Interop.Error.SUCCESS)
                     {
                         throw new InternalException(err);
@@ -208,7 +213,7 @@ namespace System.Net.Sockets
 
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
-                    handler.HandleSocketEvents(numEvents);
+                    HandleSocketEvents(numEvents);
                 }
             }
             catch (Exception e)
@@ -231,94 +236,76 @@ namespace System.Net.Sockets
 
         // The JIT is allowed to arbitrarily extend the lifetime of locals, which may retain SocketAsyncContext references,
         // indirectly preventing Socket instances to be finalized, despite being no longer referenced by user code.
-        // To avoid this, the event handling logic is delegated to a non-inlined processing method.
+        // To avoid this, the event handling logic is delegated to a non-inlined processing method so that the
+        // SocketAsyncContext references held in its locals do not extend onto the EventLoop frame across the
+        // (potentially long) WaitForSocketEvents wait.
         // See discussion: https://github.com/dotnet/runtime/issues/37064
-        // SocketEventHandler holds an on-stack cache of SocketAsyncEngine members needed by the handler method.
-        private readonly struct SocketEventHandler
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void HandleSocketEvents(int numEvents)
         {
-            public Interop.Sys.SocketEvent* Buffer { get; }
-            private readonly ConcurrentQueue<SocketIOEvent> _eventQueue;
+            SocketIOEvent[] asyncEvents = _asyncEvents;
+            int count = 0;
 
-            // Reusable, preallocated scratch buffer to collect the async events produced by a
-            // single WaitForSocketEvents call before packing them into a balanced binary tree.
-            // The number of async events can never exceed the number of socket events, which is
-            // bounded by EventBufferCount, so this array never needs to grow.
-            private readonly SocketIOEvent[] _asyncEvents;
-
-            public SocketEventHandler(SocketAsyncEngine engine)
+            foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(_buffer, numEvents))
             {
-                Buffer = engine._buffer;
-                _eventQueue = engine._eventQueue;
-                _asyncEvents = new SocketIOEvent[EventBufferCount];
-            }
+                Debug.Assert((uint)socketEvent.Data < (uint)s_registeredContexts.Length);
 
-            [MethodImpl(MethodImplOptions.NoInlining)]
-            public readonly void HandleSocketEvents(int numEvents)
-            {
-                SocketIOEvent[] asyncEvents = _asyncEvents;
-                int count = 0;
+                // The context may be null if the socket was unregistered right before the event was processed.
+                // The slot in s_registeredContexts may have been reused by a different context, in which case the
+                // incorrect socket will notice that no information is available yet and harmlessly retry, waiting for new events.
+                SocketAsyncContext? context = s_registeredContexts[(uint)socketEvent.Data];
 
-                foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(Buffer, numEvents))
+                if (context is not null)
                 {
-                    Debug.Assert((uint)socketEvent.Data < (uint)s_registeredContexts.Length);
-
-                    // The context may be null if the socket was unregistered right before the event was processed.
-                    // The slot in s_registeredContexts may have been reused by a different context, in which case the
-                    // incorrect socket will notice that no information is available yet and harmlessly retry, waiting for new events.
-                    SocketAsyncContext? context = s_registeredContexts[(uint)socketEvent.Data];
-
-                    if (context is not null)
+                    if (context.PreferInlineCompletions)
                     {
-                        if (context.PreferInlineCompletions)
-                        {
-                            context.HandleEventsInline(socketEvent.Events);
-                        }
-                        else
-                        {
-                            Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
+                        context.HandleEventsInline(socketEvent.Events);
+                    }
+                    else
+                    {
+                        Interop.Sys.SocketEvents events = context.HandleSyncEventsSpeculatively(socketEvent.Events);
 
-                            if (events != Interop.Sys.SocketEvents.None)
-                            {
-                                SocketIOEvent newEvent = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
-                                    existingEvent :
-                                    new SocketIOEvent(_eventQueue);
+                        if (events != Interop.Sys.SocketEvents.None)
+                        {
+                            SocketIOEvent newEvent = _eventQueue.TryDequeue(out SocketIOEvent? existingEvent) ?
+                                existingEvent :
+                                new SocketIOEvent(_eventQueue);
 
-                                asyncEvents[count++] = newEvent.With(context, events);
-                            }
+                            asyncEvents[count++] = newEvent.With(context, events);
                         }
                     }
                 }
-
-                if (count > 0)
-                {
-                    // Pack all the events into a single balanced binary tree and post it to the
-                    // thread pool queue as one item. The tree is unpacked into the local
-                    // queues as the items execute.
-                    SocketIOEvent root = BuildTree(new ReadOnlySpan<SocketIOEvent>(asyncEvents, 0, count));
-
-                    // Clear the references so the scratch buffer doesn't keep contexts alive.
-                    Array.Clear(asyncEvents, 0, count);
-
-                    ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
-                }
             }
 
-            // Builds a balanced binary tree out of the events in the span, returning its root.
-            private static SocketIOEvent BuildTree(ReadOnlySpan<SocketIOEvent> events)
+            if (count > 0)
             {
-                Debug.Assert(!events.IsEmpty);
+                // Pack all the events into a single balanced binary tree and post it to the
+                // thread pool queue as one item. The tree is unpacked into the local
+                // queues as the items execute.
+                SocketIOEvent root = BuildTree(new ReadOnlySpan<SocketIOEvent>(asyncEvents, 0, count));
 
-                SocketIOEvent root = events[0];
-                ReadOnlySpan<SocketIOEvent> rest = events.Slice(1);
+                // Clear the references so the scratch buffer doesn't keep contexts alive.
+                Array.Clear(asyncEvents, 0, count);
 
-                // Give the left side the extra element when the count is odd.
-                int leftCount = (rest.Length + 1) / 2;
-
-                root._left = leftCount > 0 ? BuildTree(rest.Slice(0, leftCount)) : null;
-                root._right = rest.Length > leftCount ? BuildTree(rest.Slice(leftCount)) : null;
-
-                return root;
+                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
             }
+        }
+
+        // Builds a balanced binary tree out of the events in the span, returning its root.
+        private static SocketIOEvent BuildTree(ReadOnlySpan<SocketIOEvent> events)
+        {
+            Debug.Assert(!events.IsEmpty);
+
+            SocketIOEvent root = events[0];
+            ReadOnlySpan<SocketIOEvent> rest = events.Slice(1);
+
+            // Give the left side the extra element when the count is odd.
+            int leftCount = (rest.Length + 1) / 2;
+
+            root._left = leftCount > 0 ? BuildTree(rest.Slice(0, leftCount)) : null;
+            root._right = rest.Length > leftCount ? BuildTree(rest.Slice(leftCount)) : null;
+
+            return root;
         }
 
         private sealed class SocketIOEvent : IThreadPoolWorkItem
