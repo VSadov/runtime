@@ -296,15 +296,14 @@ namespace System.Net.Sockets
                 }
 
                 (SocketAsyncContext? rootContext, Interop.Sys.SocketEvents rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
+                // request another scan
+                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
                 if (rootContext is null)
                 {
-                    // All the events were handled inline, keep scanning.
+                    // All the events were handled inline, we are done.
                     Debug.Assert(children is null);
-                    ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
                     return;
                 }
-
-                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
 
                 if (children is not null)
                 {
