@@ -194,6 +194,16 @@ namespace System.Threading
             // Pool of reusable Event objects to avoid allocating one per completion.
             private readonly ConcurrentQueue<Event>? _eventPool;
 
+            // Work item that polls the completion port without blocking, on a thread pool thread.
+            // At most one instance is in flight at any given time, and while it is in flight the
+            // poller thread is blocked on _scanDoneEvent, so _nativeEvents is never used concurrently.
+            private readonly ScanWorkItem? _scanWorkItem;
+
+            // Signaled by the scan work item when a poll finds no events, releasing the poller
+            // thread to perform another blocking poll. There is at most one waiter and one setter,
+            // and the waiter resets it before scheduling the next scan, so it acts as an auto-reset event.
+            private readonly ManualResetEventSlim? _scanDoneEvent;
+
             private readonly Thread _thread;
 
             public IOCompletionPoller(nint port)
@@ -207,6 +217,8 @@ namespace System.Threading
                         (Interop.Kernel32.OVERLAPPED_ENTRY*)
                         NativeMemory.Alloc(NativeEventCapacity, (nuint)sizeof(Interop.Kernel32.OVERLAPPED_ENTRY));
                     _eventPool = new ConcurrentQueue<Event>();
+                    _scanWorkItem = new ScanWorkItem(this);
+                    _scanDoneEvent = new ManualResetEventSlim(initialState: false);
 
                     // These threads don't run user code, use a smaller stack size
                     _thread = new Thread(Poll, SmallStackSizeBytes);
@@ -242,6 +254,8 @@ namespace System.Threading
             {
                 Debug.Assert(_nativeEvents != null);
                 Debug.Assert(_eventPool != null);
+                Debug.Assert(_scanWorkItem != null);
+                Debug.Assert(_scanDoneEvent != null);
 
                 while (
                     Interop.Kernel32.GetQueuedCompletionStatusEx(
@@ -255,17 +269,125 @@ namespace System.Threading
                     Debug.Assert(nativeEventCount > 0);
                     Debug.Assert(nativeEventCount <= NativeEventCapacity);
 
-                    // Pack all the events into a single balanced binary tree and post it to the
-                    // thread pool queue as one item. The tree is built directly from the native
-                    // events buffer and is unpacked into the local queues as the items execute.
-                    Event? root = BuildTree(_nativeEvents, 0, nativeEventCount);
-                    if (root is not null)
-                    {
-                        ThreadPool.UnsafeQueueUserWorkItemInternal(root, preferLocal: false);
-                    }
+                    HandleAndDispatchEvents(nativeEventCount);
+
+                    // Hand the polling over to the thread pool and wait until it runs out of work.
+                    ThreadPool.UnsafeQueueUserWorkItemInternal(_scanWorkItem, preferLocal: false);
+                    _scanDoneEvent.Wait();
+                    _scanDoneEvent.Reset();
                 }
 
                 ThrowHelper.ThrowApplicationException(Marshal.GetHRForLastWin32Error());
+            }
+
+            // Packs the events into a tree and posts it to the thread pool queue as one item.
+            // The tree is unpacked into the local queues as the items execute.
+            private void HandleAndDispatchEvents(int nativeEventCount)
+            {
+                Event? children = BuildEvents(nativeEventCount, out NativeOverlapped* rootOverlapped, out uint rootBytesTransferred);
+                if (rootOverlapped == null)
+                {
+                    Debug.Assert(children is null);
+                    return;
+                }
+
+                // The poller thread must not run the callback itself, so the root needs a work item too.
+                Event root = RentEvent().With(rootOverlapped, rootBytesTransferred);
+                root._left = children;
+
+                ThreadPool.UnsafeQueueUserWorkItemInternal(root, preferLocal: false);
+            }
+
+            // Polls the completion port without blocking, on a thread pool thread.
+            // If events are found, the children are pushed to the local queue, another scan is
+            // scheduled to the global queue and the first callback is invoked inline.
+            // If no events are found, the poller thread is released to block again.
+            private void Scan()
+            {
+                Debug.Assert(_nativeEvents != null);
+                Debug.Assert(_eventPool != null);
+                Debug.Assert(_scanWorkItem != null);
+                Debug.Assert(_scanDoneEvent != null);
+
+                if (!Interop.Kernel32.GetQueuedCompletionStatusEx(
+                        _port,
+                        _nativeEvents,
+                        NativeEventCapacity,
+                        out int nativeEventCount,
+                        0,
+                        false))
+                {
+                    // No events are pending (or the port failed, which the poller thread will observe
+                    // and report). Let the poller thread do a blocking poll again.
+                    _scanDoneEvent.Set();
+                    return;
+                }
+
+                Debug.Assert(nativeEventCount > 0);
+                Debug.Assert(nativeEventCount <= NativeEventCapacity);
+
+                Event? children = BuildEvents(nativeEventCount, out NativeOverlapped* rootOverlapped, out uint rootBytesTransferred);
+
+                // Request another scan. This is done before running any callback, so that the
+                // completion port keeps being drained while this thread is busy.
+                ThreadPool.UnsafeQueueUserWorkItemInternal(_scanWorkItem, preferLocal: false);
+
+                if (rootOverlapped == null)
+                {
+                    Debug.Assert(children is null);
+                    return;
+                }
+
+                if (children is not null)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItemInternal(children, preferLocal: true);
+                }
+
+                // Invoke the first callback inline - no work item is needed for it.
+                Event.Invoke(rootOverlapped, rootBytesTransferred);
+            }
+
+            private sealed class ScanWorkItem : IThreadPoolWorkItem
+            {
+                private readonly IOCompletionPoller _poller;
+
+                public ScanWorkItem(IOCompletionPoller poller) => _poller = poller;
+
+                void IThreadPoolWorkItem.Execute() => _poller.Scan();
+            }
+
+            private Event RentEvent()
+            {
+                Debug.Assert(_eventPool != null);
+
+                return _eventPool.TryDequeue(out Event? existingEvent) ? existingEvent : new Event(_eventPool);
+            }
+
+            // Takes the first event out as a raw (overlapped, bytesTransferred) pair, so that a caller
+            // that is going to invoke it inline does not need an Event for it at all. The remaining
+            // events are packed into a balanced binary tree, whose root is returned.
+            private Event? BuildEvents(int count, out NativeOverlapped* rootOverlapped, out uint rootBytesTransferred)
+            {
+                // Scan for the first non-null entry to use as the root. Entries shouldn't be null since null
+                // is not posted, but the completion port is shared and could receive one.
+                int start = 0;
+                while (count > 0 && _nativeEvents[start].lpOverlapped == null)
+                {
+                    start++;
+                    count--;
+                }
+
+                if (count == 0)
+                {
+                    rootOverlapped = null;
+                    rootBytesTransferred = 0;
+                    return null;
+                }
+
+                rootOverlapped = _nativeEvents[start].lpOverlapped;
+                rootBytesTransferred = _nativeEvents[start].dwNumberOfBytesTransferred;
+
+                return BuildTree(_nativeEvents, start + 1, count - 1);
             }
 
             // Builds a balanced binary tree out of the native events in [start, start + count), returning its root.
@@ -288,10 +410,7 @@ namespace System.Threading
                 }
 
                 Interop.Kernel32.OVERLAPPED_ENTRY* nativeEvent = &nativeEvents[start];
-                Event newEvent = _eventPool.TryDequeue(out Event? existingEvent) ?
-                    existingEvent :
-                    new Event(_eventPool);
-                Event root = newEvent.With(nativeEvent->lpOverlapped, nativeEvent->dwNumberOfBytesTransferred);
+                Event root = RentEvent().With(nativeEvent->lpOverlapped, nativeEvent->dwNumberOfBytesTransferred);
 
                 int restCount = count - 1;
                 int restStart = start + 1;
@@ -396,7 +515,7 @@ namespace System.Threading
                     Invoke(nativeOverlapped, bytesTransferred);
                 }
 
-                private static void Invoke(NativeOverlapped* nativeOverlapped, uint bytesTransferred)
+                internal static void Invoke(NativeOverlapped* nativeOverlapped, uint bytesTransferred)
                 {
                     if (NativeRuntimeEventSource.Log.IsEnabled())
                     {
