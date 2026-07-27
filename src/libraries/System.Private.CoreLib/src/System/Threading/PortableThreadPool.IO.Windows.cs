@@ -79,10 +79,9 @@ namespace System.Threading
         private void InitializeIOOnWindows()
         {
             Debug.Assert(IOCompletionPollerCount % IOCompletionPortCount == 0);
-            int numConcurrentThreads = IOCompletionPollerCount / IOCompletionPortCount;
             for (int i = 0; i < IOCompletionPortCount; i++)
             {
-                _ioPorts[i] = CreateIOCompletionPort(numConcurrentThreads);
+                _ioPorts[i] = CreateIOCompletionPort(int.MaxValue);
             }
         }
 
