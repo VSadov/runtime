@@ -270,8 +270,8 @@ namespace System.Threading
 
                     HandleAndDispatchEvents(nativeEventCount);
 
-                    // Hand the polling over to the thread pool and wait until it runs out of work.
-                    ThreadPool.UnsafeQueueUserWorkItemInternal(_scanWorkItem, preferLocal: false);
+                    // The polling has been handed over to the thread pool,
+                    // wait until it runs out of work.
                     _scanDoneEvent.Wait();
                     _scanDoneEvent.Reset();
                 }
@@ -283,7 +283,15 @@ namespace System.Threading
             // The tree is unpacked into the local queues as the items execute.
             private void HandleAndDispatchEvents(int nativeEventCount)
             {
+                Debug.Assert(_scanWorkItem != null);
+
                 Event? children = BuildEvents(nativeEventCount, out NativeOverlapped* rootOverlapped, out uint rootBytesTransferred);
+
+                // The buffer is no longer in use, so the polling can be handed over to the thread pool.
+                // This is queued before the events below, so that polling can resume without waiting for
+                // the completions to be picked up.
+                ThreadPool.UnsafeQueueUserWorkItemInternal(_scanWorkItem, preferLocal: false);
+
                 if (rootOverlapped == null)
                 {
                     Debug.Assert(children is null);

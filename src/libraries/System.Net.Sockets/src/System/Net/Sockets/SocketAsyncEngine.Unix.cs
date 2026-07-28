@@ -250,8 +250,8 @@ namespace System.Net.Sockets
 
                     if (!InlineSocketCompletionsEnabled)
                     {
-                        // Hand the polling over to the thread pool and wait until it runs out of work.
-                        ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+                        // The polling has been handed over to the thread pool,
+                        // wait until it runs out of work.
                         _scanDoneEvent!.Wait();
                         _scanDoneEvent.Reset();
                     }
@@ -270,6 +270,15 @@ namespace System.Net.Sockets
         private void HandleAndDispatchSocketEvents(int numEvents)
         {
             (SocketAsyncContext? rootContext, Interop.Sys.SocketEvents rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
+
+            // The buffer is no longer in use, so the polling can be handed over to the thread pool.
+            // This is queued before the events below, so that polling can resume without waiting for
+            // the completions to be picked up.
+            if (!InlineSocketCompletionsEnabled)
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+            }
+
             if (rootContext is null)
             {
                 Debug.Assert(children is null);
