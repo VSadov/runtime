@@ -268,7 +268,28 @@ namespace System.Threading
                     Debug.Assert(nativeEventCount > 0);
                     Debug.Assert(nativeEventCount <= NativeEventCapacity);
 
-                    HandleAndDispatchEvents(nativeEventCount);
+                    HandleAndDispatchEvents(nativeEventCount, scheduleScan: false);
+
+                    // Handing the polling over to the thread pool costs a work item, a wakeup and a
+                    // handoff back when the work runs out. That only pays off if more completions are
+                    // coming, so check for that first - the poll is much cheaper than the handoff.
+                    if (!Interop.Kernel32.GetQueuedCompletionStatusEx(
+                            _port,
+                            _nativeEvents,
+                            NativeEventCapacity,
+                            out nativeEventCount,
+                            0,
+                            false))
+                    {
+                        // Nothing else to do (or the port failed, which the blocking poll below will
+                        // observe and report), just wait for more completions.
+                        continue;
+                    }
+
+                    Debug.Assert(nativeEventCount > 0);
+                    Debug.Assert(nativeEventCount <= NativeEventCapacity);
+
+                    HandleAndDispatchEvents(nativeEventCount, scheduleScan: true);
 
                     // The polling has been handed over to the thread pool,
                     // wait until it runs out of work.
@@ -281,28 +302,32 @@ namespace System.Threading
 
             // Packs the events into a tree and posts it to the thread pool queue as one item.
             // The tree is unpacked into the local queues as the items execute.
-            private void HandleAndDispatchEvents(int nativeEventCount)
+            private void HandleAndDispatchEvents(int nativeEventCount, bool scheduleScan)
             {
                 Debug.Assert(_scanWorkItem != null);
 
                 Event? children = BuildEvents(nativeEventCount, out NativeOverlapped* rootOverlapped, out uint rootBytesTransferred);
 
-                // The buffer is no longer in use, so the polling can be handed over to the thread pool.
-                // This is queued before the events below, so that polling can resume without waiting for
-                // the completions to be picked up.
-                ThreadPool.UnsafeQueueUserWorkItemInternal(_scanWorkItem, preferLocal: false);
+                if (rootOverlapped != null)
+                {
+                    // The poller thread must not run the callback itself, so the root needs a work item too.
+                    Event root = RentEvent().With(rootOverlapped, rootBytesTransferred);
+                    root._left = children;
 
-                if (rootOverlapped == null)
+                    ThreadPool.UnsafeQueueUserWorkItemInternal(root, preferLocal: false);
+                }
+                else
                 {
                     Debug.Assert(children is null);
-                    return;
                 }
 
-                // The poller thread must not run the callback itself, so the root needs a work item too.
-                Event root = RentEvent().With(rootOverlapped, rootBytesTransferred);
-                root._left = children;
-
-                ThreadPool.UnsafeQueueUserWorkItemInternal(root, preferLocal: false);
+                if (scheduleScan)
+                {
+                    // The buffer is no longer in use, so the polling can be handed over to the thread pool.
+                    // This is queued after the events above, so that a worker starts unpacking the tree
+                    // before it polls again - the port has just been drained anyway.
+                    ThreadPool.UnsafeQueueUserWorkItemInternal(_scanWorkItem, preferLocal: false);
+                }
             }
 
             // Polls the completion port without blocking, on a thread pool thread.

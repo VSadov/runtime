@@ -246,15 +246,35 @@ namespace System.Net.Sockets
                     // The native shim is responsible for ensuring this condition.
                     Debug.Assert(numEvents > 0, $"Unexpected numEvents: {numEvents}");
 
-                    HandleAndDispatchSocketEvents(numEvents);
+                    HandleAndDispatchSocketEvents(numEvents, scheduleScan: false);
 
-                    if (!InlineSocketCompletionsEnabled)
+                    if (InlineSocketCompletionsEnabled)
                     {
-                        // The polling has been handed over to the thread pool,
-                        // wait until it runs out of work.
-                        _scanDoneEvent!.Wait();
-                        _scanDoneEvent.Reset();
+                        continue;
                     }
+
+                    // Handing the polling over to the thread pool costs a work item, a wakeup and a
+                    // handoff back when the work runs out. That only pays off if more events are
+                    // coming, so check for that first - the poll is much cheaper than the handoff.
+                    numEvents = EventBufferCount;
+                    err = Interop.Sys.TryGetSocketEvents(_port, _buffer, &numEvents);
+                    if (err != Interop.Error.SUCCESS)
+                    {
+                        throw new InternalException(err);
+                    }
+
+                    if (numEvents == 0)
+                    {
+                        // Nothing else to do, just wait for more events.
+                        continue;
+                    }
+
+                    HandleAndDispatchSocketEvents(numEvents, scheduleScan: true);
+
+                    // The polling has been handed over to the thread pool,
+                    // wait until it runs out of work.
+                    _scanDoneEvent!.Wait();
+                    _scanDoneEvent.Reset();
                 }
             }
             catch (Exception e)
@@ -267,30 +287,31 @@ namespace System.Net.Sockets
         // frame, where the JIT could extend its lifetime across the following (potentially long) waits.
         // See discussion: https://github.com/dotnet/runtime/issues/37064
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private void HandleAndDispatchSocketEvents(int numEvents)
+        private void HandleAndDispatchSocketEvents(int numEvents, bool scheduleScan)
         {
             (SocketAsyncContext? rootContext, Interop.Sys.SocketEvents rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
 
-            // The buffer is no longer in use, so the polling can be handed over to the thread pool.
-            // This is queued before the events below, so that polling can resume without waiting for
-            // the completions to be picked up.
-            if (!InlineSocketCompletionsEnabled)
+            if (rootContext is not null)
             {
-                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
-            }
+                // The event thread must not run the completion itself, so the root needs a work item too.
+                SocketIOEvent root = RentEvent();
+                root.With(rootContext, rootEvents);
+                root._left = children;
 
-            if (rootContext is null)
+                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+            }
+            else
             {
                 Debug.Assert(children is null);
-                return;
             }
 
-            // The event thread must not run the completion itself, so the root needs a work item too.
-            SocketIOEvent root = RentEvent();
-            root.With(rootContext, rootEvents);
-            root._left = children;
-
-            ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+            if (scheduleScan)
+            {
+                // The buffer is no longer in use, so the polling can be handed over to the thread pool.
+                // This is queued after the events above, so that a worker starts unpacking the tree
+                // before it polls again - the port has just been drained anyway.
+                ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
+            }
         }
 
         // Performs a non-blocking poll of the event port on a thread pool thread.
