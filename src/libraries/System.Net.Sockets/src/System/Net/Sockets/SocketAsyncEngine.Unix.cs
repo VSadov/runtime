@@ -290,6 +290,9 @@ namespace System.Net.Sockets
         // If no events are found, the dedicated event thread is released to block again.
         private void Scan()
         {
+            SocketAsyncContext? rootContext = null;
+            Interop.Sys.SocketEvents rootEvents = Interop.Sys.SocketEvents.None;
+
             try
             {
                 Debug.Assert(!InlineSocketCompletionsEnabled);
@@ -308,7 +311,7 @@ namespace System.Net.Sockets
                     return;
                 }
 
-                (SocketAsyncContext? rootContext, Interop.Sys.SocketEvents rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
+                (rootContext, rootEvents) = HandleSocketEvents(numEvents, out SocketIOEvent? children);
                 // request another scan
                 ThreadPool.UnsafeQueueUserWorkItem(_scanWorkItem!, preferLocal: false);
                 if (rootContext is null)
@@ -322,13 +325,16 @@ namespace System.Net.Sockets
                 {
                     ThreadPool.UnsafeQueueUserWorkItem(children, preferLocal: true);
                 }
-                // Run the first event inline - no work item is needed for it.
-                rootContext.HandleEvents(rootEvents);
             }
             catch (Exception e)
             {
                 Environment.FailFast("Exception thrown from SocketAsyncEngine scan: " + e.ToString(), e);
             }
+
+            // Run the first event inline - no work item is needed for it.
+            // This is intentionally outside the guard above, so that an exception from the
+            // completion is handled the same way as when it runs as a work item.
+            rootContext!.HandleEvents(rootEvents);
         }
 
         private sealed class ScanWorkItem : IThreadPoolWorkItem
