@@ -25,6 +25,15 @@ namespace System.Net.Sockets
         // PreferInlineCompletions defaults to false and can be set to true using the DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS envvar.
         internal static readonly bool InlineSocketCompletionsEnabled = Environment.GetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS") == "1";
 
+        // Exploratory switch: when set, the event thread keeps doing all the polling itself and never
+        // hands it over to the thread pool. Events are still packed into trees and dispatched the same
+        // way, so this isolates the cost/benefit of the handoff.
+        // Can be set to "1" using the DOTNET_SYSTEM_NET_SOCKETS_NO_HANDOFF envvar.
+        private static readonly bool NoHandoff = Environment.GetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_NO_HANDOFF") == "1";
+
+        // True when the polling can be handed over to the thread pool.
+        private static bool HandoffEnabled => !InlineSocketCompletionsEnabled && !NoHandoff;
+
         // Set when some socket is given a PreferInlineCompletions value that differs from the
         // process-wide default above. That is done through an experimental API and virtually never
         // happens, so until it does, the event loop can use the default without reading per-context state.
@@ -186,7 +195,7 @@ namespace System.Net.Sockets
         private SocketAsyncEngine()
         {
             _port = (IntPtr)(-1);
-            if (!InlineSocketCompletionsEnabled)
+            if (HandoffEnabled)
             {
                 _scanWorkItem = new ScanWorkItem(this);
                 _scanDoneEvent = new ManualResetEventSlim(initialState: false);
@@ -251,7 +260,7 @@ namespace System.Net.Sockets
                     // A batch with a single event means the events are arriving slower than they are
                     // handled, so more events are unlikely to be waiting already. Skip the check for
                     // them and just wait - at this rate the wait is the dominant cost anyways.
-                    if (InlineSocketCompletionsEnabled || numEvents == 1)
+                    if (!HandoffEnabled || numEvents == 1)
                     {
                         continue;
                     }
@@ -328,7 +337,7 @@ namespace System.Net.Sockets
 
             try
             {
-                Debug.Assert(!InlineSocketCompletionsEnabled);
+                Debug.Assert(HandoffEnabled);
 
                 int numEvents = EventBufferCount;
                 Interop.Error err = Interop.Sys.TryGetSocketEvents(_port, _buffer, &numEvents);
