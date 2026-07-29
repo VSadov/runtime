@@ -248,7 +248,10 @@ namespace System.Net.Sockets
 
                     HandleAndDispatchSocketEvents(numEvents, scheduleScan: false);
 
-                    if (InlineSocketCompletionsEnabled)
+                    // A batch with a single event means the events are arriving slower than they are
+                    // handled, so more events are unlikely to be waiting already. Skip the check for
+                    // them and just wait - at this rate the wait is the dominant cost anyways.
+                    if (InlineSocketCompletionsEnabled || numEvents == 1)
                     {
                         continue;
                     }

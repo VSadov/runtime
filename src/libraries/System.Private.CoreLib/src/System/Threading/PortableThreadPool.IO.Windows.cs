@@ -270,6 +270,14 @@ namespace System.Threading
 
                     HandleAndDispatchEvents(nativeEventCount, scheduleScan: false);
 
+                    // A batch with a single completion means the completions are arriving slower than
+                    // they are handled, so more completions are unlikely to be waiting already. Skip
+                    // the check for them and just wait - at this rate the wait is the dominant cost anyways.
+                    if (nativeEventCount == 1)
+                    {
+                        continue;
+                    }
+
                     // Handing the polling over to the thread pool costs a work item, a wakeup and a
                     // handoff back when the work runs out. That only pays off if more completions are
                     // coming, so check for that first - the poll is much cheaper than the handoff.
