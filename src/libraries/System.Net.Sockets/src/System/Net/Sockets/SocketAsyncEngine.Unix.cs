@@ -33,6 +33,18 @@ namespace System.Net.Sockets
         // Anything in the 8 - 64 range performs the same, larger values give up the latency benefit.
         private const int MaxTreeSize = 32;
 
+        // EXPERIMENTAL - to be removed before merging.
+        // Batches smaller than this are posted to the global queue as individual work items instead of
+        // being packed into a tree. A tree pushes its children to the local queue of the thread that runs
+        // the root, betting that the same thread will come back for them. When the root's own event takes
+        // long enough to process, other threads steal the children instead, which is more expensive than
+        // taking them from the global queue would have been. Small batches are the case where that bet is
+        // least likely to pay off, since they tend to occur when the pool is not saturated.
+        private static readonly int MinTreeSize =
+            int.TryParse(Environment.GetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_MIN_TREE_SIZE"), out int minTreeSize) && minTreeSize > 0
+                ? minTreeSize
+                : 1;
+
         // Set when some socket is given a PreferInlineCompletions value that differs from the
         // process-wide default above. That is done through an experimental API and virtually never
         // happens, so until it does, the event loop can use the default without reading per-context state.
@@ -298,14 +310,25 @@ namespace System.Net.Sockets
                 return;
             }
 
-            for (int i = 0; i < count; i += MaxTreeSize)
+            if (count < MinTreeSize)
             {
-                int treeSize = Math.Min(MaxTreeSize, count - i);
+                // Too few events to be worth packing into a tree - post them directly.
+                for (int i = 0; i < count; i++)
+                {
+                    ThreadPool.UnsafeQueueUserWorkItem(asyncEvents[i], preferLocal: false);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < count; i += MaxTreeSize)
+                {
+                    int treeSize = Math.Min(MaxTreeSize, count - i);
 
-                SocketIOEvent root = asyncEvents[i];
-                LinkChildren(root, new ReadOnlySpan<SocketIOEvent>(asyncEvents, i + 1, treeSize - 1));
+                    SocketIOEvent root = asyncEvents[i];
+                    LinkChildren(root, new ReadOnlySpan<SocketIOEvent>(asyncEvents, i + 1, treeSize - 1));
 
-                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+                    ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
+                }
             }
 
             // Clear the references so the scratch buffer doesn't keep contexts alive.
