@@ -640,6 +640,38 @@ namespace System.Threading
             ThreadPool.EnsureWorkerRequested();
         }
 
+        /// <summary>
+        /// Schedules a work item to be executed by the current thread as soon as the currently executing work item completes.
+        /// </summary>
+        /// <remarks>
+        /// The work item is stored in a slot that is private to this thread, so unlike a local queue push it cannot be stolen,
+        /// and no worker thread request is made. That avoids both a spurious wake of another worker and the possibility of
+        /// another worker taking the work item that this thread is about to pick up anyway.
+        ///
+        /// The caller must know by construction that the work item will be picked up shortly after this call, which in practice
+        /// means that the caller is about to complete the work item it is currently executing.
+        /// </remarks>
+        internal void EnqueueLocalDeferred(object callback)
+        {
+            Debug.Assert((callback is IThreadPoolWorkItem) ^ (callback is Task));
+
+            ThreadPoolWorkQueueThreadLocals? tl = ThreadPoolWorkQueueThreadLocals.threadLocals;
+            Debug.Assert(tl?.nextWorkItem is null, "A work item may defer at most one work item.");
+
+            if (tl is null || tl.nextWorkItem is not null)
+            {
+                Enqueue(callback, forceGlobal: false);
+                return;
+            }
+
+            if (_loggingEnabled && FrameworkEventSource.Log.IsEnabled())
+                FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
+
+            // No thread request is necessary. This thread is about to return to the dispatch loop, where it will pick this
+            // work item up before looking at any queue.
+            tl.nextWorkItem = callback;
+        }
+
 #if CORECLR
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void EnqueueForPrioritizationExperiment(object callback, bool forceGlobal)
@@ -703,6 +735,12 @@ namespace System.Threading
             // bounded loop as no other thread is allowed to push into this thread's queue.
             ThreadPoolWorkQueue queue = ThreadPool.s_workQueue;
             bool ensureWorkerRequest = false;
+
+            // The deferred work item slot is not visible to other threads, move its work item to the local queue so that
+            // it is transferred along with the rest of the local work items below. No thread request had been made when the
+            // work item was deferred, but the loop below will pop it and set ensureWorkerRequest, so it will get one.
+            tl.FlushNextWorkItemToLocalQueue();
+
             while (tl.workStealingQueue.LocalPop() is object workItem)
             {
                 // A work item had been removed temporarily and other threads may have missed stealing it, so ensure that
@@ -739,8 +777,16 @@ namespace System.Threading
 
         public object? Dequeue(ThreadPoolWorkQueueThreadLocals tl, ref bool missedSteal)
         {
+            // Check for a work item deferred by the work item that this thread executed previously
+            object? workItem = tl.nextWorkItem;
+            if (workItem != null)
+            {
+                tl.nextWorkItem = null;
+                return workItem;
+            }
+
             // Check for local work items
-            object? workItem = tl.workStealingQueue.LocalPop();
+            workItem = tl.workStealingQueue.LocalPop();
             if (workItem != null)
             {
                 return workItem;
@@ -894,6 +940,10 @@ namespace System.Threading
         {
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
             ThreadPoolWorkQueueThreadLocals tl = workQueue.GetOrCreateThreadLocals();
+
+            // Every path that leaves Dispatch either flushes the deferred work item slot or leaves it empty, so a work item
+            // deferred in a previous Dispatch call cannot still be sitting here.
+            Debug.Assert(tl.nextWorkItem is null);
 
             if (s_assignableWorkItemQueueCount > 0)
             {
@@ -1049,6 +1099,14 @@ namespace System.Threading
                 {
                     // The runtime-specific thread pool implementation requires the Dispatch loop to return to the VM
                     // periodically to let it perform its own work
+                    //
+                    // This thread may not come back to the dispatch loop promptly, so make any deferred work item
+                    // visible to other threads.
+                    if (tl.FlushNextWorkItemToLocalQueue())
+                    {
+                        ThreadPool.EnsureWorkerRequested();
+                    }
+
                     tl.isProcessingHighPriorityWorkItems = false;
                     if (s_assignableWorkItemQueueCount > 0)
                     {
@@ -1125,6 +1183,13 @@ namespace System.Threading
         public static ThreadPoolWorkQueueThreadLocals? threadLocals;
 
         public bool isProcessingHighPriorityWorkItems;
+
+        /// <summary>
+        /// A work item deferred by the currently executing work item, to be executed by this thread next. It is not
+        /// visible to other threads and therefore cannot be stolen. See <see cref="ThreadPoolWorkQueue.EnqueueLocalDeferred"/>.
+        /// </summary>
+        public object? nextWorkItem;
+
         public int queueIndex;
         public WorkQueue assignedGlobalWorkItemQueue;
         public readonly ThreadPoolWorkQueue workQueue;
@@ -1142,6 +1207,22 @@ namespace System.Threading
             ThreadPoolWorkQueue.WorkStealingQueueList.Add(workStealingQueue);
             currentThread = Thread.CurrentThread;
             threadLocalCompletionCountNode = ThreadPool.GetOrCreateThreadLocalCompletionCountNode();
+        }
+
+        /// <summary>
+        /// Moves any deferred work item to the local queue, where other threads can steal it. Returns whether a work item
+        /// was moved.
+        /// </summary>
+        public bool FlushNextWorkItemToLocalQueue()
+        {
+            if (nextWorkItem is not object workItem)
+            {
+                return false;
+            }
+
+            nextWorkItem = null;
+            workStealingQueue.LocalPush(workItem);
+            return true;
         }
 
 
@@ -1652,6 +1733,19 @@ namespace System.Threading
             s_workQueue.Enqueue(callBack, forceGlobal: !preferLocal);
         internal static void UnsafeQueueHighPriorityWorkItemInternal(IThreadPoolWorkItem callBack) =>
             s_workQueue.EnqueueAtHighPriority(callBack);
+
+        /// <summary>
+        /// Queues a work item to be executed by the current thread immediately after it finishes the work item it is
+        /// currently executing.
+        /// </summary>
+        /// <remarks>
+        /// The caller must know by construction that the work item will be picked up shortly, which in practice means that
+        /// the caller is about to complete the work item it is currently executing. Using this from a work item that then
+        /// blocks or runs for a long time would delay <paramref name="callBack"/> for that duration, as no other thread can
+        /// pick it up. When the current thread is not executing a thread pool work item, this falls back to a normal enqueue.
+        /// </remarks>
+        internal static void UnsafeQueueLocalDeferredWorkItemInternal(object callBack) =>
+            s_workQueue.EnqueueLocalDeferred(callBack);
 
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(object workItem)
