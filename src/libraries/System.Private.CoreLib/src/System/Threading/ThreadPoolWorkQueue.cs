@@ -648,21 +648,33 @@ namespace System.Threading
         /// and no worker thread request is made. That avoids both a spurious wake of another worker and the possibility of
         /// another worker taking the work item that this thread is about to pick up anyway.
         ///
-        /// The caller must know by construction that the work item will be picked up shortly after this call, which in practice
-        /// means that the caller is about to complete the work item it is currently executing.
+        /// Since the work item is not visible to any other thread, it must be certain that this thread will pick it up
+        /// promptly. Otherwise the work item could be delayed for an unbounded time, and code that waits for it to run could
+        /// deadlock. That is established here rather than left to the caller: the deferral is accepted only when the work item
+        /// is the very work item that this thread is currently executing, which means the caller is at the tail of that work
+        /// item's execution and only the dispatch loop's own epilogue runs before the work item is picked up again. Anything
+        /// else falls back to a regular enqueue.
         /// </remarks>
         internal void EnqueueLocalDeferred(object callback)
         {
             Debug.Assert((callback is IThreadPoolWorkItem) ^ (callback is Task));
 
             ThreadPoolWorkQueueThreadLocals? tl = ThreadPoolWorkQueueThreadLocals.threadLocals;
-            Debug.Assert(tl?.nextWorkItem is null, "A work item may defer at most one work item.");
-
-            if (tl is null || tl.nextWorkItem is not null)
+            // The work item must be the one this thread is currently executing, and it must be a Task. Work items that are
+            // reused across suspensions are what make the identity check meaningful, and of those, only the Task-derived ones
+            // (async state machine boxes and runtime async tasks) are safe to identify this way. The others are pooled, and a
+            // pooled work item may be recycled and handed to unrelated code while this thread is still executing it, in which
+            // case its identity would no longer imply anything about where we are. A Task cannot be recycled while it is still
+            // in flight, so its identity is stable for as long as it is the current work item.
+            if (tl is null || !ReferenceEquals(callback, tl.currentWorkItem) || callback is not Task)
             {
                 Enqueue(callback, forceGlobal: false);
                 return;
             }
+
+            // A work item defers at most once: it is at the tail of its execution and returns to the dispatch loop right after,
+            // and the dispatch loop clears currentWorkItem before running anything else.
+            Debug.Assert(tl.nextWorkItem is null);
 
             if (_loggingEnabled && FrameworkEventSource.Log.IsEnabled())
                 FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
@@ -1039,6 +1051,11 @@ namespace System.Threading
                 //
                 // Execute the workitem outside of any finally blocks, so that it can be aborted if needed.
                 //
+                // While a work item is executing, it is allowed to defer a work item to this thread through
+                // EnqueueLocalDeferred, which the loop above will pick up on the next iteration. Recording the work item
+                // lets that path verify that it is being called at the tail of this work item's execution.
+                //
+                tl.currentWorkItem = workItem;
 #if FEATURE_OBJCMARSHAL
                 if (AutoreleasePool.EnableAutoreleasePool)
                 {
@@ -1056,6 +1073,10 @@ namespace System.Threading
                     DispatchWorkItem(workItem, currentThread);
                 }
 #pragma warning restore CS0162
+
+                // No more work may be deferred on behalf of this work item, and it must not be kept alive by the reference
+                // below while the next work item runs.
+                tl.currentWorkItem = null;
 
                 // Release refs
                 workItem = null;
@@ -1183,6 +1204,13 @@ namespace System.Threading
         public static ThreadPoolWorkQueueThreadLocals? threadLocals;
 
         public bool isProcessingHighPriorityWorkItems;
+
+        /// <summary>
+        /// The work item that this thread is currently executing in <see cref="ThreadPoolWorkQueue.Dispatch"/>, or null if
+        /// none. Used by <see cref="ThreadPoolWorkQueue.EnqueueLocalDeferred"/> to recognize a work item that is deferring
+        /// at the tail of its own execution.
+        /// </summary>
+        public object? currentWorkItem;
 
         /// <summary>
         /// A work item deferred by the currently executing work item, to be executed by this thread next. It is not
@@ -1739,10 +1767,11 @@ namespace System.Threading
         /// currently executing.
         /// </summary>
         /// <remarks>
-        /// The caller must know by construction that the work item will be picked up shortly, which in practice means that
-        /// the caller is about to complete the work item it is currently executing. Using this from a work item that then
-        /// blocks or runs for a long time would delay <paramref name="callBack"/> for that duration, as no other thread can
-        /// pick it up. When the current thread is not executing a thread pool work item, this falls back to a normal enqueue.
+        /// This is an optimization for a work item that is completing and knows what should run next on this thread, such as
+        /// an await that loses the race between IsCompleted and OnCompleted. It is only applied when <paramref name="callBack"/>
+        /// is the work item that this thread is currently executing, so that it is certain to be picked up as soon as the
+        /// caller returns to the dispatch loop. In any other case this falls back to a normal enqueue, so it is always safe
+        /// to call. See <see cref="ThreadPoolWorkQueue.EnqueueLocalDeferred"/>.
         /// </remarks>
         internal static void UnsafeQueueLocalDeferredWorkItemInternal(object callBack) =>
             s_workQueue.EnqueueLocalDeferred(callBack);
@@ -1752,14 +1781,19 @@ namespace System.Threading
         /// it is currently executing.
         /// </summary>
         /// <remarks>
-        /// Has the same requirements on the caller as <see cref="UnsafeQueueLocalDeferredWorkItemInternal(object)"/>.
+        /// Has the same behavior as <see cref="UnsafeQueueLocalDeferredWorkItemInternal(object)"/>, with the work item being
+        /// the state object for the callbacks that the runtime uses to resume an async method, and a wrapper otherwise. A
+        /// wrapper is a new object and so is never the work item that this thread is currently executing, which means such a
+        /// callback is always queued normally.
         /// </remarks>
         internal static void UnsafeQueueLocalDeferredWorkItemInternal(Action<object?> callBack, object? state)
         {
             Debug.Assert(callBack is not null);
 
             // As in UnsafeQueueUserWorkItem<TState>, a callback that only resumes an async state machine or a runtime async
-            // continuation can be represented by the state object itself, avoiding a wrapper allocation.
+            // continuation can be represented by the state object itself, avoiding a wrapper allocation. Only these callbacks
+            // are unwrapped, since only the runtime uses them, and only from the tail of the work item being resumed. For any
+            // other callback the state object is not known to have any relationship to what is running on this thread.
             object workItem;
             if (ReferenceEquals(callBack, s_invokeAsyncStateMachineBox) && state is IAsyncStateMachineBox stateMachineBox)
             {
