@@ -2744,7 +2744,11 @@ namespace System.Threading.Tasks
             // If we're unable to because the task has already completed, queue it.
             if (!AddTaskContinuation(stateMachineBox, addBeforeOthers: false))
             {
-                ThreadPool.UnsafeQueueUserWorkItemInternal(stateMachineBox, preferLocal: true);
+                // The task completed between the awaiter's IsCompleted check and here, so the continuation has to be
+                // scheduled. This runs at the tail of the awaiting method's MoveNext, so the work item is handed to this
+                // thread to be picked up as soon as it returns to the dispatch loop, avoiding both the queue round trip
+                // and a worker thread request that would either wake a worker spuriously or take this work item away.
+                ThreadPool.UnsafeQueueLocalDeferredWorkItemInternal(stateMachineBox);
             }
             return;
 

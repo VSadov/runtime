@@ -1747,6 +1747,36 @@ namespace System.Threading
         internal static void UnsafeQueueLocalDeferredWorkItemInternal(object callBack) =>
             s_workQueue.EnqueueLocalDeferred(callBack);
 
+        /// <summary>
+        /// Queues a callback and its state to be executed by the current thread immediately after it finishes the work item
+        /// it is currently executing.
+        /// </summary>
+        /// <remarks>
+        /// Has the same requirements on the caller as <see cref="UnsafeQueueLocalDeferredWorkItemInternal(object)"/>.
+        /// </remarks>
+        internal static void UnsafeQueueLocalDeferredWorkItemInternal(Action<object?> callBack, object? state)
+        {
+            Debug.Assert(callBack is not null);
+
+            // As in UnsafeQueueUserWorkItem<TState>, a callback that only resumes an async state machine or a runtime async
+            // continuation can be represented by the state object itself, avoiding a wrapper allocation.
+            object workItem;
+            if (ReferenceEquals(callBack, s_invokeAsyncStateMachineBox) && state is IAsyncStateMachineBox stateMachineBox)
+            {
+                workItem = stateMachineBox;
+            }
+            else if (ReferenceEquals(callBack, s_dispatchRuntimeAsyncContinuationsCallback) && state is Task task)
+            {
+                workItem = task;
+            }
+            else
+            {
+                workItem = new QueueUserWorkItemCallbackDefaultContext<object?>(callBack, state);
+            }
+
+            s_workQueue.EnqueueLocalDeferred(workItem);
+        }
+
         // This method tries to take the target callback out of the current thread's queue.
         internal static bool TryPopCustomWorkItem(object workItem)
         {
