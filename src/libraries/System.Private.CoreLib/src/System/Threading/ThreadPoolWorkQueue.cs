@@ -781,6 +781,32 @@ namespace System.Threading
             }
         }
 
+        /// <summary>
+        /// Makes a work item that was deferred by the work item this thread is currently executing visible to other threads.
+        /// </summary>
+        /// <remarks>
+        /// A deferred work item is kept in a slot that is private to this thread, on the expectation that this thread will
+        /// return to the dispatch loop and pick it up almost immediately. Anything that runs in between and is not known to
+        /// be bounded, such as a user callback, must call this first, so that the work item cannot be delayed for an
+        /// arbitrary duration or deadlock code that waits for it to run.
+        /// </remarks>
+        internal static void FlushDeferredWorkItem()
+        {
+            if (ThreadPoolWorkQueueThreadLocals.threadLocals is ThreadPoolWorkQueueThreadLocals tl &&
+                tl.FlushNextWorkItemToLocalQueue())
+            {
+                // The work item is now in the local queue where it can be stolen, and no thread request was made when it
+                // was deferred, so one is needed now.
+                ThreadPool.EnsureWorkerRequested();
+            }
+        }
+
+        /// <summary>
+        /// Whether the work item this thread is currently executing has deferred a work item to this thread.
+        /// </summary>
+        internal static bool HasDeferredWorkItem =>
+            ThreadPoolWorkQueueThreadLocals.threadLocals?.nextWorkItem is not null;
+
         internal static bool LocalFindAndPop(object callback)
         {
             ThreadPoolWorkQueueThreadLocals? tl = ThreadPoolWorkQueueThreadLocals.threadLocals;
@@ -1082,7 +1108,7 @@ namespace System.Threading
                 workItem = null;
 
                 // Return to clean ExecutionContext and SynchronizationContext. This may call user code (AsyncLocal value
-                // change notifications).
+                // change notifications), which flushes any deferred work item.
                 ExecutionContext.ResetThreadPoolThread(currentThread);
 
                 // Reset thread state after all user code for the work item has completed

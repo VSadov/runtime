@@ -297,6 +297,14 @@ namespace System.Threading
             currentThread._synchronizationContext = null;
             if (currentExecutionCtx != null)
             {
+                // The work item has finished running. If restoring the context notifies user code, publish any work item
+                // that the work item deferred to this thread first, since it is not visible to any other thread and the
+                // notifications are unbounded.
+                if (currentExecutionCtx.HasChangeNotifications)
+                {
+                    ThreadPoolWorkQueue.FlushDeferredWorkItem();
+                }
+
                 // The EC always needs to be reset for this overload, as it will flow back to the caller if it performs
                 // extra work prior to returning to the Dispatch loop. For example for Task-likes it will flow out of await points
                 RestoreChangedContextToThread(currentThread, contextToRestore: null, currentExecutionCtx);
@@ -353,6 +361,10 @@ namespace System.Threading
 
             if (currentExecutionCtx != null && currentExecutionCtx.HasChangeNotifications)
             {
+                // The work item has finished running, and the notifications below are user code. Publish any work item that
+                // it deferred to this thread first, since it is not visible to any other thread.
+                ThreadPoolWorkQueue.FlushDeferredWorkItem();
+
                 OnValuesChanged(currentExecutionCtx, nextExecutionCtx: null);
 
                 // Reset to defaults again without change notifications in case the Change handler changed the contexts

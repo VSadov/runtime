@@ -306,6 +306,18 @@ namespace System.Runtime.CompilerServices
                 ExecutionContext? currentExecutionCtx = thread._executionContext;
                 if (_executionContext != currentExecutionCtx)
                 {
+                    // A work item can only have been deferred to this thread if this dispatcher is itself running as a
+                    // thread pool work item, and then the context it started on, and is restoring here, is the Default one.
+                    // Testing for that first keeps the thread static that the flush reads out of every other path.
+                    Debug.Assert(_executionContext is null || !ThreadPoolWorkQueue.HasDeferredWorkItem);
+
+                    // If restoring the context notifies user code, publish any deferred work item first, since it is not
+                    // visible to any other thread and there is no bound on what the notifications may do, including blocking.
+                    if (_executionContext is null && currentExecutionCtx!.HasChangeNotifications)
+                    {
+                        ThreadPoolWorkQueue.FlushDeferredWorkItem();
+                    }
+
                     ExecutionContext.RestoreChangedContextToThread(thread, _executionContext, currentExecutionCtx);
                 }
             }
