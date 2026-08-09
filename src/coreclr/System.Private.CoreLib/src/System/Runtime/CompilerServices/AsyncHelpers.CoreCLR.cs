@@ -1231,7 +1231,12 @@ namespace System.Runtime.CompilerServices
                     }
 
                     SetContinuationState(continuation);
-                    ThreadPool.UnsafeQueueUserWorkItemInternal(this, preferLocal: true);
+
+                    // The continuation asked to run on the thread pool and this thread has a context that it must not
+                    // run under. If this thread is executing this task as a work item, handing the task back to it is
+                    // enough to leave the context behind, since the dispatch loop restores the default contexts before
+                    // picking the task up again.
+                    ThreadPool.UnsafeQueueLocalDeferredWorkItemInternal(this);
                     return true;
                 }
 
