@@ -36,7 +36,13 @@ namespace System.Runtime.CompilerServices
                 }
                 else
                 {
-                    ThreadPool.UnsafeQueueUserWorkItemInternal(RuntimeAsyncTask, preferLocal: true);
+                    // When the awaited task completed between the check that it was incomplete and attaching this
+                    // continuation to it, this runs at the tail of the suspension, on the thread that is executing
+                    // RuntimeAsyncTask as a work item. Handing the task to that thread lets it be picked up as soon as
+                    // the dispatch loop is reached, without a queue round trip or a worker thread request that would
+                    // either wake a worker spuriously or take the task away. In any other case, in particular when a
+                    // completing thread runs this continuation, this queues the task as usual.
+                    ThreadPool.UnsafeQueueLocalDeferredWorkItemInternal(RuntimeAsyncTask);
                 }
             }
         }
