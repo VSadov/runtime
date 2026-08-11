@@ -201,10 +201,7 @@ namespace System.Threading.Tasks.Sources
             switch (capturedContext)
             {
                 case null:
-                    // This runs at the tail of the awaiter's OnCompleted, so the continuation is handed to this thread to be
-                    // picked up as soon as it returns to the dispatch loop. That avoids the queue round trip and the worker
-                    // thread request, which would either wake a worker spuriously or take this continuation away.
-                    ThreadPool.UnsafeQueueLocalDeferredWorkItemInternal(continuation, state);
+                    ThreadPool.UnsafeQueueUserWorkItem(continuation, state, preferLocal: true);
                     break;
 
                 case ExecutionContext:
