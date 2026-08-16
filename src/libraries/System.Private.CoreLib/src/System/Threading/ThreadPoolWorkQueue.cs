@@ -1607,6 +1607,16 @@ namespace System.Threading
                     ThrowHelper.ThrowUnexpectedStateForKnownCallback(state);
                 }
 
+                // Reaching here means a notifier such as an IValueTaskSource is scheduling a
+                // runtime async continuation it was handed, which it only does when it found the
+                // operation already complete and would otherwise queue to avoid stack diving. If
+                // the runtime async dispatcher loop is directly below that suspension it can resume
+                // the continuation instead, which avoids the queueing without growing the stack.
+                if (AsyncHelpers.TryClaimInlineResume(state))
+                {
+                    return true;
+                }
+
                 UnsafeQueueUserWorkItemInternal((object)state, preferLocal);
                 return true;
             }
