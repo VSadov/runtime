@@ -107,6 +107,9 @@ namespace System.Net.Tests
             yield return new object[] { "GET /foo/%uFFF HTTP/1.1", null, null, null, "" };
         }
 
+        // TEMPORARY - revert before submitting. Hangs indefinitely in this local network
+        // environment, on pristine upstream/main as well as on this branch.
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/21940")] // hangs locally on loopback socket wait
         [ActiveIssue("https://github.com/dotnet/runtime/issues/2284", TestRuntimes.Mono)]
         [Fact]
         public async Task GetContext_InvalidRequest_DoesNotGetContext()
