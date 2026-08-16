@@ -14,6 +14,12 @@ namespace System.Runtime.CompilerServices
         private delegate*<Task, ref byte, void> _getResult;
         internal object? ContinuationContext;
 
+        // Set when the await specified ConfigureAwaitOptions.ForceYielding. That option is
+        // implemented by forcing the awaiter's IsCompleted to false, so the awaited Task may
+        // well be complete already. The suspension must still unwind the stack before the
+        // continuation runs, so such a continuation can never be resumed inline.
+        internal bool ForceYielding;
+
         public RuntimeAsyncTaskContinuation()
         {
             ResumeInfo = (ResumeInfo*)Unsafe.AsPointer(in TaskContinuationResume.ResumeInfo);
@@ -41,7 +47,7 @@ namespace System.Runtime.CompilerServices
             }
         }
 
-        private bool QueueIfNecessary(bool canInline)
+        internal bool QueueIfNecessary(bool canInline)
         {
             Debug.Assert(RuntimeAsyncTask != null);
 
@@ -117,12 +123,14 @@ namespace System.Runtime.CompilerServices
         public void Initialize(Task task)
         {
             Task = task;
+            ForceYielding = false;
             _getResult = &GetResult;
         }
 
         public void Initialize<T>(Task<T> task)
         {
             Task = task;
+            ForceYielding = false;
             _getResult = &GetResult<T>;
         }
 

@@ -230,7 +230,27 @@ namespace System.Runtime.CompilerServices
             public ExecutionContext? LeafExecutionContext;
             public SynchronizationContext? LeafSynchronizationContext;
 
+            // Non-null while a suspension is being handled with the dispatcher loop directly below
+            // it, which is the only situation where a continuation can be resumed inline instead of
+            // being queued. Holds the task that a notifier would schedule, both to verify that a
+            // claimant is the suspension we are currently handling, and because the offer is
+            // consumed by clearing this.
+            public object? InlineResumeOffer;
+
             public unsafe RuntimeAsyncStackState* Next;
+
+            // Resets the notifier that the current suspension was attached to. The dispatcher loop
+            // reuses this state across iterations when it resumes a continuation inline, so a stale
+            // notifier would be picked up by the priority-ordered dispatch in HandleSuspended.
+            public unsafe void ClearNotifiers()
+            {
+                CriticalNotifier = null;
+                Notifier = null;
+                ValueTaskSourceContinuation = null;
+                TaskContinuation = null;
+                AwaiterContinuation = null;
+                AwaiterOffset = 0;
+            }
         }
 
         // Used during suspensions to hold the continuation chain and on what we are waiting.
@@ -319,6 +339,36 @@ namespace System.Runtime.CompilerServices
             t_runtimeAsyncAwaitState.CachedTaskContinuation = continuation;
         }
 
+        /// <summary>
+        /// Called when a notifier discovers that the operation being awaited had already completed
+        /// while a runtime async continuation was being registered on it. Normally the continuation
+        /// must then be queued to avoid stack diving. If the runtime async dispatcher loop is
+        /// directly below the current suspension, it can instead resume the continuation on its next
+        /// iteration, which avoids the queueing without growing the stack.
+        /// </summary>
+        /// <param name="state">The runtime async task the notifier was going to schedule.</param>
+        /// <returns>
+        /// <see langword="true"/> if the runtime async machinery took ownership of the continuation
+        /// and the caller must not queue it; otherwise <see langword="false"/>.
+        /// </returns>
+        internal static unsafe bool TryClaimInlineResume(object? state)
+        {
+            RuntimeAsyncStackState* stackState = t_runtimeAsyncAwaitState.StackState;
+
+            // The offer is only open while we are handling a suspension with the dispatcher loop
+            // below us, and only for the suspension that is actually being handled right now.
+            // A null offer never matches, since the caller passes a non-null task.
+            if (stackState == null ||
+                !ReferenceEquals(state, stackState->InlineResumeOffer))
+            {
+                return false;
+            }
+
+            // Consume the offer. The suspension handler detects the handoff by observing this.
+            stackState->InlineResumeOffer = null;
+            return true;
+        }
+
 #if !NATIVEAOT
         [LibraryImport(RuntimeHelpers.QCall, EntryPoint = "AsyncHelpers_AddContinuationToExInternal")]
         private static unsafe partial void AddContinuationToExInternal(void* diagnosticIP, ObjectHandleOnStack ex);
@@ -381,6 +431,7 @@ namespace System.Runtime.CompilerServices
             }
 
             taskCont.Initialize(task);
+            taskCont.ForceYielding = (options & ConfigureAwaitOptions.ForceYielding) != 0;
 
             if ((options & ConfigureAwaitOptions.ContinueOnCapturedContext) != 0)
             {
@@ -417,6 +468,7 @@ namespace System.Runtime.CompilerServices
             }
 
             taskCont.Initialize<T>(task);
+            taskCont.ForceYielding = (options & ConfigureAwaitOptions.ForceYielding) != 0;
 
             if ((options & ConfigureAwaitOptions.ContinueOnCapturedContext) != 0)
             {
@@ -834,7 +886,18 @@ namespace System.Runtime.CompilerServices
                         taskCont.RuntimeAsyncTask = this;
                         if (!taskCont.Task.AddTaskContinuation(taskCont, addBeforeOthers: false))
                         {
-                            taskCont.Execute(canInline: false);
+                            // The task completed before we could register on it, so nobody will
+                            // schedule us. Normally we must queue rather than run the continuation
+                            // here, to avoid stack diving. If the dispatcher loop is directly below
+                            // this suspension it can resume the continuation instead.
+                            // A ForceYielding await can never do that: the option is implemented by
+                            // forcing the awaiter's IsCompleted to false, so we get here routinely
+                            // with an already completed task, and the whole point of the option is
+                            // that the stack unwinds before the continuation runs.
+                            if (taskCont.ForceYielding || !TryClaimInlineResume(this))
+                            {
+                                taskCont.Execute(canInline: false);
+                            }
                         }
                     }
                     else if (stackState->ValueTaskSourceContinuation is { } valueTaskSourceCont)
@@ -921,6 +984,60 @@ namespace System.Runtime.CompilerServices
                 HandleSuspended(ref state);
             }
 
+            // Handles a suspension that happened while DispatchContinuations is our immediate
+            // caller. Whether the notifier we attach to will race with completion cannot be known
+            // in advance, so instead we offer an inline resume for the duration of the suspension:
+            // a notifier that finds the operation already complete, and that would therefore have
+            // to queue the continuation to avoid stack diving, can hand it back to us instead.
+            // Since the dispatcher loop is right below us and is about to unwind anyway, it can
+            // resume the continuation on its next iteration, which avoids the queueing without
+            // growing the stack.
+            // Returns the continuation the dispatcher should resume next, or null if the suspension
+            // was handled normally and the dispatcher must unwind.
+            internal unsafe Continuation? HandleSuspendedInDispatcher(ref RuntimeAsyncAwaitState state)
+            {
+                RuntimeAsyncStackState* stackState = state.StackState;
+                Continuation head = state.SentinelContinuation!.Next!;
+
+                // Offer the inline resume for the duration of the suspension. HandleSuspended does
+                // not let exceptions escape, so no cleanup guard is needed here.
+                stackState->InlineResumeOffer = this;
+                HandleSuspended(ref state);
+
+                // The notifier consumed the offer if and only if it cleared it.
+                if (stackState->InlineResumeOffer is not null)
+                {
+                    stackState->InlineResumeOffer = null;
+                    return null;
+                }
+
+                // Unlike the ValueTaskSource path, HandleSuspended leaves the context flags on a
+                // task continuation, since scheduling is ours to decide. Honor them: if the
+                // continuation has to go elsewhere, QueueIfNecessary queues/posts this task and we
+                // report that we cannot resume inline. It uses the continuation state that
+                // HandleSuspended already published, which is what the scheduled task picks up.
+                if (head is RuntimeAsyncTaskContinuation taskCont &&
+                    (taskCont.Flags & ContinuationFlags.AllContinuationFlags) != 0 &&
+                    taskCont.QueueIfNecessary(canInline: true))
+                {
+                    stackState->ClearNotifiers();
+                    return null;
+                }
+
+                // Nobody else is going to schedule us, so take the chain back. ResumeTaskContinuation
+                // clears RuntimeAsyncTask when the continuation runs.
+                Continuation taken = MoveContinuationState();
+                Debug.Assert(taken == head);
+
+                // The resume paths assert that no context flags remain.
+                Debug.Assert((head.Flags & ContinuationFlags.AllContinuationFlags) == 0);
+
+                // The dispatcher loop reuses this state for the resumed continuation, so the
+                // notifier this suspension was attached to must not be observed by the next one.
+                stackState->ClearNotifiers();
+                return head;
+            }
+
 #pragma warning disable CA1822 // Mark members as static
             [MethodImpl(MethodImplOptions.NoOptimization)]
             public void NotifyDebuggerOfRuntimeAsyncState()
@@ -981,7 +1098,15 @@ namespace System.Runtime.CompilerServices
                         if (newContinuation != null)
                         {
                             newContinuation.Next = nextContinuation;
-                            HandleSuspended(ref awaitState);
+
+                            // The dispatcher loop is directly below this suspension, so a
+                            // continuation that the notifier would otherwise have to queue can be
+                            // resumed on the next iteration instead.
+                            if (HandleSuspendedInDispatcher(ref awaitState) is { } resumeInline)
+                            {
+                                asyncDispatcherInfo.NextContinuation = resumeInline;
+                                continue;
+                            }
 
                             contexts.Pop(awaitState.CurrentThread!);
                             awaitState.Pop();
