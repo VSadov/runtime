@@ -10,7 +10,7 @@ namespace System.IO.Pipelines
     {
         public override void Schedule(Action<object?> action, object? state)
         {
-            System.Threading.ThreadPool.QueueUserWorkItem(action, state, preferLocal: true);
+            System.Threading.ThreadPool.QueueUserWorkItem(action, state, preferLocal: false);
         }
 
         internal override void UnsafeSchedule(Action<object?> action, object? state)
