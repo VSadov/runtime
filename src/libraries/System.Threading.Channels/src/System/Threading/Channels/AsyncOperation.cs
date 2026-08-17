@@ -219,7 +219,7 @@ namespace System.Threading.Channels
                     // Otherwise fall through to invoke it synchronously.
                     if (RunContinuationsAsynchronously)
                     {
-                        UnsafeQueueSetCompletionAndInvokeContinuation();
+                        UnsafeRunContinuationAsynchronously();
                         return;
                     }
                 }
@@ -388,7 +388,10 @@ namespace System.Threading.Channels
 
             if (capturedContext is null)
             {
-                ChannelUtilities.UnsafeQueueUserWorkItem(continuation, state);
+                // Unlike SetCompletionAndInvokeContinuation, we queue only to avoid stack diving
+                // while still inside the awaiter's OnCompleted.
+                // We would run completion inline if we could, so keep it local.
+                ChannelUtilities.UnsafeQueueUserWorkItem(continuation, state, preferLocal: true);
             }
             else if (sc is not null)
             {

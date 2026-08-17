@@ -15,7 +15,15 @@ namespace System.IO.Pipelines
 
         internal override void UnsafeSchedule(Action<object?> action, object? state)
         {
-            System.Threading.ThreadPool.UnsafeQueueUserWorkItem(action, state, preferLocal: true);
+            // Scheduling here means the continuation was not to run on the completing stack, so do
+            // not bias it back towards this thread: the local queue is LIFO and this thread is the
+            // most likely to pick it up next.
+            System.Threading.ThreadPool.UnsafeQueueUserWorkItem(action, state, preferLocal: false);
+        }
+
+        internal override void UnsafeSchedule(Action<object?> action, object? state, bool preferLocal)
+        {
+            System.Threading.ThreadPool.UnsafeQueueUserWorkItem(action, state, preferLocal);
         }
     }
 }

@@ -916,7 +916,7 @@ namespace System.IO.Pipelines
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void TrySchedule(PipeScheduler scheduler, in CompletionData completionData)
+        private static void TrySchedule(PipeScheduler scheduler, in CompletionData completionData, bool preferLocal = false)
         {
             Action<object?> completion = completionData.Completion;
             // Nothing to do
@@ -933,7 +933,7 @@ namespace System.IO.Pipelines
             if (completionData.SynchronizationContext is null && completionData.ExecutionContext is null)
             {
                 // Common fast-path
-                scheduler.UnsafeSchedule(completion, completionData.CompletionState);
+                scheduler.UnsafeSchedule(completion, completionData.CompletionState, preferLocal);
             }
             else
             {
@@ -1036,7 +1036,10 @@ namespace System.IO.Pipelines
             {
                 Writer.Complete(ThrowHelper.CreateInvalidOperationException_NoConcurrentOperation());
             }
-            TrySchedule(ReaderScheduler, completionData);
+            // If OnCompleted produced completion data the operation had already completed, so this
+            // is the rare race where we schedule only to avoid stack diving while still inside the
+            // awaiter's OnCompleted. We would run the completion inline if we could, so keep it local.
+            TrySchedule(ReaderScheduler, completionData, preferLocal: true);
         }
 
         internal ReadResult GetReadAsyncResult()
@@ -1249,7 +1252,9 @@ namespace System.IO.Pipelines
             {
                 Reader.Complete(ThrowHelper.CreateInvalidOperationException_NoConcurrentOperation());
             }
-            TrySchedule(WriterScheduler, completionData);
+            // See the comment in OnReadAsyncCompleted: this is the completion race,
+            // we could not run inline, so schedule with local preference.
+            TrySchedule(WriterScheduler, completionData, preferLocal: true);
         }
 
         private void ReaderCancellationRequested()

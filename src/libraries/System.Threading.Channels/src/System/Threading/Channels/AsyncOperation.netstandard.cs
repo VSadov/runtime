@@ -5,7 +5,7 @@ namespace System.Threading.Channels
 {
     internal partial class AsyncOperation
     {
-        private void UnsafeQueueSetCompletionAndInvokeContinuation() =>
+        private void UnsafeRunContinuationAsynchronously() =>
             ThreadPool.UnsafeQueueUserWorkItem(static s => ((AsyncOperation)s).SetCompletionAndInvokeContinuation(), this);
 
         private static void Unregister(CancellationTokenRegistration registration) =>

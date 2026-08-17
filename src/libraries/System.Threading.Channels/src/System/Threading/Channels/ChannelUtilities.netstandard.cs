@@ -22,6 +22,10 @@ namespace System.Threading.Channels
             }, Tuple.Create(action, state));
         }
 
+        // No overload of UnsafeQueueUserWorkItem takes a locality preference downlevel.
+        internal static void UnsafeQueueUserWorkItem<TState>(Action<TState> action, TState state, bool preferLocal) =>
+            UnsafeQueueUserWorkItem(action, state);
+
         internal static void QueueUserWorkItem(Action<object?> action, object? state) =>
             Task.Factory.StartNew(action, state, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
     }

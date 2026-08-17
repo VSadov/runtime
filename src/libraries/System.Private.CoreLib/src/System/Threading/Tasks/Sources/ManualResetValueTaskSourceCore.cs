@@ -201,6 +201,9 @@ namespace System.Threading.Tasks.Sources
             switch (capturedContext)
             {
                 case null:
+                    // Unlike the completion path, we queue only to avoid stack diving while
+                    // still inside the awaiter's OnCompleted.
+                    // We would run completion inline if we could, so keep it local.
                     ThreadPool.UnsafeQueueUserWorkItem(continuation, state, preferLocal: true);
                     break;
 
@@ -245,7 +248,9 @@ namespace System.Threading.Tasks.Sources
                 {
                     if (_runContinuationsAsynchronously)
                     {
-                        ThreadPool.UnsafeQueueUserWorkItem(continuation, state, preferLocal: true);
+                        // The continuation was explicitly asked not to run inline,
+                        // so do not bias it back towards this thread.
+                        ThreadPool.UnsafeQueueUserWorkItem(continuation, state, preferLocal: false);
                     }
                     else
                     {

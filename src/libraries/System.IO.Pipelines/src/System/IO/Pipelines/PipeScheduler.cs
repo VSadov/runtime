@@ -26,5 +26,13 @@ namespace System.IO.Pipelines
 
         internal virtual void UnsafeSchedule(Action<object?> action, object? state)
             => Schedule(action, state);
+
+        /// <summary>
+        /// Schedules <paramref name="action"/>, hinting whether the work should be biased towards
+        /// the current thread. Only meaningful for the thread pool scheduler; other schedulers run
+        /// the callback wherever their contract says, and ignore the hint.
+        /// </summary>
+        internal virtual void UnsafeSchedule(Action<object?> action, object? state, bool preferLocal)
+            => UnsafeSchedule(action, state);
     }
 }
