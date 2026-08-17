@@ -1608,11 +1608,13 @@ namespace System.Threading
                 }
 
                 // Reaching here means a notifier such as an IValueTaskSource is scheduling a
-                // runtime async continuation it was handed, which it only does when it found the
-                // operation already complete and would otherwise queue to avoid stack diving. If
-                // the runtime async dispatcher loop is directly below that suspension it can resume
-                // the continuation instead, which avoids the queueing without growing the stack.
-                if (AsyncHelpers.TryClaimInlineResume(state))
+                // runtime async continuation it was handed. It does that either because the
+                // continuation was explicitly asked not to run inline, in which case it queues
+                // globally, or because it found the operation already complete and must avoid stack
+                // diving, in which case it keeps the work local. Only the latter can be resumed by
+                // the runtime async dispatcher loop, if one is directly below that suspension, so
+                // the locality preference tells us whether it is worth looking for an offer.
+                if (preferLocal && AsyncHelpers.TryClaimInlineResume(state))
                 {
                     return true;
                 }
