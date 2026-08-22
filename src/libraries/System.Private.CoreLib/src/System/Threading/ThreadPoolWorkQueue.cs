@@ -880,17 +880,13 @@ namespace System.Threading
         // Dispatch (if YieldFromDispatchLoop is true), or performing periodic activities
         public const uint DispatchQuantumMs = 30;
 
-        public enum DispatchResult
-        {
-            Spurious = 0,   // the thread was invited, but there was no work in the queue.
-            Regular = 1,   // this thread did as much work as was available or its quantum expired.
-            ShouldStop = 2, // this thread stopped working early.
-        }
-
         /// <summary>
         /// Dispatches work items to this thread.
         /// </summary>
-        internal static DispatchResult Dispatch()
+        /// <returns>
+        /// <see langword="false"/> if this thread was requested to stop processing work items, <see langword="true"/> otherwise.
+        /// </returns>
+        internal static bool Dispatch()
         {
             ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
             ThreadPoolWorkQueueThreadLocals tl = workQueue.GetOrCreateThreadLocals();
@@ -918,7 +914,7 @@ namespace System.Threading
                 }
 
                 // The thread found no work.
-                return DispatchResult.Spurious;
+                return true;
             }
 
 
@@ -977,7 +973,7 @@ namespace System.Threading
                             ThreadPool.EnsureWorkerRequested();
                         }
 
-                        return DispatchResult.Regular;
+                        return true;
                     }
                 }
 
@@ -1034,7 +1030,7 @@ namespace System.Threading
                         workQueue.UnassignWorkItemQueue(tl);
                     }
 
-                    return DispatchResult.ShouldStop;
+                    return false;
                 }
 
                 // Check if the dispatch quantum has expired
@@ -1054,7 +1050,7 @@ namespace System.Threading
                     {
                         workQueue.UnassignWorkItemQueue(tl);
                     }
-                    return DispatchResult.Regular;
+                    return true;
                 }
 
                 if (s_assignableWorkItemQueueCount > 0)
