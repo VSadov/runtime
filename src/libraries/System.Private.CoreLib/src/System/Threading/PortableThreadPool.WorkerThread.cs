@@ -40,7 +40,7 @@ namespace System.Threading
 
             private static short DetermineSpuriousDispatchNoSpinThreshold()
             {
-                const short DefaultSpuriousDispatchNoSpinThreshold = 1;
+                short DefaultSpuriousDispatchNoSpinThreshold = (short)Environment.ProcessorCount;
 
                 // When a worker is invited to dispatch work items but finds none, it may park without spinning first.
                 // That is only preferable while more than this number of workers are still processing work and can take
