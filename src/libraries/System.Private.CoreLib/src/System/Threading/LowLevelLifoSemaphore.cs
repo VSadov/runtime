@@ -81,38 +81,44 @@ namespace System.Threading
                 false);
         }
 
+        /// <summary>
+        /// Tracks how far a waiter has progressed through its spin budget, so that a spin can be
+        /// resumed where it left off instead of starting over. The default value starts a fresh spin.
+        /// </summary>
+        public struct SpinState
+        {
+            internal int _spinsRemaining;
+            internal uint _iteration;
+
+            // A fresh spin has not performed any backoff yet.
+            internal readonly bool IsFresh => _iteration == 0;
+
+            public void Reset()
+            {
+                _spinsRemaining = 0;
+                _iteration = 0;
+            }
+        }
+
         public bool Wait(int timeoutMs)
+        {
+            SpinState spinState = default;
+            return Wait(timeoutMs, ref spinState);
+        }
+
+        /// <summary>
+        /// Waits for a signal, spinning before blocking. When <paramref name="spinState"/> carries the
+        /// position of an earlier spin, the spin resumes from there, so a caller that keeps acquiring
+        /// signals without making progress runs down its budget and eventually blocks without spinning.
+        /// The position is reset once the thread blocks.
+        /// </summary>
+        public bool Wait(int timeoutMs, ref SpinState spinState)
         {
             Debug.Assert(timeoutMs >= -1);
 
-            // Try one-shot acquire first
-            Counts counts = _separated._counts;
-            if (counts.SignalCount != 0)
+            if (spinState.IsFresh)
             {
-                Counts newCounts = counts;
-                newCounts.DecrementSignalCount();
-                Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                if (countsBeforeUpdate == counts)
-                {
-                    // we've consumed a signal
-                    return true;
-                }
-            }
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return WaitSlow(timeoutMs);
-        }
-
-        private bool WaitSlow(int timeoutMs)
-        {
-            int spinsRemaining = Environment.IsSingleProcessor ? 0 : _maxSpinCount;
-
-            uint iteration = 0;
-            while (spinsRemaining > 0)
-            {
-                spinsRemaining -= Backoff.Exponential(iteration++);
-
+                // Try one-shot acquire first
                 Counts counts = _separated._counts;
                 if (counts.SignalCount != 0)
                 {
@@ -125,8 +131,40 @@ namespace System.Threading
                         return true;
                     }
                 }
+
+                RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
+
+                spinState._spinsRemaining = Environment.IsSingleProcessor ? 0 : _maxSpinCount;
             }
 
+            return WaitSlow(timeoutMs, ref spinState);
+        }
+
+        private bool WaitSlow(int timeoutMs, ref SpinState spinState)
+        {
+            while (spinState._spinsRemaining > 0)
+            {
+                // Back off first. A resumed spin continues at the position it reached before, so the
+                // thread waits a while rather than re-checking for a signal that it just consumed.
+                spinState._spinsRemaining -= Backoff.Exponential(spinState._iteration++);
+
+                Counts counts = _separated._counts;
+                if (counts.SignalCount != 0)
+                {
+                    Counts newCounts = counts;
+                    newCounts.DecrementSignalCount();
+                    Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+                    if (countsBeforeUpdate == counts)
+                    {
+                        // We've consumed a signal. Keep the spin position - if the caller finds no work,
+                        // its next wait picks the spin up from here instead of spinning the full budget.
+                        return true;
+                    }
+                }
+            }
+
+            // The spin budget is spent, so block. The budget starts over after blocking.
+            spinState.Reset();
             return WaitNoSpin(timeoutMs);
         }
 
