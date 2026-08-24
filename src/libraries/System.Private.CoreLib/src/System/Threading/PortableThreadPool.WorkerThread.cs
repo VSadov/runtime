@@ -137,8 +137,14 @@ namespace System.Threading
                         switch (ThreadPoolWorkQueue.Dispatch())
                         {
                             case ThreadPoolWorkQueue.DispatchResult.Spurious:
-                                // We were invited but found no work. This is counterproductive. We should park.
-                                noSpin = true;
+                                // We were invited but found no work. This is counterproductive.
+                                // Pause a bit before trying again.
+                                Thread.UninterruptibleSleep0();
+                                if (!Environment.IsSingleProcessor)
+                                {
+                                    Thread.SpinWait(1);
+                                }
+                                noSpin = false;
                                 break;
 
                             case ThreadPoolWorkQueue.DispatchResult.ShouldStop:
