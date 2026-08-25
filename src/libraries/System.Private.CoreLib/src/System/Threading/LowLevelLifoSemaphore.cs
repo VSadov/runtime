@@ -110,10 +110,10 @@ namespace System.Threading
         {
             int spinsRemaining = Environment.IsSingleProcessor ? 0 : _maxSpinCount;
 
-            uint iteration = 0;
+            uint spinsPerIteration = 1;
             while (spinsRemaining > 0)
             {
-                spinsRemaining -= Backoff.Exponential(iteration++);
+                spinsRemaining -= Backoff.Exponential(spinsPerIteration);
 
                 Counts counts = _separated._counts;
                 if (counts.SignalCount != 0)
@@ -125,6 +125,10 @@ namespace System.Threading
                     {
                         // we've consumed a signal
                         return true;
+                    }
+                    else
+                    {
+                        spinsPerIteration++;
                     }
                 }
             }
