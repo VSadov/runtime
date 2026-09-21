@@ -25,13 +25,15 @@ namespace System.Net.Sockets
         // PreferInlineCompletions defaults to false and can be set to true using the DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS envvar.
         internal static readonly bool InlineSocketCompletionsEnabled = Environment.GetEnvironmentVariable("DOTNET_SYSTEM_NET_SOCKETS_INLINE_COMPLETIONS") == "1";
 
-        // The events of a batch are packed into balanced binary trees, one work item per tree.
-        // A tree is unpacked by the thread that executes its root, so the events of a large tree can
-        // end up serialized behind that thread unless other threads steal them, which only happens
-        // when they run out of work. Capping the size bounds that delay, at the cost of posting more
-        // work items - which is fine, since it only happens for batches that are large to begin with.
-        // Anything in the 8 - 64 range performs the same, larger values give up the latency benefit.
-        private const int MaxTreeSize = 32;
+        // The events of a batch are handed to the thread pool as a single work item per batch, which
+        // claims and runs them one at a time. Draining a run of events inside one work item, rather
+        // than returning to the pool between them, keeps a batch from being interleaved with the
+        // continuations its own handlers produce - those land on the worker's local queue and, being
+        // LIFO, would otherwise run before the rest of the batch.
+        // Capping the batch size bounds how long one work item can hold a worker, at the cost of
+        // posting more of them - which is fine, since it only happens for batches that are large to
+        // begin with. Anything in the 8 - 64 range performs the same.
+        private const int MaxBatchSize = 32;
 
         // Set when some socket is given a PreferInlineCompletions value that differs from the
         // process-wide default above. That is done through an experimental API and virtually never
@@ -108,15 +110,9 @@ namespace System.Net.Sockets
         private readonly Interop.Sys.SocketEvent* _buffer;
 
         //
-        // Pool of reusable SocketIOEvent objects to avoid allocating one per event.
+        // Pool of reusable batches to avoid allocating one per event batch.
         //
-        private readonly ConcurrentQueue<SocketIOEvent> _eventPool = new ConcurrentQueue<SocketIOEvent>();
-
-        // Reusable, preallocated scratch buffer used by the event loop to collect the async events produced by a
-        // single WaitForSocketEvents call before packing them into a balanced binary tree.
-        // The number of async events can never exceed the number of socket events, which is
-        // bounded by EventBufferCount, so this array never needs to grow.
-        private readonly SocketIOEvent[] _asyncEvents = new SocketIOEvent[EventBufferCount];
+        private readonly ConcurrentQueue<SocketIOEventBatch> _batchPool = new ConcurrentQueue<SocketIOEventBatch>();
 
         //
         // Registers the Socket with a SocketAsyncEngine, and returns the associated engine.
@@ -248,9 +244,9 @@ namespace System.Net.Sockets
             }
         }
 
-        // Handles the socket events currently in the buffer, packing the ones that need to be completed
-        // asynchronously into balanced binary trees and posting each tree to the thread pool queue as one
-        // item. The trees are unpacked into the local queues as the items execute.
+        // Handles the socket events currently in the buffer, collecting the ones that need to be
+        // completed asynchronously into batches and posting each batch to the thread pool queue as one
+        // item. A batch is drained by the workers that pick it up, one event at a time.
         //
         // The JIT is allowed to arbitrarily extend the lifetime of locals, which may retain SocketAsyncContext references,
         // indirectly preventing Socket instances to be finalized, despite being no longer referenced by user code.
@@ -261,7 +257,7 @@ namespace System.Net.Sockets
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void HandleAndDispatchSocketEvents(int numEvents)
         {
-            SocketIOEvent[] asyncEvents = _asyncEvents;
+            SocketIOEventBatch? batch = null;
             int count = 0;
 
             foreach (var socketEvent in new ReadOnlySpan<Interop.Sys.SocketEvent>(_buffer, numEvents))
@@ -285,31 +281,36 @@ namespace System.Net.Sockets
 
                         if (events != Interop.Sys.SocketEvents.None)
                         {
-                            SocketIOEvent newEvent = RentEvent();
-                            newEvent.With(context, events);
-                            asyncEvents[count++] = newEvent;
+                            // Fill a pooled batch in place - no scratch buffer and no copy.
+                            batch ??= RentBatch();
+                            batch.Set(count++, context, events);
+
+                            if (count == MaxBatchSize)
+                            {
+                                DispatchBatch(batch, count);
+                                batch = null;
+                                count = 0;
+                            }
                         }
                     }
                 }
             }
 
-            if (count == 0)
+            if (batch is not null)
             {
-                return;
+                DispatchBatch(batch, count);
             }
+        }
 
-            for (int i = 0; i < count; i += MaxTreeSize)
-            {
-                int treeSize = Math.Min(MaxTreeSize, count - i);
+        private SocketIOEventBatch RentBatch() =>
+            _batchPool.TryDequeue(out SocketIOEventBatch? batch) ?
+                batch :
+                new SocketIOEventBatch(_batchPool);
 
-                SocketIOEvent root = asyncEvents[i];
-                LinkChildren(root, new ReadOnlySpan<SocketIOEvent>(asyncEvents, i + 1, treeSize - 1));
-
-                ThreadPool.UnsafeQueueUserWorkItem(root, preferLocal: false);
-            }
-
-            // Clear the references so the scratch buffer doesn't keep contexts alive.
-            Array.Clear(asyncEvents, 0, count);
+        private static void DispatchBatch(SocketIOEventBatch batch, int count)
+        {
+            batch.Prepare(count);
+            ThreadPool.UnsafeQueueUserWorkItem(batch, preferLocal: false);
         }
 
         private void FreeNativeResources()
@@ -324,103 +325,148 @@ namespace System.Net.Sockets
             }
         }
 
-        private SocketIOEvent RentEvent() =>
-            _eventPool.TryDequeue(out SocketIOEvent? existingEvent) ?
-                existingEvent :
-                new SocketIOEvent(_eventPool);
-
-        // Arranges the events in the span into a balanced binary tree hanging off the given root.
-        private static void LinkChildren(SocketIOEvent root, ReadOnlySpan<SocketIOEvent> rest)
+        private readonly struct PendingEvent(SocketAsyncContext context, Interop.Sys.SocketEvents events)
         {
-            // Events are handed out with null children, either fresh or cleared when recycled.
-            Debug.Assert(root._left is null && root._right is null);
-
-            switch (rest.Length)
-            {
-                case 0:
-                    return;
-
-                case 1:
-                    root._left = rest[0];
-                    return;
-
-                case 2:
-                    root._left = rest[0];
-                    root._right = rest[1];
-                    return;
-            }
-
-            // Give the left side the extra element when the count is odd.
-            int leftCount = (rest.Length + 1) / 2;
-
-            ReadOnlySpan<SocketIOEvent> left = rest.Slice(0, leftCount);
-            ReadOnlySpan<SocketIOEvent> right = rest.Slice(leftCount);
-
-            root._left = left[0];
-            LinkChildren(left[0], left.Slice(1));
-
-            if (!right.IsEmpty)
-            {
-                root._right = right[0];
-                LinkChildren(right[0], right.Slice(1));
-            }
+            public readonly SocketAsyncContext Context = context;
+            public readonly Interop.Sys.SocketEvents Events = events;
         }
 
-        private sealed class SocketIOEvent : IThreadPoolWorkItem
+        // A batch of socket events, dispatched to the thread pool as a single work item.
+        //
+        // Workers claim one event at a time with an interlocked increment, so a handler that blocks
+        // holds up exactly the event it claimed and no others. Before running a handler a worker makes
+        // sure another worker is coming for the remainder, so progress never depends on the current one
+        // returning. That request is deduped and taken once per dequeue, so a batch costs about as many
+        // enqueues as there are workers willing to help, not one per event.
+        //
+        // The instance is pooled and reused. Reuse is safe because it is reference counted rather than
+        // versioned: _refs counts the queued work items plus the workers currently inside Execute, and
+        // the batch only returns to the pool when that reaches zero. Nothing can reference it at that
+        // point, so the engine can refill it and reset the cursor with plain writes, and a stale helper
+        // can never claim a slot belonging to a later batch.
+        private sealed class SocketIOEventBatch : IThreadPoolWorkItem
         {
-            private readonly ConcurrentQueue<SocketIOEvent> _pool;
-            public SocketIOEvent? _left;
-            public SocketIOEvent? _right;
+            // A batch holds MaxBatchSize events inline, so it is much larger than a single event would
+            // be. Cap the pool so it cannot grow without bound in edge cases; the number in flight per
+            // engine is normally a handful.
+            private const int MaxBatchPoolCount = 1024;
 
-            public SocketAsyncContext? _context;
-            public Interop.Sys.SocketEvents _events;
+            // A limiter rather than a tuning knob: sized so a batch of normal-cost handlers finishes
+            // well inside it and only a pathologically slow handler trips it.
+            private static readonly long TicksPer50Us = Stopwatch.Frequency / 20_000;
+            private static readonly long TicksPer1Ms = Stopwatch.Frequency / 1_000;
 
-            // Assuming that SocketIOEvent + overhead of a queue slot takes ~ 64bytes,
-            // we will limit the number of events in the pool to 1MB / 64bytes = 16k items
-            // to prevent unlimited growth in edge cases.
-            // The count of events in flight per engine should normally be much less than this.
-            private const int MaxEventPoolCount = 1024 * 1024 / 64;
+            private readonly ConcurrentQueue<SocketIOEventBatch> _pool;
 
-            public SocketIOEvent(ConcurrentQueue<SocketIOEvent> pool)
+            // Fixed size, allocated once with the instance.
+            private readonly PendingEvent[] _items = new PendingEvent[MaxBatchSize];
+
+            private int _current;
+            private int _end;
+            private int _refs;
+            private int _helperRequested;
+
+            public SocketIOEventBatch(ConcurrentQueue<SocketIOEventBatch> pool)
             {
                 _pool = pool;
             }
 
-            public void With(SocketAsyncContext context, Interop.Sys.SocketEvents events)
+            // Called by the engine thread, which holds the only reference to a pooled batch.
+            public void Set(int index, SocketAsyncContext context, Interop.Sys.SocketEvents events)
             {
-                _context = context;
-                _events = events;
+                _items[index] = new PendingEvent(context, events);
+            }
+
+            // Also engine-thread only. The enqueue that follows publishes these writes: the thread pool
+            // queue provides the release, and the worker's dequeue the matching acquire.
+            public void Prepare(int count)
+            {
+                _current = 0;
+                _end = count;
+
+                // One reference for the enqueue that is about to happen, which is also the first helper.
+                _refs = 1;
+                _helperRequested = 1;
             }
 
             void IThreadPoolWorkItem.Execute()
             {
-                // Unpack the child subtrees into the local queue. Each of them will in turn
-                // unpack its own children when it executes.
-                SocketIOEvent? left = _left;
-                SocketIOEvent? right = _right;
+                // The requested helper has arrived - allow another one to be requested.
+                Volatile.Write(ref _helperRequested, 0);
 
-                if (left is not null)
+                // Insurance is taken once per dequeue. Without this, a worker looping through the batch
+                // would request a fresh helper every time an arriving helper cleared the flag, which
+                // approaches one enqueue per event.
+                bool insured = false;
+
+                int remaining = _end - Volatile.Read(ref _current);
+                long deadline =
+                    Stopwatch.GetTimestamp() +
+                    Math.Min((long)Math.Max(remaining, 1) * TicksPer50Us, TicksPer1Ms);
+
+                while (true)
                 {
-                    ThreadPool.UnsafeQueueUserWorkItem(left, preferLocal: true);
+                    // Full barrier, so the reads below cannot be hoisted above the claim.
+                    int i = Interlocked.Increment(ref _current) - 1;
+                    if (i >= _end)
+                    {
+                        break;
+                    }
+
+                    // HandleEvents may run user code, which may block or even wait on another event in
+                    // this same batch, so make sure someone is coming for the rest before running it.
+                    if (!insured && i + 1 < _end)
+                    {
+                        EnsureHelperRequested();
+                        insured = true;
+                    }
+
+                    PendingEvent item = _items[i];
+
+                    // Don't keep the context alive once it has been dispatched. Every slot below _end is
+                    // claimed exactly once, so the array is fully cleared by the time the batch is reused.
+                    _items[i] = default;
+
+                    item.Context.HandleEvents(item.Events);
+
+                    if (Stopwatch.GetTimestamp() >= deadline)
+                    {
+                        // Hand the rest off rather than keep deferring this worker's own continuations.
+                        // The dedupe stays correct here: the flag being set means a helper is queued and
+                        // has not started, and if it had started it cleared the flag on entry.
+                        if (Volatile.Read(ref _current) < _end)
+                        {
+                            EnsureHelperRequested();
+                        }
+
+                        break;
+                    }
                 }
-                if (right is not null)
+
+                Release();
+            }
+
+            private void EnsureHelperRequested()
+            {
+                if (Volatile.Read(ref _helperRequested) == 0 &&
+                    Interlocked.Exchange(ref _helperRequested, 1) == 0)
                 {
-                    ThreadPool.UnsafeQueueUserWorkItem(right, preferLocal: true);
+                    // Count the queued item before publishing it. The caller is inside Execute and so
+                    // holds a reference, which means _refs cannot be resurrected from zero here.
+                    Interlocked.Increment(ref _refs);
+                    ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: true);
                 }
+            }
 
-                SocketAsyncContext context = _context!;
-                Interop.Sys.SocketEvents events = _events;
-
-                if (_pool.Count < MaxEventPoolCount)
+            private void Release()
+            {
+                // Not run under a finally: if a handler throws, the process is going down through the
+                // thread pool's unhandled exception path, and leaking the batch is preferable to
+                // returning a possibly inconsistent one to the pool.
+                if (Interlocked.Decrement(ref _refs) == 0 && _pool.Count < MaxBatchPoolCount)
                 {
-                    _context = null;
-                    _events = Interop.Sys.SocketEvents.None;
-                    _left = null;
-                    _right = null;
                     _pool.Enqueue(this);
                 }
-
-                context.HandleEvents(events);
             }
         }
     }
