@@ -281,16 +281,38 @@ namespace System.Net.Sockets
 
                         if (events != Interop.Sys.SocketEvents.None)
                         {
-                            // Fill a pooled batch in place - no scratch buffer and no copy.
-                            batch ??= RentBatch();
-                            batch.Set(count++, context, events);
-
-                            if (count == MaxBatchSize)
+                            // An event can report both directions at once, either because the socket is
+                            // genuinely readable and writable or because an error was translated into
+                            // Read | Write. Split it here so that the two halves become separate entries:
+                            // handling them together would run one and queue the other, which lands the
+                            // second behind the continuations the first produces. An extra array slot is
+                            // much cheaper than that, and lets the two be claimed by different workers.
+                            //
+                            // Error has already been translated to Read | Write by the call above, so
+                            // splitting on the remaining bits covers it with no special case.
+                            Interop.Sys.SocketEvents remaining = events;
+                            do
                             {
-                                DispatchBatch(batch, count);
-                                batch = null;
-                                count = 0;
+                                Interop.Sys.SocketEvents single = remaining & Interop.Sys.SocketEvents.Read;
+                                if (single == Interop.Sys.SocketEvents.None)
+                                {
+                                    single = remaining;
+                                }
+
+                                remaining ^= single;
+
+                                // Fill a pooled batch in place - no scratch buffer and no copy.
+                                batch ??= RentBatch();
+                                batch.Set(count++, context, single);
+
+                                if (count == MaxBatchSize)
+                                {
+                                    DispatchBatch(batch, count);
+                                    batch = null;
+                                    count = 0;
+                                }
                             }
+                            while (remaining != Interop.Sys.SocketEvents.None);
                         }
                     }
                 }
