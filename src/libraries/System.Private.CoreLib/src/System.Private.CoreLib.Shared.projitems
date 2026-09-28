@@ -1368,7 +1368,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadInt64PersistentCounter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadInterruptedException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadLocal.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)System\Threading\PerCoreThreadPoolWorkQueue.cs" Condition="'$(FeatureMultithreading)' == 'true'" />
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadPoolWorkQueue.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadPoolWorkQueue.Common.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadPriority.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadStart.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)System\Threading\ThreadStartException.cs" />

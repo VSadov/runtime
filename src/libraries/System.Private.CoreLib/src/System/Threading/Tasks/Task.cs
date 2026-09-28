@@ -3230,7 +3230,7 @@ namespace System.Threading.Tasks
                 // pool, which can lead to the whole system slowing down or even deadlocking. To address that,
                 // just before we block, we move all local work into a global queue, so that it's at least
                 // prioritized by other threads more fairly with respect to other work.
-                ThreadPoolWorkQueue.TransferAllLocalWorkItemsToHighPriorityGlobalQueue();
+                ThreadPool.s_workQueue.TransferLocalWorkItemsBeforeBlocking();
 
                 var mres = new SetOnInvokeMres();
                 try

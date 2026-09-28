@@ -56,7 +56,7 @@ namespace System.Threading
                 s_mainTask = mainTask;
                 while (!mainTask.IsCompleted)
                 {
-                    ThreadPoolWorkQueue.Dispatch();
+                    ThreadPool.s_workQueue.Dispatch();
                     WasiFinalizerScheduler.DrainIfPending();
                 }
             }
@@ -78,7 +78,7 @@ namespace System.Threading
                 s_mainTask = mainTask;
                 while (!mainTask.IsCompleted)
                 {
-                    ThreadPoolWorkQueue.Dispatch();
+                    ThreadPool.s_workQueue.Dispatch();
                     WasiFinalizerScheduler.DrainIfPending();
                 }
             }

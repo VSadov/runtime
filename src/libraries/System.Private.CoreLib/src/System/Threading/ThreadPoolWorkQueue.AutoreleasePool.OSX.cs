@@ -6,10 +6,10 @@ using System.Runtime.Versioning;
 
 namespace System.Threading
 {
-    internal sealed partial class ThreadPoolWorkQueue
+    internal static partial class ThreadPoolWorkItemDispatcher
     {
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void DispatchItemWithAutoreleasePool(object workItem, Thread currentThread)
+        internal static void DispatchItemWithAutoreleasePool(object workItem, Thread currentThread)
         {
             IntPtr autoreleasePool = Interop.Sys.CreateAutoreleasePool();
             try

@@ -138,7 +138,7 @@ namespace System.Threading
             try
             {
                 _callbackQueued = false;
-                ThreadPoolWorkQueue.Dispatch();
+                ThreadPool.s_workQueue.Dispatch();
             }
             catch (Exception e)
             {

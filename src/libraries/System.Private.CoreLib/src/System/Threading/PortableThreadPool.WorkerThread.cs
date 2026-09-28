@@ -154,14 +154,14 @@ namespace System.Threading
                     {
                         // We took the request, now we must Dispatch some work items.
                         threadPoolInstance.NotifyDispatchProgress(Environment.TickCount);
-                        switch (ThreadPoolWorkQueue.Dispatch())
+                        switch (ThreadPool.s_workQueue.Dispatch())
                         {
-                            case ThreadPoolWorkQueue.DispatchResult.Spurious:
+                            case IThreadPoolWorkQueue.DispatchResult.Spurious:
                                 // We were invited but found no work. This is counterproductive. We may want to park.
                                 spurious = true;
                                 break;
 
-                            case ThreadPoolWorkQueue.DispatchResult.ShouldStop:
+                            case IThreadPoolWorkQueue.DispatchResult.ShouldStop:
                                 // We are above goal and this worker is already removed in the counts.
                                 // Chances to be invited back right away are low, so just park.
                                 return true;

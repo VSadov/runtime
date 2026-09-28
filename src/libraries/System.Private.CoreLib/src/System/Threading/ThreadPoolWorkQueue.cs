@@ -11,6 +11,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
+using DispatchResult = System.Threading.IThreadPoolWorkQueue.DispatchResult;
 
 #if FEATURE_MULTITHREADING
 using WorkQueue = System.Collections.Concurrent.ConcurrentQueue<object>;
@@ -22,9 +23,9 @@ using WorkQueue = System.Collections.Generic.Queue<object>;
 namespace System.Threading
 {
     /// <summary>
-    /// Class for creating and managing a threadpool.
+    /// The default thread pool work queue implementation.
     /// </summary>
-    internal sealed partial class ThreadPoolWorkQueue
+    internal sealed partial class ThreadPoolWorkQueue : IThreadPoolWorkQueue
     {
         internal static class WorkStealingQueueList
         {
@@ -701,7 +702,7 @@ namespace System.Threading
         {
             // Pop each work item off the local queue and push it onto the global. This is a
             // bounded loop as no other thread is allowed to push into this thread's queue.
-            ThreadPoolWorkQueue queue = ThreadPool.s_workQueue;
+            ThreadPoolWorkQueue queue = tl.workQueue;
             bool ensureWorkerRequest = false;
             while (tl.workStealingQueue.LocalPop() is object workItem)
             {
@@ -730,6 +731,10 @@ namespace System.Threading
                 ThreadPool.EnsureWorkerRequested();
             }
         }
+
+        public void TransferLocalWorkItemsBeforeBlocking() => TransferAllLocalWorkItemsToHighPriorityGlobalQueue();
+
+        public bool TryRemove(Task workItem) => LocalFindAndPop(workItem);
 
         internal static bool LocalFindAndPop(object callback)
         {
@@ -842,7 +847,7 @@ namespace System.Threading
             return true;
         }
 
-        public static long LocalCount
+        public long LocalCount
         {
             get
             {
@@ -876,23 +881,69 @@ namespace System.Threading
             }
         }
 
+        // Get all workitems.  Called by TaskScheduler in its debugger hooks.
+        public IEnumerable<object> GetQueuedWorkItems()
+        {
+            // Enumerate high-priority queue
+            foreach (object workItem in highPriorityWorkItems)
+            {
+                yield return workItem;
+            }
+
+            // Enumerate assignable global queues
+            foreach (WorkQueue queue in _assignableWorkItemQueues)
+            {
+                foreach (object workItem in queue)
+                {
+                    yield return workItem;
+                }
+            }
+
+            // Enumerate global queue
+            foreach (object workItem in workItems)
+            {
+                yield return workItem;
+            }
+
+#if CORECLR
+            if (ThreadPoolWorkQueue.s_prioritizationExperiment)
+            {
+                // Enumerate low-priority global queue
+                foreach (object workItem in lowPriorityWorkItems)
+                {
+                    yield return workItem;
+                }
+            }
+#endif
+
+            // Enumerate each local queue
+            foreach (ThreadPoolWorkQueue.WorkStealingQueue wsq in ThreadPoolWorkQueue.WorkStealingQueueList.Queues)
+            {
+                if (wsq != null && wsq.m_array != null)
+                {
+                    object?[] items = wsq.m_array;
+                    for (int i = 0; i < items.Length; i++)
+                    {
+                        object? item = items[i];
+                        if (item != null)
+                        {
+                            yield return item;
+                        }
+                    }
+                }
+            }
+        }
+
         // Time in ms for which ThreadPoolWorkQueue.Dispatch keeps executing normal work items before either returning from
         // Dispatch (if YieldFromDispatchLoop is true), or performing periodic activities
         public const uint DispatchQuantumMs = 30;
 
-        public enum DispatchResult
-        {
-            Spurious = 0,   // the thread was invited, but there was no work in the queue.
-            Regular = 1,   // this thread did as much work as was available or its quantum expired.
-            ShouldStop = 2, // this thread stopped working early.
-        }
-
         /// <summary>
         /// Dispatches work items to this thread.
         /// </summary>
-        internal static DispatchResult Dispatch()
+        public DispatchResult Dispatch()
         {
-            ThreadPoolWorkQueue workQueue = ThreadPool.s_workQueue;
+            ThreadPoolWorkQueue workQueue = this;
             ThreadPoolWorkQueueThreadLocals tl = workQueue.GetOrCreateThreadLocals();
 
             if (s_assignableWorkItemQueueCount > 0)
@@ -992,18 +1043,18 @@ namespace System.Threading
 #if FEATURE_OBJCMARSHAL
                 if (AutoreleasePool.EnableAutoreleasePool)
                 {
-                    DispatchItemWithAutoreleasePool(workItem, currentThread);
+                    ThreadPoolWorkItemDispatcher.DispatchItemWithAutoreleasePool(workItem, currentThread);
                 }
                 else
 #endif
 #pragma warning disable CS0162 // Unreachable code detected. EnableWorkerTracking may be a constant in some runtimes.
                 if (ThreadPool.EnableWorkerTracking)
                 {
-                    DispatchWorkItemWithWorkerTracking(workItem, currentThread);
+                    ThreadPoolWorkItemDispatcher.DispatchWorkItemWithWorkerTracking(workItem, currentThread);
                 }
                 else
                 {
-                    DispatchWorkItem(workItem, currentThread);
+                    ThreadPoolWorkItemDispatcher.DispatchWorkItem(workItem, currentThread);
                 }
 #pragma warning restore CS0162
 
@@ -1073,49 +1124,6 @@ namespace System.Threading
                 workQueue.RefreshLoggingEnabled();
             }
         }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void DispatchWorkItemWithWorkerTracking(object workItem, Thread currentThread)
-        {
-            Debug.Assert(ThreadPool.EnableWorkerTracking);
-            Debug.Assert(currentThread == Thread.CurrentThread);
-
-            bool reportedStatus = false;
-            try
-            {
-                ThreadPool.ReportThreadStatus(isWorking: true);
-                reportedStatus = true;
-                DispatchWorkItem(workItem, currentThread);
-            }
-            finally
-            {
-                if (reportedStatus)
-                    ThreadPool.ReportThreadStatus(isWorking: false);
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void DispatchWorkItem(object workItem, Thread currentThread)
-        {
-            if (workItem is Task task)
-            {
-                // Task workitems catch their exceptions for later observation
-                // We do not need to pass unhandled ones to ExceptionHandling.s_handler
-                task.ExecuteDirectly(currentThread);
-            }
-            else
-            {
-                Debug.Assert(workItem is IThreadPoolWorkItem);
-                try
-                {
-                    Unsafe.As<IThreadPoolWorkItem>(workItem).Execute();
-                }
-                catch (Exception ex) when (ExceptionHandling.IsHandledByGlobalHandler(ex))
-                {
-                    // the handler returned "true" means the exception is now "handled" and we should continue.
-                }
-            }
-        }
     }
 
     // Holds a WorkStealingQueue, and removes it from the list when this object is no longer referenced.
@@ -1152,582 +1160,6 @@ namespace System.Threading
             {
                 ThreadPoolWorkQueue.TransferAllLocalWorkItemsToHighPriorityGlobalQueue(this);
                 ThreadPoolWorkQueue.WorkStealingQueueList.Remove(workStealingQueue);
-            }
-        }
-    }
-
-    public delegate void WaitCallback(object? state);
-
-    public delegate void WaitOrTimerCallback(object? state, bool timedOut);  // signaled or timed out
-
-    internal abstract class QueueUserWorkItemCallbackBase : IThreadPoolWorkItem
-    {
-#if DEBUG
-        private bool _executed;
-
-        ~QueueUserWorkItemCallbackBase()
-        {
-            Interlocked.MemoryBarrier(); // ensure that an old cached value is not read below
-            Debug.Assert(_executed, "A QueueUserWorkItemCallback was never called!");
-        }
-#endif
-
-        public virtual void Execute()
-        {
-#if DEBUG
-            GC.SuppressFinalize(this);
-            Debug.Assert(!Interlocked.Exchange(ref _executed, true), "A QueueUserWorkItemCallback was called twice!");
-#endif
-        }
-    }
-
-    internal sealed class QueueUserWorkItemCallback : QueueUserWorkItemCallbackBase
-    {
-        private WaitCallback? _callback; // SOS's ThreadPool command depends on this name
-        private readonly object? _state;
-        private readonly ExecutionContext _context;
-
-        private static readonly Action<QueueUserWorkItemCallback> s_executionContextShim = quwi =>
-        {
-            Debug.Assert(quwi._callback != null);
-            WaitCallback callback = quwi._callback;
-            quwi._callback = null;
-
-            callback(quwi._state);
-        };
-
-        internal QueueUserWorkItemCallback(WaitCallback callback, object? state, ExecutionContext context)
-        {
-            Debug.Assert(context != null);
-
-            _callback = callback;
-            _state = state;
-            _context = context;
-        }
-
-        public override void Execute()
-        {
-            base.Execute();
-
-            ExecutionContext.RunForThreadPoolUnsafe(_context, s_executionContextShim, this);
-        }
-    }
-
-    internal sealed class QueueUserWorkItemCallback<TState> : QueueUserWorkItemCallbackBase
-    {
-        private Action<TState>? _callback; // SOS's ThreadPool command depends on this name
-        private readonly TState _state;
-        private readonly ExecutionContext _context;
-
-        internal QueueUserWorkItemCallback(Action<TState> callback, TState state, ExecutionContext context)
-        {
-            Debug.Assert(callback != null);
-
-            _callback = callback;
-            _state = state;
-            _context = context;
-        }
-
-        public override void Execute()
-        {
-            base.Execute();
-
-            Debug.Assert(_callback != null);
-            Action<TState> callback = _callback;
-            _callback = null;
-
-            ExecutionContext.RunForThreadPoolUnsafe(_context, callback, in _state);
-        }
-    }
-
-    internal sealed class QueueUserWorkItemCallbackDefaultContext : QueueUserWorkItemCallbackBase
-    {
-        private WaitCallback? _callback; // SOS's ThreadPool command depends on this name
-        private readonly object? _state;
-
-        internal QueueUserWorkItemCallbackDefaultContext(WaitCallback callback, object? state)
-        {
-            Debug.Assert(callback != null);
-
-            _callback = callback;
-            _state = state;
-        }
-
-        public override void Execute()
-        {
-            ExecutionContext.CheckThreadPoolAndContextsAreDefault();
-            base.Execute();
-
-            Debug.Assert(_callback != null);
-            WaitCallback callback = _callback;
-            _callback = null;
-
-            callback(_state);
-
-            // ThreadPoolWorkQueue.Dispatch will handle notifications and reset EC and SyncCtx back to default
-        }
-    }
-
-    internal sealed class QueueUserWorkItemCallbackDefaultContext<TState> : QueueUserWorkItemCallbackBase
-    {
-        private Action<TState>? _callback; // SOS's ThreadPool command depends on this name
-        private readonly TState _state;
-
-        internal QueueUserWorkItemCallbackDefaultContext(Action<TState> callback, TState state)
-        {
-            Debug.Assert(callback != null);
-
-            _callback = callback;
-            _state = state;
-        }
-
-        public override void Execute()
-        {
-            ExecutionContext.CheckThreadPoolAndContextsAreDefault();
-            base.Execute();
-
-            Debug.Assert(_callback != null);
-            Action<TState> callback = _callback;
-            _callback = null;
-
-            callback(_state);
-
-            // ThreadPoolWorkQueue.Dispatch will handle notifications and reset EC and SyncCtx back to default
-        }
-    }
-
-    internal sealed class _ThreadPoolWaitOrTimerCallback
-    {
-        private readonly WaitOrTimerCallback _waitOrTimerCallback;
-        private readonly ExecutionContext? _executionContext;
-        private readonly object? _state;
-        private static readonly ContextCallback _ccbt = new ContextCallback(WaitOrTimerCallback_Context_t);
-        private static readonly ContextCallback _ccbf = new ContextCallback(WaitOrTimerCallback_Context_f);
-
-        internal _ThreadPoolWaitOrTimerCallback(WaitOrTimerCallback waitOrTimerCallback, object? state, bool flowExecutionContext)
-        {
-            _waitOrTimerCallback = waitOrTimerCallback;
-            _state = state;
-
-            if (flowExecutionContext)
-            {
-                // capture the exection context
-                _executionContext = ExecutionContext.Capture();
-            }
-        }
-
-        private static void WaitOrTimerCallback_Context_t(object? state) =>
-            WaitOrTimerCallback_Context(state, timedOut: true);
-
-        private static void WaitOrTimerCallback_Context_f(object? state) =>
-            WaitOrTimerCallback_Context(state, timedOut: false);
-
-        private static void WaitOrTimerCallback_Context(object? state, bool timedOut)
-        {
-            _ThreadPoolWaitOrTimerCallback helper = (_ThreadPoolWaitOrTimerCallback)state!;
-            helper._waitOrTimerCallback(helper._state, timedOut);
-        }
-
-        // call back helper
-        internal static void PerformWaitOrTimerCallback(_ThreadPoolWaitOrTimerCallback helper, bool timedOut)
-        {
-            Debug.Assert(helper != null, "Null state passed to PerformWaitOrTimerCallback!");
-            // call directly if it is an unsafe call OR EC flow is suppressed
-            ExecutionContext? context = helper._executionContext;
-            if (context == null)
-            {
-                WaitOrTimerCallback callback = helper._waitOrTimerCallback;
-                callback(helper._state, timedOut);
-            }
-            else
-            {
-                ExecutionContext.Run(context, timedOut ? _ccbt : _ccbf, helper);
-            }
-        }
-    }
-
-    public static partial class ThreadPool
-    {
-        internal const string WorkerThreadName = ".NET TP Worker";
-
-        internal static readonly ThreadPoolWorkQueue s_workQueue = new ThreadPoolWorkQueue();
-
-        /// <summary>Shim used to invoke <see cref="IAsyncStateMachineBox.MoveNext"/> of the supplied <see cref="IAsyncStateMachineBox"/>.</summary>
-        internal static readonly Action<object?> s_invokeAsyncStateMachineBox = static state =>
-        {
-            if (state is IAsyncStateMachineBox box)
-            {
-                box.MoveNext();
-            }
-            else
-            {
-                ThrowHelper.ThrowUnexpectedStateForKnownCallback(state);
-            }
-        };
-
-        /// <summary>Shim used to invoke <see cref="Task.ExecuteDirectly"/> of a supplied <see cref="Task"/>.</summary>
-        internal static readonly Action<object?> s_dispatchRuntimeAsyncContinuationsCallback = static state =>
-        {
-            if (state is Task t)
-            {
-                t.ExecuteDirectly(null);
-            }
-            else
-            {
-                ThrowHelper.ThrowUnexpectedStateForKnownCallback(state);
-            }
-        };
-
-        internal static bool EnableWorkerTracking => IsWorkerTrackingEnabledInConfig && EventSource.IsSupported;
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        [CLSCompliant(false)]
-        public static RegisteredWaitHandle RegisterWaitForSingleObject(
-             WaitHandle waitObject,
-             WaitOrTimerCallback callBack,
-             object? state,
-             uint millisecondsTimeOutInterval,
-             bool executeOnlyOnce    // NOTE: we do not allow other options that allow the callback to be queued as an APC
-             )
-        {
-            if (millisecondsTimeOutInterval > (uint)int.MaxValue && millisecondsTimeOutInterval != uint.MaxValue)
-                throw new ArgumentOutOfRangeException(nameof(millisecondsTimeOutInterval), SR.ArgumentOutOfRange_LessEqualToIntegerMaxVal);
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, millisecondsTimeOutInterval, executeOnlyOnce, true);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        [CLSCompliant(false)]
-        public static RegisteredWaitHandle UnsafeRegisterWaitForSingleObject(
-             WaitHandle waitObject,
-             WaitOrTimerCallback callBack,
-             object? state,
-             uint millisecondsTimeOutInterval,
-             bool executeOnlyOnce    // NOTE: we do not allow other options that allow the callback to be queued as an APC
-             )
-        {
-            if (millisecondsTimeOutInterval > (uint)int.MaxValue && millisecondsTimeOutInterval != uint.MaxValue)
-                throw new ArgumentOutOfRangeException(nameof(millisecondsTimeOutInterval), SR.ArgumentOutOfRange_NeedNonNegOrNegative1);
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, millisecondsTimeOutInterval, executeOnlyOnce, false);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        public static RegisteredWaitHandle RegisterWaitForSingleObject(
-             WaitHandle waitObject,
-             WaitOrTimerCallback callBack,
-             object? state,
-             int millisecondsTimeOutInterval,
-             bool executeOnlyOnce    // NOTE: we do not allow other options that allow the callback to be queued as an APC
-             )
-        {
-            ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeOutInterval, -1);
-            return RegisterWaitForSingleObject(waitObject, callBack, state, (uint)millisecondsTimeOutInterval, executeOnlyOnce, true);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        public static RegisteredWaitHandle UnsafeRegisterWaitForSingleObject(
-             WaitHandle waitObject,
-             WaitOrTimerCallback callBack,
-             object? state,
-             int millisecondsTimeOutInterval,
-             bool executeOnlyOnce    // NOTE: we do not allow other options that allow the callback to be queued as an APC
-             )
-        {
-            ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeOutInterval, -1);
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, (uint)millisecondsTimeOutInterval, executeOnlyOnce, false);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        public static RegisteredWaitHandle RegisterWaitForSingleObject(
-            WaitHandle waitObject,
-            WaitOrTimerCallback callBack,
-            object? state,
-            long millisecondsTimeOutInterval,
-            bool executeOnlyOnce    // NOTE: we do not allow other options that allow the callback to be queued as an APC
-        )
-        {
-            ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeOutInterval, -1);
-            ArgumentOutOfRangeException.ThrowIfGreaterThan(millisecondsTimeOutInterval, int.MaxValue);
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, (uint)millisecondsTimeOutInterval, executeOnlyOnce, true);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        public static RegisteredWaitHandle UnsafeRegisterWaitForSingleObject(
-            WaitHandle waitObject,
-            WaitOrTimerCallback callBack,
-            object? state,
-            long millisecondsTimeOutInterval,
-            bool executeOnlyOnce    // NOTE: we do not allow other options that allow the callback to be queued as an APC
-        )
-        {
-            ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeOutInterval, -1);
-            ArgumentOutOfRangeException.ThrowIfGreaterThan(millisecondsTimeOutInterval, int.MaxValue);
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, (uint)millisecondsTimeOutInterval, executeOnlyOnce, false);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        public static RegisteredWaitHandle RegisterWaitForSingleObject(
-                          WaitHandle waitObject,
-                          WaitOrTimerCallback callBack,
-                          object? state,
-                          TimeSpan timeout,
-                          bool executeOnlyOnce
-                          )
-        {
-            long tm = (long)timeout.TotalMilliseconds;
-
-            ArgumentOutOfRangeException.ThrowIfLessThan(tm, -1, nameof(timeout));
-            ArgumentOutOfRangeException.ThrowIfGreaterThan(tm, int.MaxValue, nameof(timeout));
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, (uint)tm, executeOnlyOnce, true);
-        }
-
-#if !FEATURE_WASM_MANAGED_THREADS
-        [UnsupportedOSPlatform("browser")]
-#endif
-        public static RegisteredWaitHandle UnsafeRegisterWaitForSingleObject(
-                          WaitHandle waitObject,
-                          WaitOrTimerCallback callBack,
-                          object? state,
-                          TimeSpan timeout,
-                          bool executeOnlyOnce
-                          )
-        {
-            long tm = (long)timeout.TotalMilliseconds;
-
-            ArgumentOutOfRangeException.ThrowIfLessThan(tm, -1, nameof(timeout));
-            ArgumentOutOfRangeException.ThrowIfGreaterThan(tm, int.MaxValue, nameof(timeout));
-
-            RuntimeFeature.ThrowIfMultithreadingIsNotSupported();
-
-            return RegisterWaitForSingleObject(waitObject, callBack, state, (uint)tm, executeOnlyOnce, false);
-        }
-
-        public static bool QueueUserWorkItem(WaitCallback callBack) =>
-            QueueUserWorkItem(callBack, null);
-
-        public static bool QueueUserWorkItem(WaitCallback callBack, object? state)
-        {
-            if (callBack == null)
-            {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.callBack);
-            }
-
-            ExecutionContext? context = ExecutionContext.Capture();
-
-            object tpcallBack = (context == null || context.IsDefault) ?
-                new QueueUserWorkItemCallbackDefaultContext(callBack, state) :
-                (object)new QueueUserWorkItemCallback(callBack, state, context);
-
-            s_workQueue.Enqueue(tpcallBack, forceGlobal: true);
-
-            return true;
-        }
-
-        public static bool QueueUserWorkItem<TState>(Action<TState> callBack, TState state, bool preferLocal)
-        {
-            if (callBack == null)
-            {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.callBack);
-            }
-
-            ExecutionContext? context = ExecutionContext.Capture();
-
-            object tpcallBack = (context == null || context.IsDefault) ?
-                new QueueUserWorkItemCallbackDefaultContext<TState>(callBack, state) :
-                (object)new QueueUserWorkItemCallback<TState>(callBack, state, context);
-
-            s_workQueue.Enqueue(tpcallBack, forceGlobal: !preferLocal);
-
-            return true;
-        }
-
-        public static bool UnsafeQueueUserWorkItem<TState>(Action<TState> callBack, TState state, bool preferLocal)
-        {
-            if (callBack == null)
-            {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.callBack);
-            }
-
-            // If the callback is the runtime-provided invocation of an IAsyncStateMachineBox,
-            // then we can queue the Task state directly to the ThreadPool instead of
-            // wrapping it in a QueueUserWorkItemCallback.
-            //
-            // This occurs when user code queues its provided continuation to the ThreadPool;
-            // internally we call UnsafeQueueUserWorkItemInternal directly for Tasks.
-            if (ReferenceEquals(callBack, s_invokeAsyncStateMachineBox))
-            {
-                if (state is not IAsyncStateMachineBox)
-                {
-                    // The provided state must be the internal IAsyncStateMachineBox (Task) type
-                    ThrowHelper.ThrowUnexpectedStateForKnownCallback(state);
-                }
-
-                UnsafeQueueUserWorkItemInternal((object)state, preferLocal);
-                return true;
-            }
-
-            // Similarly, for runtime async, user code may call with the
-            // runtime async callback directly.
-            if (ReferenceEquals(callBack, s_dispatchRuntimeAsyncContinuationsCallback))
-            {
-                if (state is not Task)
-                {
-                    // The provided state must be the internal RuntimeAsyncTask (Task)
-                    ThrowHelper.ThrowUnexpectedStateForKnownCallback(state);
-                }
-
-                UnsafeQueueUserWorkItemInternal((object)state, preferLocal);
-                return true;
-            }
-
-            s_workQueue.Enqueue(
-                new QueueUserWorkItemCallbackDefaultContext<TState>(callBack, state), forceGlobal: !preferLocal);
-
-            return true;
-        }
-
-        public static bool UnsafeQueueUserWorkItem(WaitCallback callBack, object? state)
-        {
-            if (callBack == null)
-            {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.callBack);
-            }
-
-            object tpcallBack = new QueueUserWorkItemCallbackDefaultContext(callBack, state);
-
-            s_workQueue.Enqueue(tpcallBack, forceGlobal: true);
-
-            return true;
-        }
-
-        public static bool UnsafeQueueUserWorkItem(IThreadPoolWorkItem callBack, bool preferLocal)
-        {
-            if (callBack == null)
-            {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.callBack);
-            }
-            if (callBack is Task)
-            {
-                // Prevent code from queueing a derived Task that also implements the interface,
-                // as that would bypass Task.Start and its safety checks.
-                ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.callBack);
-            }
-
-            UnsafeQueueUserWorkItemInternal(callBack, preferLocal);
-            return true;
-        }
-
-        internal static void UnsafeQueueUserWorkItemInternal(object callBack, bool preferLocal) =>
-            s_workQueue.Enqueue(callBack, forceGlobal: !preferLocal);
-        internal static void UnsafeQueueHighPriorityWorkItemInternal(IThreadPoolWorkItem callBack) =>
-            s_workQueue.EnqueueAtHighPriority(callBack);
-
-        // This method tries to take the target callback out of the current thread's queue.
-        internal static bool TryPopCustomWorkItem(object workItem)
-        {
-            Debug.Assert(null != workItem);
-            return ThreadPoolWorkQueue.LocalFindAndPop(workItem);
-        }
-
-        // Get all workitems.  Called by TaskScheduler in its debugger hooks.
-        internal static IEnumerable<object> GetQueuedWorkItems()
-        {
-            // Enumerate high-priority queue
-            foreach (object workItem in s_workQueue.highPriorityWorkItems)
-            {
-                yield return workItem;
-            }
-
-            // Enumerate assignable global queues
-            foreach (WorkQueue queue in s_workQueue._assignableWorkItemQueues)
-            {
-                foreach (object workItem in queue)
-                {
-                    yield return workItem;
-                }
-            }
-
-            // Enumerate global queue
-            foreach (object workItem in s_workQueue.workItems)
-            {
-                yield return workItem;
-            }
-
-#if CORECLR
-            if (ThreadPoolWorkQueue.s_prioritizationExperiment)
-            {
-                // Enumerate low-priority global queue
-                foreach (object workItem in s_workQueue.lowPriorityWorkItems)
-                {
-                    yield return workItem;
-                }
-            }
-#endif
-
-            // Enumerate each local queue
-            foreach (ThreadPoolWorkQueue.WorkStealingQueue wsq in ThreadPoolWorkQueue.WorkStealingQueueList.Queues)
-            {
-                if (wsq != null && wsq.m_array != null)
-                {
-                    object?[] items = wsq.m_array;
-                    for (int i = 0; i < items.Length; i++)
-                    {
-                        object? item = items[i];
-                        if (item != null)
-                        {
-                            yield return item;
-                        }
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Gets the number of work items that are currently queued to be processed.
-        /// </summary>
-        /// <remarks>
-        /// For a thread pool implementation that may have different types of work items, the count includes all types that can
-        /// be tracked, which may only be the user work items including tasks. Some implementations may also include queued
-        /// timer and wait callbacks in the count. On Windows, the count is unlikely to include the number of pending IO
-        /// completions, as they get posted directly to an IO completion port.
-        /// </remarks>
-        public static long PendingWorkItemCount
-        {
-            get
-            {
-                ThreadPoolWorkQueue workQueue = s_workQueue;
-                return ThreadPoolWorkQueue.LocalCount + workQueue.GlobalCount;
             }
         }
     }
