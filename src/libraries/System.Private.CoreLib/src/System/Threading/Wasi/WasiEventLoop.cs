@@ -62,7 +62,7 @@ namespace System.Threading
                     // Before Dispatch, which can block in wasi:io/poll, so the pump's timer is registered first.
                     WasiEventPipeJobs.Pump();
 #endif
-                    ThreadPoolWorkQueue.Dispatch();
+                    ThreadPool.s_workQueue.Dispatch();
                     WasiFinalizerScheduler.DrainIfPending();
                 }
             }
@@ -88,7 +88,7 @@ namespace System.Threading
                     // Before Dispatch, which can block in wasi:io/poll, so the pump's timer is registered first.
                     WasiEventPipeJobs.Pump();
 #endif
-                    ThreadPoolWorkQueue.Dispatch();
+                    ThreadPool.s_workQueue.Dispatch();
                     WasiFinalizerScheduler.DrainIfPending();
                 }
             }
