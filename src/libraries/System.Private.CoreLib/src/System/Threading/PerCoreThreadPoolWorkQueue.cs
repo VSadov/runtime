@@ -1329,22 +1329,19 @@ namespace System.Threading
 
         public PerCoreThreadPoolWorkQueue()
         {
-            uint processorCount = (uint)Environment.ProcessorCount;
-            _WorkStealingQueues = new WorkStealingQueue[BitOperations.RoundUpToPowerOf2(processorCount)];
+            int processorCount = Environment.ProcessorCount;
+            _WorkStealingQueues = new WorkStealingQueue[BitOperations.RoundUpToPowerOf2((uint)processorCount)];
 
-            // One fifo queue can be shared by several cores. The default is one fifo queue per core.
+            // The number of cores that share one fifo queue. Fewer fifo queues mean less to scan when looking for work,
+            // but more contention between enqueuers.
             int fifoQueuesPerCores = AppContextConfigHelper.GetInt32Config(
                 "System.Threading.ThreadPool.FifoQueuesPerCores",
                 "DOTNET_ThreadPool_FifoQueuesPerCores",
                 defaultValue: 1,
                 allowNegative: false);
-            if (fifoQueuesPerCores < 1)
-            {
-                fifoQueuesPerCores = 1;
-            }
-
-            uint fifoQueueCount = (processorCount + (uint)fifoQueuesPerCores - 1) / (uint)fifoQueuesPerCores;
-            _FifoQueues = new FifoWorkQueue[BitOperations.RoundUpToPowerOf2(Math.Max(fifoQueueCount, 1u))];
+            fifoQueuesPerCores = Math.Clamp(fifoQueuesPerCores, 1, processorCount);
+            int fifoQueueCount = (processorCount + fifoQueuesPerCores - 1) / fifoQueuesPerCores;
+            _FifoQueues = new FifoWorkQueue[BitOperations.RoundUpToPowerOf2((uint)fifoQueueCount)];
 
             RefreshLoggingEnabled();
         }
