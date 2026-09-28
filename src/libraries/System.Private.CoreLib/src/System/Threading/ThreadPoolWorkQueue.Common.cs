@@ -22,7 +22,7 @@ namespace System.Threading
     /// </remarks>
     internal interface IThreadPoolWorkQueue
     {
-        enum DispatchResult
+        public enum DispatchResult
         {
             Spurious = 0,   // the thread was invited, but there was no work in the queue.
             Regular = 1,   // this thread did as much work as was available or its quantum expired.
