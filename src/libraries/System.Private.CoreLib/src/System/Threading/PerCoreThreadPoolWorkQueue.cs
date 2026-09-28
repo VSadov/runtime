@@ -306,16 +306,22 @@ namespace System.Threading
             internal object? TryDequeue(ref bool missedSteal)
             {
                 var currentSegment = _deqSegment;
-                object? result = currentSegment.TryDequeue(ref missedSteal);
+
+                // The caller's missedSteal may already be set - by an earlier queue in the same scan, or deliberately
+                // by the dispatch loop. That must not prevent us from moving past a drained segment, so the decision
+                // to take the slow path is based only on what happened with this queue.
+                bool localMissedSteal = false;
+                object? result = currentSegment.TryDequeue(ref localMissedSteal);
 
                 if (result == null &&
-                    !missedSteal &&
+                    !localMissedSteal &&
                     currentSegment._nextSegment != null)
                 {
                     // slow path that fixes up segments
-                    result = TryDequeueSlow(currentSegment, ref missedSteal);
+                    result = TryDequeueSlow(currentSegment, ref localMissedSteal);
                 }
 
+                missedSteal |= localMissedSteal;
                 return result;
             }
 
