@@ -1208,6 +1208,17 @@ namespace System.Threading
                                         // unlock other prev slot
                                         // must be after we moved other enq to the next slot, or someone may pop prev and break continuity of full slots.
                                         Volatile.Write(ref enqPrevSlot.SequenceNumber, prevSequenceNumber);
+
+                                        if (toIdx != otherEnqPosition)
+                                        {
+                                            // The moved items are now in a queue that a worker may have already scanned and found empty,
+                                            // and no thread request was made for them. Make sure some worker will check the queues again.
+                                            // The fence is needed to publish the moved items before checking for an outstanding request,
+                                            // for the same reason as in the fifo TryEnqueue.
+                                            Interlocked.MemoryBarrier();
+                                            ThreadPool.EnsureWorkerRequested();
+                                        }
+
                                         return result;
                                     }
 
