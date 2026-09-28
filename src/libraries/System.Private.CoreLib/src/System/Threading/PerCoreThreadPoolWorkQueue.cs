@@ -1516,7 +1516,7 @@ namespace System.Threading
             object? workItem;
             FifoWorkQueue[] ffQueues = _FifoQueues;
 
-            // For fairness we will traverse fifo queues starting from a random index.
+            // For fairness we will traverse work-stealing queues starting from a random index.
             uint start = localWsQueue.NextRnd();
 
             // To decorrelate traversal patterns in different workers we will
@@ -1528,11 +1528,15 @@ namespace System.Threading
             // force the result to be odd.
             uint stride = (localWsQueue._queueIndex + start) * 1664525u | 1;
 
+            // Fifo queues are traversed starting from the one that the current thread would enqueue into.
+            // This favors latency over fairness - other fifo queues are only checked when that one is empty.
+            uint fifoStart = (uint)GetPreferredIndexForQueues(ffQueues);
+
             uint n = (uint)ffQueues.Length;
             uint mask = n - 1;
             for (uint i = 0; i < n; i++)
             {
-                uint idx = (start + i * stride) & mask;
+                uint idx = (fifoStart + i * stride) & mask;
                 FifoWorkQueue? ffQueue = ffQueues[idx];
                 workItem = ffQueue?.TryDequeue(ref missedSteal);
                 if (workItem != null)
