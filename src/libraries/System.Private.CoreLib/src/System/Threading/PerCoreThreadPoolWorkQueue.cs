@@ -1327,6 +1327,13 @@ namespace System.Threading
         [ThreadStatic]
         private static uint t_localQueueIdx;
 
+        // Whether DequeueAll scans fifo queues starting from the queue the current thread would enqueue into (the default),
+        // or from a random queue.
+        private static readonly bool s_fifoScanFromCurrentQueue = AppContextConfigHelper.GetBooleanConfig(
+            "System.Threading.ThreadPool.FifoScanFromCurrentQueue",
+            "DOTNET_ThreadPool_FifoScanFromCurrentQueue",
+            defaultValue: true);
+
         public PerCoreThreadPoolWorkQueue()
         {
             int processorCount = Environment.ProcessorCount;
@@ -1528,9 +1535,10 @@ namespace System.Threading
             // force the result to be odd.
             uint stride = (localWsQueue._queueIndex + start) * 1664525u | 1;
 
-            // Fifo queues are traversed starting from the one that the current thread would enqueue into.
+            // By default fifo queues are traversed starting from the one that the current thread would enqueue into.
             // This favors latency over fairness - other fifo queues are only checked when that one is empty.
-            uint fifoStart = (uint)GetPreferredIndexForQueues(ffQueues);
+            // Otherwise the traversal starts from a random fifo queue, which is fairer.
+            uint fifoStart = s_fifoScanFromCurrentQueue ? (uint)GetPreferredIndexForQueues(ffQueues) : start;
 
             uint n = (uint)ffQueues.Length;
             uint mask = n - 1;
