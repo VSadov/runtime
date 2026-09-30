@@ -142,6 +142,38 @@ namespace System.Threading
                     internal object? Item;
                     /// <summary>The sequence number for this slot, used to synchronize between enqueuers and dequeuers.</summary>
                     internal int SequenceNumber;
+#if TARGET_64BIT
+                    // Takes space that would otherwise be alignment padding, so the slot does not get bigger.
+                    private uint _enqueueTimestamp;
+#endif
+
+                    /// <summary>
+                    /// When the item was enqueued (see <see cref="WaitTimeTracking.GetTimestamp"/>), or 0 when wait time tracking
+                    /// is disabled. Like <see cref="Item"/>, it must be written before the slot is published and read before
+                    /// the slot is released.
+                    /// </summary>
+                    internal uint EnqueueTimestamp
+                    {
+                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                        readonly get
+                        {
+#if TARGET_64BIT
+                            return WaitTimeTracking.IsEnabled ? _enqueueTimestamp : 0;
+#else
+                            return 0;
+#endif
+                        }
+                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                        set
+                        {
+#if TARGET_64BIT
+                            if (WaitTimeTracking.IsEnabled)
+                            {
+                                _enqueueTimestamp = value;
+                            }
+#endif
+                        }
+                    }
                 }
 
                 internal ref Slot this[int i]
@@ -410,10 +442,12 @@ namespace System.Threading
                             if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
                             {
                                 var item = slot.Item;
+                                uint enqueueTimestamp = slot.EnqueueTimestamp;
                                 slot.Item = null;
 
                                 // make the slot appear empty in the next generation
                                 Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
+                                WaitTimeTracking.RecordGlobal(enqueueTimestamp);
                                 return item;
                             }
 
@@ -466,10 +500,12 @@ namespace System.Threading
                         if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
                         {
                             var item = slot.Item;
+                            uint enqueueTimestamp = slot.EnqueueTimestamp;
                             slot.Item = null;
 
                             // make the slot appear empty in the next generation
                             Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
+                            WaitTimeTracking.RecordGlobal(enqueueTimestamp);
                             return item;
                         }
 
@@ -496,6 +532,7 @@ namespace System.Threading
                 /// </summary>
                 public bool TryEnqueue(object item)
                 {
+                    uint enqueueTimestamp = WaitTimeTracking.GetEnqueueTimestamp();
                     while (true)
                     {
                         int position = _queueEnds.Enqueue;
@@ -512,6 +549,7 @@ namespace System.Threading
                             if (Interlocked.CompareExchange(ref _queueEnds.Enqueue, position + 1, position) == position)
                             {
                                 slot.Item = item;
+                                slot.EnqueueTimestamp = enqueueTimestamp;
                                 Volatile.Write(ref slot.SequenceNumber, position + Full);
                                 // NB: Volatile.Write would be sufficient as the queue end update makes the queue not empty.
                                 // But we would need to spin in Dequeue until item appears and current thread could be preempted,
@@ -579,11 +617,22 @@ namespace System.Threading
             internal QueueSegment _deqSegment;
 
             /// <summary>
+            /// Wait time statistics flushed by the threads that dispatch on this queue's core.
+            /// Null when wait time tracking is disabled.
+            /// </summary>
+            internal readonly WaitTimeTracking.Accumulator? _waitTimes;
+
+            /// <summary>
             /// Initializes a new instance of the <see cref="WorkStealingQueue"/> class.
             /// </summary>
             internal WorkStealingQueue(int index)
                   : base(index)
             {
+                if (WaitTimeTracking.IsEnabled)
+                {
+                    _waitTimes = new WaitTimeTracking.Accumulator();
+                }
+
                 _enqSegment = _deqSegment = new QueueSegment(InitialSegmentLength);
             }
 
@@ -861,6 +910,8 @@ namespace System.Threading
                 /// </summary>
                 internal bool TryEnqueue(object item)
                 {
+                    uint enqueueTimestamp = WaitTimeTracking.GetEnqueueTimestamp();
+
                     // Loop in a case if we need to try again.
                     // Contention is rare here, since this is "our" queue, but we may accidentally share
                     // or have interference from stealing.
@@ -900,6 +951,7 @@ namespace System.Threading
 
                                         // Fill the slot (must be done before the slot is marked as Full, ordering with above writes is unimportant)
                                         slot.Item = item;
+                                        slot.EnqueueTimestamp = enqueueTimestamp;
 
                                         // Mark the slot as Full in the current generation.
                                         // the slot can be used immediately by other threads.
@@ -992,6 +1044,7 @@ namespace System.Threading
                                     _queueEnds.Enqueue = position;
 
                                     var item = slot.Item;
+                                    uint enqueueTimestamp = slot.EnqueueTimestamp;
                                     slot.Item = null;
 
                                     // make the slot appear empty in the current generation, this unlocks the slot
@@ -1003,6 +1056,7 @@ namespace System.Threading
                                         continue;
                                     }
 
+                                    WaitTimeTracking.RecordLocal(enqueueTimestamp);
                                     return item;
                                 }
 
@@ -1065,17 +1119,19 @@ namespace System.Threading
                                 Debug.Assert(position == _queueEnds.Dequeue);
 
                                 object? item;
+                                uint enqueueTimestamp;
 
                                 // if we have a local queue (it is likely that we have it and that it is empty),
                                 // and if the queue we are stealing from is "rich", try stealing half its items.
                                 var enqPos = _queueEnds.Enqueue;
                                 if (enqPos - position < MoveThreshold ||
                                     // "this" is a sentinel for a failed Move attempt
-                                    (item = TryMoveTo(localWsQueue._enqSegment, position, enqPos)) == this)
+                                    (item = TryMoveTo(localWsQueue._enqSegment, position, enqPos, out enqueueTimestamp)) == this)
                                 {
                                     // Move did not work out, so just take the item that we have reserved.
                                     _queueEnds.Dequeue = position + 1;
                                     item = slot.Item;
+                                    enqueueTimestamp = slot.EnqueueTimestamp;
                                     slot.Item = null;
                                 }
 
@@ -1088,6 +1144,7 @@ namespace System.Threading
                                     continue;
                                 }
 
+                                WaitTimeTracking.RecordLocal(enqueueTimestamp);
                                 return item;
                             }
                         }
@@ -1101,8 +1158,15 @@ namespace System.Threading
                     }
                 }
 
-                internal object? TryMoveTo(QueueSegment other, int deqPosition, int enqPosition)
+                /// <summary>
+                /// Moves up to half of the items, starting at <paramref name="deqPosition"/>, to the <paramref name="other"/> segment,
+                /// except for the last one, which is returned along with its <paramref name="enqueueTimestamp"/>.
+                /// Returns "this" if the move did not happen.
+                /// </summary>
+                internal object? TryMoveTo(QueueSegment other, int deqPosition, int enqPosition, out uint enqueueTimestamp)
                 {
+                    enqueueTimestamp = 0;
+
                     // similar sequence as in TryEnqueue, since we will be adding items to the other queue.
                     int otherEnqPosition = other._queueEnds.Enqueue;
                     ref Slot enqPrevSlot = ref other[otherEnqPosition - 1];
@@ -1161,6 +1225,8 @@ namespace System.Threading
                                             }
 
                                             to.Item = from.Item;
+                                            // moved items keep their enqueue time
+                                            to.EnqueueTimestamp = from.EnqueueTimestamp;
                                             // Note: the following enables "to" for dequeuing, which may immediately happen,
                                             // but not for popping, yet - since the other enq is locked.
                                             Volatile.Write(ref to.SequenceNumber, toIdx + Full);
@@ -1177,6 +1243,7 @@ namespace System.Threading
                                         // return the last slot value
                                         // (it should already be marked empty, or will be, if it is at deqPosition)
                                         var result = from.Item;
+                                        enqueueTimestamp = from.EnqueueTimestamp;
                                         from.Item = null;
 
                                         // restore the half slot, must be after all the full->empty slot transitioning
@@ -1709,6 +1776,7 @@ namespace System.Threading
                     workItem = workQueue.Dequeue(ref missedSteal);
                     if (workItem == null)
                     {
+                        WaitTimeTracking.Flush(workQueue);
                         return DispatchResult.Regular;
                     }
                 }
@@ -1756,6 +1824,7 @@ namespace System.Threading
                 int currentTickCount = Environment.TickCount;
                 if (!ThreadPool.NotifyWorkItemComplete(threadLocalCompletionCountNode!, currentTickCount))
                 {
+                    WaitTimeTracking.Flush(workQueue);
                     return DispatchResult.ShouldStop;
                 }
 
@@ -1766,6 +1835,8 @@ namespace System.Threading
                 }
 
                 // The quantum expired, do any necessary periodic activities
+
+                WaitTimeTracking.Flush(workQueue);
 
                 if (ThreadPool.YieldFromDispatchLoop(currentTickCount))
                 {
@@ -1778,6 +1849,327 @@ namespace System.Threading
 
                 // Periodically refresh whether logging is enabled
                 workQueue.RefreshLoggingEnabled();
+            }
+        }
+
+        /// <summary>
+        /// Opt-in tracking of how long work items wait in the queues, from enqueue to dequeue.
+        /// </summary>
+        /// <remarks>
+        /// Enabled with DOTNET_ThreadPool_TrackWorkItemWaitTimes=1, or the System.Threading.ThreadPool.TrackWorkItemWaitTimes
+        /// runtime configuration switch. It takes two timestamps per work item, so it is off by default. It is only available
+        /// on 64-bit, where the enqueue time fits in the alignment padding of a queue slot.
+        ///
+        /// - Enqueue stores a timestamp in the item's slot. Items moved between local queues keep it.
+        /// - A thread that dequeues an item adds the item's wait to thread-local statistics. Local and global (fifo) queues
+        ///   are kept apart, since their latency and fairness expectations differ.
+        /// - At the end of each dispatch quantum and when leaving the dispatch loop, the thread adds its statistics to the
+        ///   accumulator of its local queue, so the data does not stay with parked threads.
+        /// - About once a second, the gate thread of the portable thread pool drains the accumulators and publishes the count
+        ///   and the min, average and max wait of each kind of queue over the elapsed window: in <see cref="s_lastSample"/>,
+        ///   and in the FrameworkEventSource ThreadPoolWorkItemWaitTimes event (ThreadPool keyword, Informational level).
+        ///   The gate thread keeps running until the data of the last active window is published.
+        /// </remarks>
+        internal static class WaitTimeTracking
+        {
+            internal static readonly bool IsEnabled =
+#if TARGET_64BIT
+                AppContextConfigHelper.GetBooleanConfig(
+                    "System.Threading.ThreadPool.TrackWorkItemWaitTimes",
+                    "DOTNET_ThreadPool_TrackWorkItemWaitTimes",
+                    defaultValue: false);
+#else
+                false;
+#endif
+
+            // Timestamps are Stopwatch ticks, scaled down by a power of 2 to units of at most a microsecond, and truncated to
+            // 32 bits. The difference of two timestamps covers waits of up to 2^31 units: about 18 minutes with 1 GHz ticks.
+            private static readonly int s_timestampShift = GetTimestampShift();
+            private static readonly double s_microsecondsPerUnit = (double)(1L << s_timestampShift) * 1_000_000 / Stopwatch.Frequency;
+
+            // The current thread's statistics that have not been added to an accumulator yet.
+            [ThreadStatic]
+            private static WaitStats t_localQueueWaits;
+            [ThreadStatic]
+            private static WaitStats t_globalQueueWaits;
+
+            // Used only by the gate thread.
+            private static long s_windowStart;
+            private static bool s_keepGateThreadRunning;
+
+            /// <summary>The last window published by the gate thread, for inspection in a debugger or a dump.</summary>
+            internal static Sample s_lastSample;
+
+            private static int GetTimestampShift()
+            {
+                int shift = 0;
+                while ((Stopwatch.Frequency >> (shift + 1)) >= 1_000_000)
+                {
+                    shift++;
+                }
+
+                return shift;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal static uint GetTimestamp() => (uint)(Stopwatch.GetTimestamp() >> s_timestampShift);
+
+            /// <summary>Returns the timestamp to store with an item that is being enqueued, or 0 when tracking is disabled.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal static uint GetEnqueueTimestamp() => IsEnabled ? GetTimestamp() : 0;
+
+            /// <summary>Records the wait of an item dequeued from a local queue.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal static void RecordLocal(uint enqueueTimestamp)
+            {
+                if (IsEnabled)
+                {
+                    RecordLocalCore(enqueueTimestamp);
+                }
+            }
+
+            /// <summary>Records the wait of an item dequeued from a global (fifo) queue.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal static void RecordGlobal(uint enqueueTimestamp)
+            {
+                if (IsEnabled)
+                {
+                    RecordGlobalCore(enqueueTimestamp);
+                }
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            private static void RecordLocalCore(uint enqueueTimestamp) => t_localQueueWaits.Add(GetWait(enqueueTimestamp));
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            private static void RecordGlobalCore(uint enqueueTimestamp) => t_globalQueueWaits.Add(GetWait(enqueueTimestamp));
+
+            private static uint GetWait(uint enqueueTimestamp)
+            {
+                uint wait = GetTimestamp() - enqueueTimestamp;
+
+                // The clock is monotonic, so a wait that looks negative is one too long to represent.
+                return (int)wait >= 0 ? wait : int.MaxValue;
+            }
+
+            /// <summary>
+            /// Adds the current thread's statistics to the accumulator of the local queue it last dequeued from.
+            /// Called at the end of each dispatch quantum and when the thread leaves the dispatch loop.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal static void Flush(PerCoreThreadPoolWorkQueue workQueue)
+            {
+                if (IsEnabled)
+                {
+                    FlushCore(workQueue);
+                }
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            private static void FlushCore(PerCoreThreadPoolWorkQueue workQueue)
+            {
+                ref WaitStats local = ref t_localQueueWaits;
+                ref WaitStats global = ref t_globalQueueWaits;
+                uint localQueueIdx = t_localQueueIdx;
+                if ((local.Count | global.Count) == 0 || localQueueIdx == 0)
+                {
+                    return;
+                }
+
+                // If the accumulator is busy, keep the data for the next flush rather than wait.
+                Accumulator? accumulator = workQueue._WorkStealingQueues[localQueueIdx - 1]?._waitTimes;
+                if (accumulator is not null && accumulator.TryAdd(in local, in global))
+                {
+                    local = default;
+                    global = default;
+                }
+            }
+
+            /// <summary>
+            /// Called by the gate thread when it starts running after a period without activity,
+            /// so that the idle time is not counted in the next window.
+            /// </summary>
+            internal static void OnGateThreadResumed()
+            {
+                s_windowStart = Stopwatch.GetTimestamp();
+                s_keepGateThreadRunning = true;
+            }
+
+            /// <summary>
+            /// Called by the gate thread each time it performs its periodic activities. About once a second, drains the
+            /// accumulators and publishes the statistics of the elapsed window.
+            /// Returns true while there may be data to publish, so that the gate thread keeps running until it is published.
+            /// </summary>
+            internal static bool PerformGateActivities()
+            {
+                long now = Stopwatch.GetTimestamp();
+                long elapsed = now - s_windowStart;
+
+                // The gate activities run every 500 ms. Close a window every other time.
+                if (elapsed < Stopwatch.Frequency * 3 / 4)
+                {
+                    return s_keepGateThreadRunning;
+                }
+
+                WaitStats local = default;
+                WaitStats global = default;
+                if (ThreadPool.s_workQueue is PerCoreThreadPoolWorkQueue workQueue)
+                {
+                    foreach (WorkStealingQueue? queue in workQueue._WorkStealingQueues)
+                    {
+                        queue?._waitTimes?.Drain(ref local, ref global);
+                    }
+                }
+
+                s_windowStart = now;
+
+                // After a window with data, there may be more to come. Keep running until a window is empty.
+                s_keepGateThreadRunning = (local.Count | global.Count) != 0;
+                if (s_keepGateThreadRunning)
+                {
+                    Publish(elapsed * 1000.0 / Stopwatch.Frequency, in local, in global);
+                }
+
+                return s_keepGateThreadRunning;
+            }
+
+            private static void Publish(double durationMs, in WaitStats local, in WaitStats global)
+            {
+                double us = s_microsecondsPerUnit;
+                Sample sample = new Sample
+                {
+                    DurationMs = durationMs,
+                    LocalCount = (long)local.Count,
+                    LocalMinUs = local.Min * us,
+                    LocalAvgUs = local.Count != 0 ? local.Total * us / local.Count : 0,
+                    LocalMaxUs = local.Max * us,
+                    GlobalCount = (long)global.Count,
+                    GlobalMinUs = global.Min * us,
+                    GlobalAvgUs = global.Count != 0 ? global.Total * us / global.Count : 0,
+                    GlobalMaxUs = global.Max * us,
+                };
+
+                s_lastSample = sample;
+
+                FrameworkEventSource log = FrameworkEventSource.Log;
+                if (log.IsEnabled(EventLevel.Informational, FrameworkEventSource.Keywords.ThreadPool))
+                {
+                    log.ThreadPoolWorkItemWaitTimes(
+                        sample.DurationMs,
+                        sample.LocalCount, sample.LocalMinUs, sample.LocalAvgUs, sample.LocalMaxUs,
+                        sample.GlobalCount, sample.GlobalMinUs, sample.GlobalAvgUs, sample.GlobalMaxUs);
+                }
+            }
+
+            /// <summary>The number of work items and their min, average and max waits over one window.</summary>
+            internal struct Sample
+            {
+                public double DurationMs;
+                public long LocalCount;
+                public double LocalMinUs;
+                public double LocalAvgUs;
+                public double LocalMaxUs;
+                public long GlobalCount;
+                public double GlobalMinUs;
+                public double GlobalAvgUs;
+                public double GlobalMaxUs;
+            }
+
+            /// <summary>Count, total, min and max of waits, in timestamp units.</summary>
+            internal struct WaitStats
+            {
+                public ulong Total;
+                public ulong Count;
+                public uint Min;
+                public uint Max;
+
+                public void Add(uint wait)
+                {
+                    if (Count == 0 || wait < Min)
+                    {
+                        Min = wait;
+                    }
+
+                    if (wait > Max)
+                    {
+                        Max = wait;
+                    }
+
+                    Total += wait;
+                    Count++;
+                }
+
+                public void Add(in WaitStats other)
+                {
+                    if (other.Count == 0)
+                    {
+                        return;
+                    }
+
+                    if (Count == 0 || other.Min < Min)
+                    {
+                        Min = other.Min;
+                    }
+
+                    if (other.Max > Max)
+                    {
+                        Max = other.Max;
+                    }
+
+                    Total += other.Total;
+                    Count += other.Count;
+                }
+            }
+
+            /// <summary>Wait time statistics added by the threads that dispatch on a core, and drained by the gate thread.</summary>
+            internal sealed class Accumulator
+            {
+                private PaddedWaitStats _stats;
+
+                /// <summary>Adds the statistics, unless another thread is using the accumulator.</summary>
+                internal bool TryAdd(in WaitStats local, in WaitStats global)
+                {
+                    // Contention is rare: other threads add here only after dispatching on the same core,
+                    // and the gate thread drains the accumulator once a second.
+                    if (Interlocked.CompareExchange(ref _stats.Lock, 1, 0) != 0)
+                    {
+                        return false;
+                    }
+
+                    _stats.Local.Add(in local);
+                    _stats.Global.Add(in global);
+                    Volatile.Write(ref _stats.Lock, 0);
+                    return true;
+                }
+
+                /// <summary>Moves the statistics into <paramref name="local"/> and <paramref name="global"/>.</summary>
+                internal void Drain(ref WaitStats local, ref WaitStats global)
+                {
+                    SpinWait spinner = default;
+                    while (Interlocked.CompareExchange(ref _stats.Lock, 1, 0) != 0)
+                    {
+                        spinner.SpinOnce();
+                    }
+
+                    local.Add(in _stats.Local);
+                    global.Add(in _stats.Global);
+                    _stats.Local = default;
+                    _stats.Global = default;
+                    Volatile.Write(ref _stats.Lock, 0);
+                }
+            }
+
+            // Padded so that adding to an accumulator does not cause false sharing with other objects,
+            // such as the fields of a local queue that stealing threads read.
+            [StructLayout(LayoutKind.Explicit, Size = PaddingHelpers.CACHE_LINE_SIZE * 3)]
+            private struct PaddedWaitStats
+            {
+                [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
+                public int Lock;
+                [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + 8)]
+                public WaitStats Local;
+                [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + 32)]
+                public WaitStats Global;
             }
         }
     }

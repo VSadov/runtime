@@ -64,6 +64,12 @@ namespace System.Threading
                     RunGateThreadEvent.WaitOne();
                     int currentTimeMs = Environment.TickCount;
                     delayHelper.SetGateActivitiesTime(currentTimeMs);
+#if FEATURE_MULTITHREADING
+                    if (PerCoreThreadPoolWorkQueue.WaitTimeTracking.IsEnabled)
+                    {
+                        PerCoreThreadPoolWorkQueue.WaitTimeTracking.OnGateThreadResumed();
+                    }
+#endif
 
                     while (true)
                     {
@@ -187,7 +193,18 @@ namespace System.Threading
                             }
                         }
 
-                        if (threadPoolInstance._separated._hasOutstandingThreadRequest == 0 &&
+                        // The per-core work queue can track how long work items wait (an opt-in diagnostic). Publish that
+                        // data, and keep running while there is data to publish.
+                        bool publishingWaitTimes =
+#if FEATURE_MULTITHREADING
+                            PerCoreThreadPoolWorkQueue.WaitTimeTracking.IsEnabled &&
+                            PerCoreThreadPoolWorkQueue.WaitTimeTracking.PerformGateActivities();
+#else
+                            false;
+#endif
+
+                        if (!publishingWaitTimes &&
+                            threadPoolInstance._separated._hasOutstandingThreadRequest == 0 &&
                             threadPoolInstance._pendingBlockingAdjustment == PendingBlockingAdjustment.None &&
                             Interlocked.Decrement(ref threadPoolInstance._separated.gateThreadRunningState) <= GetRunningStateForNumRuns(0))
                         {
