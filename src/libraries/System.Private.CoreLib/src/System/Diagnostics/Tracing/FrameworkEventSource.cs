@@ -118,6 +118,19 @@ namespace System.Diagnostics.Tracing
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void ThreadPoolDequeueWorkObject(object workID) => ThreadPoolDequeueWork(workID.GetHashCode());
 
+        // How long work items waited in the per-core thread pool work queue, from enqueue to dequeue, over a window of about
+        // a second. Only emitted when the queue's wait time tracking is enabled (DOTNET_ThreadPool_TrackWorkItemWaitTimes=1).
+        // Local queues are the per-core queues that take work items queued by thread pool threads; global queues are the fifo
+        // queues that take the rest. Times are in microseconds.
+        [Event(32, Level = EventLevel.Informational, Keywords = Keywords.ThreadPool)]
+        public void ThreadPoolWorkItemWaitTimes(
+            double durationMs,
+            long localCount, double localMinUs, double localAvgUs, double localMaxUs,
+            long globalCount, double globalMinUs, double globalAvgUs, double globalMaxUs)
+        {
+            WriteEvent(32, durationMs, localCount, localMinUs, localAvgUs, localMaxUs, globalCount, globalMinUs, globalAvgUs, globalMaxUs);
+        }
+
         // id -   represents a correlation ID that allows correlation of two activities, one stamped by
         //        ThreadTransferSend, the other by ThreadTransferReceive
         // kind - identifies the transfer: values below 64 are reserved for the runtime. Currently used values:
