@@ -578,26 +578,12 @@ namespace System.Threading
             /// <summary>The current dequeue segment.</summary>
             internal QueueSegment _deqSegment;
 
-            // Random number generator used to select stealing/dequeuing victims.
-            // We use classic LCG PRNG here. (https://en.wikipedia.org/wiki/Linear_congruential_generator)
-            // LCG with 32bit state is a good 16bit PRNG, as long as the upper bits are used.
-            // LCG is very fast and 16bit is more than enough for our use. (bounded by the core count).
-            // More importantly, the 32bit state updates atomically, thus rare, but possible
-            // concurrent use requires no extra handling.
-            private uint _rndState;
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            internal uint NextRnd()
-            {
-                return (_rndState = _rndState * 1664525u + 1013904223u) >> 16;
-            }
-
             /// <summary>
             /// Initializes a new instance of the <see cref="WorkStealingQueue"/> class.
             /// </summary>
             internal WorkStealingQueue(int index)
                   : base(index)
             {
-                _rndState = (uint)index;
                 _enqSegment = _deqSegment = new QueueSegment(InitialSegmentLength);
             }
 
@@ -1302,7 +1288,7 @@ namespace System.Threading
 
         private bool _loggingEnabled;
 
-        // Same PRNG as in the stealing queue.
+        // Same PRNG as t_rndState.
         // Used as a fallback when a stealing queue is not available.
         private uint _rndState;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1326,6 +1312,28 @@ namespace System.Threading
         // for most purposes is the same as "not a threadpool thread".
         [ThreadStatic]
         private static uint t_localQueueIdx;
+
+        // Random number generator used to select stealing/dequeuing victims.
+        // We use classic LCG PRNG here. (https://en.wikipedia.org/wiki/Linear_congruential_generator)
+        // LCG with 32bit state is a good 16bit PRNG, as long as the upper bits are used.
+        // LCG is very fast and 16bit is more than enough for our use. (bounded by the core count).
+        // The state is per thread, so that updating it does not cause cache traffic between cores.
+        [ThreadStatic]
+        private static uint t_rndState;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static uint NextThreadRnd()
+        {
+            uint rndState = t_rndState;
+            if (rndState == 0)
+            {
+                // Seed threads differently, so that they do not all traverse the queues in the same order.
+                rndState = (uint)Environment.CurrentManagedThreadId;
+            }
+
+            t_rndState = rndState = rndState * 1664525u + 1013904223u;
+            return rndState >> 16;
+        }
 
         // Whether DequeueAll scans fifo queues starting from the queue the current thread would enqueue into (the default),
         // or from a random queue.
@@ -1524,7 +1532,7 @@ namespace System.Threading
             FifoWorkQueue[] ffQueues = _FifoQueues;
 
             // For fairness we will traverse work-stealing queues starting from a random index.
-            uint start = localWsQueue.NextRnd();
+            uint start = NextThreadRnd();
 
             // To decorrelate traversal patterns in different workers we will
             // do traversal with an odd stride derived from localWsq index.
