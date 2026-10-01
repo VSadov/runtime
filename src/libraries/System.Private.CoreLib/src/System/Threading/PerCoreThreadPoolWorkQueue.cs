@@ -1409,6 +1409,12 @@ namespace System.Threading
             "DOTNET_ThreadPool_FifoScanFromCurrentQueue",
             defaultValue: true);
 
+        // For experiments: enqueue all work items into the fifo queues, even when the caller prefers the local queue.
+        private static readonly bool s_forceGlobalEnqueue = AppContextConfigHelper.GetBooleanConfig(
+            "System.Threading.ThreadPool.ForceGlobalEnqueue",
+            "DOTNET_ThreadPool_ForceGlobalEnqueue",
+            defaultValue: false);
+
         public PerCoreThreadPoolWorkQueue()
         {
             int processorCount = Environment.ProcessorCount;
@@ -1512,7 +1518,7 @@ namespace System.Threading
                 FrameworkEventSource.Log.ThreadPoolEnqueueWorkObject(callback);
 
             uint localQueueIdx;
-            if (forceGlobal || (localQueueIdx = t_localQueueIdx) == 0)
+            if (forceGlobal || s_forceGlobalEnqueue || (localQueueIdx = t_localQueueIdx) == 0)
             {
                 GetOrAddFifoQueue().Enqueue(callback);
             }
