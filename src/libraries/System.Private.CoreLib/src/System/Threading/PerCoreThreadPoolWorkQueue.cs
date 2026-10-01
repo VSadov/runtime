@@ -1861,13 +1861,15 @@ namespace System.Threading
         /// on 64-bit, where the enqueue time fits in the alignment padding of a queue slot.
         ///
         /// - Enqueue stores a timestamp in the item's slot. Items moved between local queues keep it.
-        /// - A thread that dequeues an item adds the item's wait to thread-local statistics. Local and global (fifo) queues
-        ///   are kept apart, since their latency and fairness expectations differ.
+        /// - A thread that dequeues an item adds the item's wait to thread-local statistics: count, total, min, max and a
+        ///   power-of-two histogram. Local and global (fifo) queues are kept apart, since their latency and fairness
+        ///   expectations differ.
         /// - At the end of each dispatch quantum and when leaving the dispatch loop, the thread adds its statistics to the
         ///   accumulator of its local queue, so the data does not stay with parked threads.
-        /// - About once a second, the gate thread of the portable thread pool drains the accumulators and publishes the count
-        ///   and the min, average and max wait of each kind of queue over the elapsed window: in <see cref="s_lastSample"/>,
-        ///   and in the FrameworkEventSource ThreadPoolWorkItemWaitTimes event (ThreadPool keyword, Informational level).
+        /// - About once a second, the gate thread of the portable thread pool drains the accumulators and publishes, for each
+        ///   kind of queue over the elapsed window, the count, the min, average and max wait, and the 50th, 90th, 99th and
+        ///   99.9th percentiles estimated from the histogram: in <see cref="s_lastSample"/>, and in the FrameworkEventSource
+        ///   ThreadPoolWorkItemWaitTimes event (ThreadPool keyword, Informational level).
         ///   The gate thread keeps running until the data of the last active window is published.
         /// </remarks>
         internal static class WaitTimeTracking
@@ -2043,10 +2045,20 @@ namespace System.Threading
                     LocalMinUs = local.Min * us,
                     LocalAvgUs = local.Count != 0 ? local.Total * us / local.Count : 0,
                     LocalMaxUs = local.Max * us,
+                    LocalP50Us = local.Percentile(0.5) * us,
+                    LocalP90Us = local.Percentile(0.9) * us,
+                    LocalP99Us = local.Percentile(0.99) * us,
+                    LocalP999Us = local.Percentile(0.999) * us,
                     GlobalCount = (long)global.Count,
                     GlobalMinUs = global.Min * us,
                     GlobalAvgUs = global.Count != 0 ? global.Total * us / global.Count : 0,
                     GlobalMaxUs = global.Max * us,
+                    GlobalP50Us = global.Percentile(0.5) * us,
+                    GlobalP90Us = global.Percentile(0.9) * us,
+                    GlobalP99Us = global.Percentile(0.99) * us,
+                    GlobalP999Us = global.Percentile(0.999) * us,
+                    LocalHistogram = local.Buckets,
+                    GlobalHistogram = global.Buckets,
                 };
 
                 s_lastSample = sample;
@@ -2057,11 +2069,13 @@ namespace System.Threading
                     log.ThreadPoolWorkItemWaitTimes(
                         sample.DurationMs,
                         sample.LocalCount, sample.LocalMinUs, sample.LocalAvgUs, sample.LocalMaxUs,
-                        sample.GlobalCount, sample.GlobalMinUs, sample.GlobalAvgUs, sample.GlobalMaxUs);
+                        sample.GlobalCount, sample.GlobalMinUs, sample.GlobalAvgUs, sample.GlobalMaxUs,
+                        sample.LocalP50Us, sample.LocalP90Us, sample.LocalP99Us, sample.LocalP999Us,
+                        sample.GlobalP50Us, sample.GlobalP90Us, sample.GlobalP99Us, sample.GlobalP999Us);
                 }
             }
 
-            /// <summary>The number of work items and their min, average and max waits over one window.</summary>
+            /// <summary>The number of work items and their wait statistics over one window.</summary>
             internal struct Sample
             {
                 public double DurationMs;
@@ -2069,19 +2083,34 @@ namespace System.Threading
                 public double LocalMinUs;
                 public double LocalAvgUs;
                 public double LocalMaxUs;
+                public double LocalP50Us;
+                public double LocalP90Us;
+                public double LocalP99Us;
+                public double LocalP999Us;
                 public long GlobalCount;
                 public double GlobalMinUs;
                 public double GlobalAvgUs;
                 public double GlobalMaxUs;
+                public double GlobalP50Us;
+                public double GlobalP90Us;
+                public double GlobalP99Us;
+                public double GlobalP999Us;
+
+                // In timestamp units (see s_microsecondsPerUnit). Bucket 0 counts waits of 0, bucket i counts waits in [2^(i-1), 2^i).
+                public WaitHistogram LocalHistogram;
+                public WaitHistogram GlobalHistogram;
             }
 
-            /// <summary>Count, total, min and max of waits, in timestamp units.</summary>
+            /// <summary>Count, total, min, max and a power-of-two histogram of waits, in timestamp units.</summary>
             internal struct WaitStats
             {
                 public ulong Total;
                 public ulong Count;
                 public uint Min;
                 public uint Max;
+
+                // Bucket 0 counts waits of 0, bucket i counts waits in [2^(i-1), 2^i).
+                public WaitHistogram Buckets;
 
                 public void Add(uint wait)
                 {
@@ -2097,6 +2126,9 @@ namespace System.Threading
 
                     Total += wait;
                     Count++;
+
+                    // Waits are below 2^31 units, so the bucket index is at most 31.
+                    Buckets[32 - BitOperations.LeadingZeroCount(wait)]++;
                 }
 
                 public void Add(in WaitStats other)
@@ -2118,7 +2150,49 @@ namespace System.Threading
 
                     Total += other.Total;
                     Count += other.Count;
+
+                    for (int i = 0; i < HistogramLength; i++)
+                    {
+                        Buckets[i] += other.Buckets[i];
+                    }
                 }
+
+                /// <summary>
+                /// Estimates a percentile of the waits, in timestamp units, by interpolating within the histogram bucket
+                /// that holds it.
+                /// </summary>
+                public readonly double Percentile(double fraction)
+                {
+                    if (Count == 0)
+                    {
+                        return 0;
+                    }
+
+                    ulong rank = (ulong)Math.Ceiling(Count * fraction);
+                    ulong seen = 0;
+                    for (int i = 0; i < HistogramLength; i++)
+                    {
+                        uint n = Buckets[i];
+                        if (n != 0 && seen + n >= rank)
+                        {
+                            double low = i == 0 ? 0 : 1L << (i - 1);
+                            double high = i == 0 ? 0 : 1L << i;
+                            return Math.Clamp(low + (high - low) * (rank - seen) / n, Min, Max);
+                        }
+
+                        seen += n;
+                    }
+
+                    return Max;
+                }
+            }
+
+            private const int HistogramLength = 32;
+
+            [InlineArray(HistogramLength)]
+            internal struct WaitHistogram
+            {
+                private uint _element0;
             }
 
             /// <summary>Wait time statistics added by the threads that dispatch on a core, and drained by the gate thread.</summary>
@@ -2161,15 +2235,19 @@ namespace System.Threading
 
             // Padded so that adding to an accumulator does not cause false sharing with other objects,
             // such as the fields of a local queue that stealing threads read.
-            [StructLayout(LayoutKind.Explicit, Size = PaddingHelpers.CACHE_LINE_SIZE * 3)]
+            [StructLayout(LayoutKind.Sequential)]
             private struct PaddedWaitStats
             {
-                [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
+                private CacheLinePadding _paddingBefore;
                 public int Lock;
-                [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + 8)]
                 public WaitStats Local;
-                [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + 32)]
                 public WaitStats Global;
+                private CacheLinePadding _paddingAfter;
+            }
+
+            [StructLayout(LayoutKind.Explicit, Size = PaddingHelpers.CACHE_LINE_SIZE)]
+            private struct CacheLinePadding
+            {
             }
         }
     }

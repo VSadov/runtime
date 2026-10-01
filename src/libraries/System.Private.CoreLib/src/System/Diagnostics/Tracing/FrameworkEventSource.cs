@@ -121,14 +121,20 @@ namespace System.Diagnostics.Tracing
         // How long work items waited in the per-core thread pool work queue, from enqueue to dequeue, over a window of about
         // a second. Only emitted when the queue's wait time tracking is enabled (DOTNET_ThreadPool_TrackWorkItemWaitTimes=1).
         // Local queues are the per-core queues that take work items queued by thread pool threads; global queues are the fifo
-        // queues that take the rest. Times are in microseconds.
+        // queues that take the rest. Times are in microseconds. Percentiles are estimated from power-of-two histograms.
         [Event(32, Level = EventLevel.Informational, Keywords = Keywords.ThreadPool)]
         public void ThreadPoolWorkItemWaitTimes(
             double durationMs,
             long localCount, double localMinUs, double localAvgUs, double localMaxUs,
-            long globalCount, double globalMinUs, double globalAvgUs, double globalMaxUs)
+            long globalCount, double globalMinUs, double globalAvgUs, double globalMaxUs,
+            double localP50Us, double localP90Us, double localP99Us, double localP999Us,
+            double globalP50Us, double globalP90Us, double globalP99Us, double globalP999Us)
         {
-            WriteEvent(32, durationMs, localCount, localMinUs, localAvgUs, localMaxUs, globalCount, globalMinUs, globalAvgUs, globalMaxUs);
+            WriteEvent(32, durationMs,
+                localCount, localMinUs, localAvgUs, localMaxUs,
+                globalCount, globalMinUs, globalAvgUs, globalMaxUs,
+                localP50Us, localP90Us, localP99Us, localP999Us,
+                globalP50Us, globalP90Us, globalP99Us, globalP999Us);
         }
 
         // id -   represents a correlation ID that allows correlation of two activities, one stamped by
