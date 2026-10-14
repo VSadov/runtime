@@ -475,54 +475,72 @@ namespace System.Threading
                 }
 
                 /// <summary>
-                /// Tries to dequeue an element from the queue in one shot (no retries).
+                /// Tries to dequeue an element from the queue with bounded contention retries.
                 /// - Returns an item, if successful.
-                /// - Returns null if dequeue slot is not marked as Full yet.
-                ///   NB: Enqueue guarantees that the item that we are responsible for is in a Full slot,
-                ///     so seeing dequeue advanced to a non-Full slot still counts as "mission accomplished".
-                /// - Returns null + sets missedSteal if lost a race to another dequeuer.
-                ///   Other dequeuers will likely take care of "our" item, but an eventual
-                ///   revisiting of the queue by some thread is required - to be sure.
+                /// - Returns null if the segment is empty.
+                /// - Returns null + sets missedSteal if contention is high or an in-flight enqueue has not
+                ///   finished writing its slot yet, so the caller can try other queues and ensure a follow-up scan.
                 /// </summary>
                 internal object? TryDequeue(ref bool missedSteal)
                 {
-                    int position = _queueEnds.Dequeue;
-                    ref Slot slot = ref this[position];
-
-                    // Read the sequence number for the slot.
-                    // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
-                    int sequenceNumber = slot.SequenceNumber;
-
-                    // Check if the slot is considered Full in the current generation.
-                    if (sequenceNumber == position + Full)
+                    int retriesLeft = 4;
+                    while (true)
                     {
-                        // Attempt to acquire the slot for Dequeuing.
-                        if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
-                        {
-                            var item = slot.Item;
-                            uint enqueueTimestamp = slot.EnqueueTimestamp;
-                            slot.Item = null;
+                        int position = _queueEnds.Dequeue;
+                        ref Slot slot = ref this[position];
 
-                            // make the slot appear empty in the next generation
-                            Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
-                            WaitTimeTracking.RecordGlobal(enqueueTimestamp);
-                            return item;
+                        // Read the sequence number for the slot.
+                        // Should read before reading Item, but we read Item after CAS, so ordinary read is ok.
+                        int sequenceNumber = slot.SequenceNumber;
+                        int diff = sequenceNumber - position;
+
+                        // Check if the slot is considered Full in the current generation.
+                        if (diff == Full)
+                        {
+                            // Attempt to acquire the slot for Dequeuing.
+                            if (Interlocked.CompareExchange(ref _queueEnds.Dequeue, position + 1, position) == position)
+                            {
+                                var item = slot.Item;
+                                uint enqueueTimestamp = slot.EnqueueTimestamp;
+                                slot.Item = null;
+
+                                // make the slot appear empty in the next generation
+                                Volatile.Write(ref slot.SequenceNumber, position + 1 + _slotsMask);
+                                WaitTimeTracking.RecordGlobal(enqueueTimestamp);
+                                return item;
+                            }
+
+                            // Lost a race to another dequeuer; Dequeue has advanced.
+                        }
+                        else if (diff < Full)
+                        {
+                            // The slot is not marked Full yet. Check whether the segment is empty or an enqueuer is mid-write.
+                            int currentEnqueue = _queueEnds.Enqueue;
+                            if (currentEnqueue == position || (_frozenForEnqueues && currentEnqueue == position + FreezeOffset))
+                            {
+                                return null;
+                            }
+
+                            if (retriesLeft == 0)
+                            {
+                                missedSteal = true;
+                                return null;
+                            }
+
+                            retriesLeft--;
+                            Thread.SpinWait(1);
+                            continue;
                         }
 
-                        // lost a race to another dequeuer.
-                    }
-                    else if (sequenceNumber - position < Full)
-                    {
-                        // the item is not there yet
-                        return null;
-                    }
-                    else
-                    {
-                        // lost a race to another dequeuer before even trying to advance the dequeue.
-                    }
+                        // Another dequeuer advanced Dequeue. Retry a bounded number of times before moving on to another queue.
+                        if (retriesLeft == 0)
+                        {
+                            missedSteal = true;
+                            return null;
+                        }
 
-                    missedSteal = true;
-                    return null;
+                        retriesLeft--;
+                    }
                 }
 
                 /// <summary>
@@ -1070,7 +1088,8 @@ namespace System.Threading
                         // then we have reached the dequeuing end of the segment.
                         // Note: "Move" may not take all the elements that it wanted, so segment is not definitely empty,
                         //       but it is still a good enough indication that we should start stealing.
-                        if (diff == 1 + _slotsMask || diff == Dequeue || _frozenForEnqueues)
+                        if (diff >= 1 + _slotsMask || diff == Dequeue || _frozenForEnqueues ||
+                            (diff == Change && _queueEnds.Dequeue == position))
                         {
                             return null;
                         }
@@ -1093,6 +1112,11 @@ namespace System.Threading
                     {
                         int position = _queueEnds.Dequeue;
 
+                        if (missedSteal && position >= _queueEnds.Enqueue)
+                        {
+                            return null;
+                        }
+
                         // The emptiness criteria for steal is finding dequeue end pointing to a
                         // slot that is empty in current generation (thus all subsequent slots are empty), and
                         // prev is empty in the new generation. We need to check the prev slot before checking the current.
@@ -1100,6 +1124,12 @@ namespace System.Threading
                         //     the current slot is being filled up. In such case we cannot consider the current slot as empty.
                         if (!missedSteal)
                         {
+                            if (position >= _queueEnds.Enqueue)
+                            {
+                                missedSteal = Volatile.Read(ref this[position - 1].SequenceNumber) != (position + _slotsMask);
+                                return null;
+                            }
+
                             missedSteal = Volatile.Read(ref this[position - 1].SequenceNumber) != (position + _slotsMask);
                         }
 
@@ -1151,6 +1181,11 @@ namespace System.Threading
 
                         if (diff != Empty)
                         {
+                            if (_queueEnds.Dequeue != position)
+                            {
+                                continue;
+                            }
+
                             missedSteal = true;
                         }
 
@@ -1423,7 +1458,12 @@ namespace System.Threading
                 allowNegative: false);
             fifoQueuesPerCores = Math.Clamp(fifoQueuesPerCores, 1, processorCount);
             int fifoQueueCount = (processorCount + fifoQueuesPerCores - 1) / fifoQueuesPerCores;
-            _FifoQueues = new FifoWorkQueue[BitOperations.RoundUpToPowerOf2((uint)fifoQueueCount)];
+            int fifoPow2 = (int)BitOperations.RoundUpToPowerOf2((uint)fifoQueueCount);
+            _FifoQueues = new FifoWorkQueue[fifoPow2];
+            for (int i = 0; i < fifoPow2; i++)
+            {
+                _FifoQueues[i] = new FifoWorkQueue(i);
+            }
 
             RefreshLoggingEnabled();
         }
@@ -1479,17 +1519,7 @@ namespace System.Threading
         internal FifoWorkQueue GetOrAddFifoQueue()
         {
             var queues = _FifoQueues;
-            var index = GetPreferredIndexForQueues(queues);
-            var result = queues[index] ?? EnsureFifoQueue(index);
-            return result;
-        }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private FifoWorkQueue EnsureFifoQueue(int index)
-        {
-            var newQueue = new FifoWorkQueue(index);
-            Interlocked.CompareExchange(ref _FifoQueues[index], newQueue, null!);
-            return _FifoQueues[index];
+            return queues.Length == 1 ? queues[0] : queues[GetPreferredIndexForQueues(queues)];
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1610,18 +1640,18 @@ namespace System.Threading
             // force the result to be odd.
             uint stride = (localWsQueue._queueIndex + start) * 1664525u | 1;
 
-            // By default fifo queues are traversed starting from the one that the current thread would enqueue into.
-            // This favors latency over fairness - other fifo queues are only checked when that one is empty.
-            // Otherwise the traversal starts from a random fifo queue, which is fairer.
-            uint fifoStart = s_fifoScanFromCurrentQueue ? (uint)GetPreferredIndexForQueues(ffQueues) : start;
-
+            // By default fifo queues are traversed starting from a random fifo queue for fairness.
+            // Optionally the traversal can start from the queue that the current thread would enqueue into,
+            // which favors latency over fairness.
             uint n = (uint)ffQueues.Length;
             uint mask = n - 1;
+            uint fifoStart = s_fifoScanFromCurrentQueue ? (localWsQueue._queueIndex & mask) : start;
+
             for (uint i = 0; i < n; i++)
             {
                 uint idx = (fifoStart + i * stride) & mask;
-                FifoWorkQueue? ffQueue = ffQueues[idx];
-                workItem = ffQueue?.TryDequeue(ref missedSteal);
+                FifoWorkQueue ffQueue = ffQueues[idx];
+                workItem = ffQueue.TryDequeue(ref missedSteal);
                 if (workItem != null)
                 {
                     return workItem;
@@ -1636,10 +1666,13 @@ namespace System.Threading
             {
                 uint idx = (start + i * stride) & mask;
                 WorkStealingQueue? wsQueue = wsQueues[idx];
-                workItem = wsQueue?.TrySteal(localWsQueue, ref missedSteal);
-                if (workItem != null)
+                if (wsQueue != null && wsQueue != localWsQueue)
                 {
-                    return workItem;
+                    workItem = wsQueue.TrySteal(localWsQueue, ref missedSteal);
+                    if (workItem != null)
+                    {
+                        return workItem;
+                    }
                 }
             }
 
