@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -20,6 +21,7 @@ namespace System.Threading.ThreadPools.Tests
     {
         private const int UnexpectedTimeoutMilliseconds = ThreadTestHelpers.UnexpectedTimeoutMilliseconds;
         private const int ExpectedTimeoutMilliseconds = ThreadTestHelpers.ExpectedTimeoutMilliseconds;
+        private const int PerCoreQueueInitialSegmentLength = 32;
 
         private static readonly int MaxPossibleThreadCount = short.MaxValue;
 
@@ -421,6 +423,203 @@ namespace System.Threading.ThreadPools.Tests
             }), preferLocal);
             await tcs.Task;
             Assert.Equal(42, al.Value);
+        }
+
+        public static IEnumerable<object[]> SingleWorkerLocalBurstData()
+        {
+            foreach (bool usePerCoreQueue in new[] { false, true })
+            {
+                foreach (int itemCount in new[]
+                {
+                    PerCoreQueueInitialSegmentLength,
+                    PerCoreQueueInitialSegmentLength + 1,
+                    3 * PerCoreQueueInitialSegmentLength,
+                    3 * PerCoreQueueInitialSegmentLength + 1,
+                })
+                {
+                    yield return new object[] { usePerCoreQueue, itemCount };
+                }
+            }
+        }
+
+        [ConditionalTheory(typeof(ThreadPoolTests), nameof(IsThreadingAndRemoteExecutorSupported), nameof(UsePortableThreadPool))]
+        [MemberData(nameof(SingleWorkerLocalBurstData))]
+        public static void LocalQueueBurst_CompletesWithSingleWorker(bool usePerCoreQueue, int itemCount)
+        {
+            RemoteExecutor.Invoke(static countString =>
+            {
+                int count = int.Parse(countString, CultureInfo.InvariantCulture);
+                Assert.Equal(1, Environment.ProcessorCount);
+                Assert.True(ThreadPool.SetMinThreads(1, 1));
+                ThreadPool.GetMaxThreads(out _, out int maxIoThreads);
+                Assert.True(ThreadPool.SetMaxThreads(1, maxIoThreads));
+
+                using CountdownEvent completed = new CountdownEvent(count);
+                ThreadPool.UnsafeQueueUserWorkItem(static state =>
+                {
+                    for (int i = 0; i < state.Count; i++)
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItem(static done => done.Signal(), state.Completed, preferLocal: true);
+                    }
+                }, (Count: count, Completed: completed), preferLocal: false);
+
+                Assert.True(completed.Wait(UnexpectedTimeoutMilliseconds),
+                    $"Completed {count - completed.CurrentCount} of {count} callbacks.");
+                Assert.Equal(0, ThreadPool.PendingWorkItemCount);
+            }, itemCount.ToString(CultureInfo.InvariantCulture), SingleProcessorQueueTestOptions(usePerCoreQueue)).Dispose();
+        }
+
+        [ConditionalTheory(typeof(ThreadPoolTests), nameof(IsThreadingAndRemoteExecutorSupportedAndNotNativeAot))]
+        [MemberData(nameof(OneBool))]
+        public static void PerCoreWorkQueue_DequeueTracksInFlightLocalEnqueue(bool enqueueAdvanced)
+        {
+            RemoteExecutor.Invoke(static advancedString =>
+            {
+                const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                const int Change = 2;
+                Type queueType = typeof(ThreadPool).Assembly.GetType("System.Threading.PerCoreThreadPoolWorkQueue", throwOnError: true)!;
+                object queue = Activator.CreateInstance(queueType)!;
+                object localQueue = queueType.GetMethod("GetOrAddWorkStealingQueue", Flags)!.Invoke(queue, null)!;
+                object segment = localQueue.GetType().GetField("_enqSegment", Flags)!.GetValue(localQueue)!;
+                Type segmentType = segment.GetType();
+                Array slots = (Array)segmentType.GetField("_slots", Flags)!.GetValue(segment)!;
+                object previousSlot = slots.GetValue(slots.Length - 1)!;
+                FieldInfo sequenceNumber = previousSlot.GetType().GetField("SequenceNumber", Flags)!;
+                sequenceNumber.SetValue(previousSlot, slots.Length - 1 + Change);
+                slots.SetValue(previousSlot, slots.Length - 1);
+
+                if (bool.Parse(advancedString))
+                {
+                    object slot = slots.GetValue(0)!;
+                    sequenceNumber.SetValue(slot, Change);
+                    slots.SetValue(slot, 0);
+                    FieldInfo endsField = segmentType.GetField("_queueEnds", Flags)!;
+                    object ends = endsField.GetValue(segment)!;
+                    ends.GetType().GetField("Enqueue", Flags)!.SetValue(ends, 1);
+                    endsField.SetValue(segment, ends);
+                }
+
+                object[] arguments = { false };
+                Assert.Null(queueType.GetMethod("Dequeue", Flags)!.Invoke(queue, arguments));
+                Assert.True((bool)arguments[0]);
+            }, enqueueAdvanced.ToString(), SingleProcessorQueueTestOptions(usePerCoreQueue: false)).Dispose();
+        }
+
+        private static RemoteInvokeOptions SingleProcessorQueueTestOptions(bool usePerCoreQueue)
+        {
+            RemoteInvokeOptions options = new RemoteInvokeOptions();
+            options.StartInfo.Environment["DOTNET_PROCESSOR_COUNT"] = "1";
+            options.StartInfo.Environment["DOTNET_ThreadPool_UsePerCoreWorkQueue"] = usePerCoreQueue ? "1" : "0";
+            return options;
+        }
+
+        public static IEnumerable<object[]> PerCoreWorkStealingQueueRolloverData()
+        {
+            int[] positions =
+            {
+                0,
+                int.MaxValue - 3 * PerCoreQueueInitialSegmentLength,
+                int.MaxValue - 3 * PerCoreQueueInitialSegmentLength + 1,
+                int.MaxValue - PerCoreQueueInitialSegmentLength,
+                int.MaxValue - 1,
+                int.MaxValue,
+                int.MinValue,
+                -1,
+            };
+
+            foreach (int position in positions)
+            {
+                foreach (bool missedSteal in new[] { false, true })
+                {
+                    foreach (int itemCount in new[]
+                    {
+                        0,
+                        1,
+                        PerCoreQueueInitialSegmentLength + 1,
+                        3 * PerCoreQueueInitialSegmentLength + 1,
+                    })
+                    {
+                        yield return new object[] { position, missedSteal, itemCount };
+                    }
+                }
+            }
+        }
+
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported), nameof(PlatformDetection.IsNotNativeAot))]
+        [MemberData(nameof(PerCoreWorkStealingQueueRolloverData))]
+        public static void PerCoreWorkStealingQueue_HandlesIndexRollover(int position, bool missedSteal, int itemCount)
+        {
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            object queue = CreatePerCoreWorkStealingQueue();
+            object localQueue = CreatePerCoreWorkStealingQueue();
+            Type queueType = queue.GetType();
+            FieldInfo enqueueSegmentField = queueType.GetField("_enqSegment", Flags)!;
+            FieldInfo dequeueSegmentField = queueType.GetField("_deqSegment", Flags)!;
+            object initialSegment = enqueueSegmentField.GetValue(queue)!;
+            InitializePerCoreQueueSegment(initialSegment, position);
+
+            MethodInfo enqueue = queueType.GetMethod("Enqueue", Flags)!;
+            MethodInfo steal = queueType.GetMethod("TrySteal", Flags)!;
+            object[] stealArguments = { localQueue, missedSteal };
+            Assert.Null(steal.Invoke(queue, stealArguments));
+            Assert.Equal(missedSteal, (bool)stealArguments[1]);
+
+            // Keep the destination nonempty so that steals do not batch-move items there.
+            enqueue.Invoke(localQueue, new object[] { new object() });
+
+            object[] items = new object[itemCount];
+            for (int i = 0; i < items.Length; i++)
+            {
+                items[i] = new object();
+                enqueue.Invoke(queue, new object[] { items[i] });
+            }
+
+            bool frozen = (bool)initialSegment.GetType().GetField("_frozenForEnqueues", Flags)!.GetValue(initialSegment)!;
+            Assert.Equal(itemCount > PerCoreQueueInitialSegmentLength, frozen);
+            Assert.Same(initialSegment, dequeueSegmentField.GetValue(queue));
+
+            foreach (object item in items)
+            {
+                stealArguments[1] = missedSteal;
+                Assert.Same(item, steal.Invoke(queue, stealArguments));
+            }
+
+            stealArguments[1] = missedSteal;
+            Assert.Null(steal.Invoke(queue, stealArguments));
+            Assert.Equal(missedSteal, (bool)stealArguments[1]);
+            Assert.Same(enqueueSegmentField.GetValue(queue), dequeueSegmentField.GetValue(queue));
+            Assert.Equal(1, (int)queueType.GetProperty("Count", Flags)!.GetValue(localQueue)!);
+        }
+
+        private static object CreatePerCoreWorkStealingQueue()
+        {
+            Type queueType = typeof(ThreadPool).Assembly.GetType(
+                "System.Threading.PerCoreThreadPoolWorkQueue+WorkStealingQueue", throwOnError: true)!;
+
+            return Activator.CreateInstance(
+                queueType, BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, args: new object[] { 0 }, culture: null)!;
+        }
+
+        private static void InitializePerCoreQueueSegment(object segment, int position)
+        {
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            Type segmentType = segment.GetType();
+            FieldInfo endsField = segmentType.GetField("_queueEnds", Flags)!;
+            object ends = endsField.GetValue(segment)!;
+            ends.GetType().GetField("Dequeue", Flags)!.SetValue(ends, position);
+            ends.GetType().GetField("Enqueue", Flags)!.SetValue(ends, position);
+            endsField.SetValue(segment, ends);
+
+            Array slots = (Array)segmentType.GetField("_slots", Flags)!.GetValue(segment)!;
+            Assert.Equal(PerCoreQueueInitialSegmentLength, slots.Length);
+            for (int i = 0; i < slots.Length; i++)
+            {
+                object slot = slots.GetValue(i)!;
+                int sequenceNumber = unchecked(position + ((i - position) & (slots.Length - 1)));
+                slot.GetType().GetField("SequenceNumber", Flags)!.SetValue(slot, sequenceNumber);
+                slots.SetValue(slot, i);
+            }
         }
 
         private sealed class SimpleWorkItem : IThreadPoolWorkItem
@@ -1500,6 +1699,9 @@ namespace System.Threading.ThreadPools.Tests
 
         public static bool IsThreadingAndRemoteExecutorSupported =>
             PlatformDetection.IsMultithreadingSupported && RemoteExecutor.IsSupported;
+
+        public static bool IsThreadingAndRemoteExecutorSupportedAndNotNativeAot =>
+            IsThreadingAndRemoteExecutorSupported && PlatformDetection.IsNotNativeAot;
 
         // Timing-sensitive tests can be too flaky on a Debug runtime, which is much slower
         public static bool IsThreadingAndRemoteExecutorSupportedAndNotDebugRuntime =>
