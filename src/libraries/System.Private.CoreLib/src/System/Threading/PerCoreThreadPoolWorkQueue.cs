@@ -1112,7 +1112,8 @@ namespace System.Threading
                     {
                         int position = _queueEnds.Dequeue;
 
-                        if (missedSteal && position >= _queueEnds.Enqueue)
+                        // Empty active segments have equal ends; signed ordering is invalid across rollover.
+                        if (missedSteal && position == _queueEnds.Enqueue)
                         {
                             return null;
                         }
@@ -1124,7 +1125,7 @@ namespace System.Threading
                         //     the current slot is being filled up. In such case we cannot consider the current slot as empty.
                         if (!missedSteal)
                         {
-                            if (position >= _queueEnds.Enqueue)
+                            if (position == _queueEnds.Enqueue)
                             {
                                 missedSteal = Volatile.Read(ref this[position - 1].SequenceNumber) != (position + _slotsMask);
                                 return null;
@@ -1658,7 +1659,7 @@ namespace System.Threading
                 }
             }
 
-            // Try stealing from all local queues.
+            // Include our own queue to service older segments and detect in-flight enqueues after a failed pop.
             WorkStealingQueue[] wsQueues = _WorkStealingQueues;
             n = (uint)wsQueues.Length;
             mask = n - 1;
@@ -1666,7 +1667,7 @@ namespace System.Threading
             {
                 uint idx = (start + i * stride) & mask;
                 WorkStealingQueue? wsQueue = wsQueues[idx];
-                if (wsQueue != null && wsQueue != localWsQueue)
+                if (wsQueue != null)
                 {
                     workItem = wsQueue.TrySteal(localWsQueue, ref missedSteal);
                     if (workItem != null)
