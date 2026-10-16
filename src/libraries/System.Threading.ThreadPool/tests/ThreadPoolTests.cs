@@ -505,6 +505,156 @@ namespace System.Threading.ThreadPools.Tests
             }, enqueueAdvanced.ToString(), SingleProcessorQueueTestOptions(usePerCoreQueue: false)).Dispose();
         }
 
+        [ConditionalTheory(typeof(ThreadPoolTests), nameof(IsPerCoreWorkQueueWaitTimeTrackingSupported))]
+        [MemberData(nameof(TwoBools))]
+        public static void PerCoreWorkQueue_WaitTimeTracking_FlushesBeforeBlocking(bool contended, bool flushBeforeWaiting)
+        {
+            RemoteInvokeOptions options = SingleProcessorQueueTestOptions(usePerCoreQueue: true);
+            options.StartInfo.Environment["DOTNET_ThreadPool_UseWindowsThreadPool"] = "0";
+            options.StartInfo.Environment["DOTNET_ThreadPool_TrackWorkItemWaitTimes"] = "1";
+
+            RemoteExecutor.Invoke(static (contendedString, flushBeforeWaitingString) =>
+            {
+                const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+                bool contended = bool.Parse(contendedString);
+                bool flushBeforeWaiting = bool.Parse(flushBeforeWaitingString);
+                object queue = typeof(ThreadPool).GetField("s_workQueue", Flags)!.GetValue(null)!;
+                Type queueType = queue.GetType();
+                Type trackingType = queueType.GetNestedType("WaitTimeTracking", Flags)!;
+                Assert.True((bool)trackingType.GetField("IsEnabled", Flags)!.GetValue(null)!);
+                object localQueue = queueType.GetMethod("GetOrAddWorkStealingQueue", Flags)!.Invoke(queue, null)!;
+                object accumulator = localQueue.GetType().GetField("_waitTimes", Flags)!.GetValue(localQueue)!;
+                FieldInfo statsField = accumulator.GetType().GetField("_stats", Flags)!;
+                object stats = statsField.GetValue(accumulator)!;
+                FieldInfo lockField = stats.GetType().GetField("Lock", Flags)!;
+
+                Type poolType = typeof(ThreadPool).Assembly.GetType("System.Threading.PortableThreadPool", throwOnError: true)!;
+                object pool = poolType.GetField("ThreadPoolInstance", Flags)!.GetValue(null)!;
+                Type gateType = poolType.GetNestedType("GateThread", Flags)!;
+                FieldInfo separatedField = poolType.GetField("_separated", Flags)!;
+                FieldInfo gateStateField = separatedField.FieldType.GetField("gateThreadRunningState", Flags)!;
+                int idleGateState = (int)gateType.GetMethod("GetRunningStateForNumRuns", Flags)!.Invoke(null, new object[] { 0 })!;
+                gateType.GetMethod("EnsureRunningSlow", Flags)!.Invoke(null, new object[] { pool });
+                ThreadTestHelpers.WaitForCondition(() =>
+                    (int)gateStateField.GetValue(separatedField.GetValue(pool)!)! == idleGateState);
+
+                Type workerType = poolType.GetNestedType("WorkerThread", Flags)!;
+                object workerSemaphore = workerType.GetField("s_semaphore", Flags)!.GetValue(null)!;
+                Type semaphoreType = workerSemaphore.GetType();
+                Action onWait = (Action)semaphoreType.GetField("_onWait", Flags)!.GetValue(workerSemaphore)!;
+                FieldInfo localWaits = trackingType.GetField("t_localQueueWaits", Flags)!;
+                FieldInfo globalWaits = trackingType.GetField("t_globalQueueWaits", Flags)!;
+                FieldInfo countField = localWaits.FieldType.GetField("Count", Flags)!;
+                MethodInfo flush = trackingType.GetMethod("Flush", Flags)!;
+
+                using ManualResetEventSlim prepared = new ManualResetEventSlim();
+                using ManualResetEventSlim startWait = new ManualResetEventSlim();
+                using ManualResetEventSlim enteredWait = new ManualResetEventSlim();
+                using ManualResetEventSlim flushed = new ManualResetEventSlim();
+                using ManualResetEventSlim published = new ManualResetEventSlim();
+                using WorkItemWaitTimeEventListener listener = new WorkItemWaitTimeEventListener(published);
+
+                // Exercise the worker's actual pre-wait callback without changing its semaphore's counts.
+                Action beforeWait = () =>
+                {
+                    enteredWait.Set();
+                    onWait();
+                    flushed.Set();
+                };
+                object semaphore = Activator.CreateInstance(
+                    semaphoreType, Flags, binder: null, args: new object[] { beforeWait }, culture: null)!;
+                MethodInfo wait = semaphoreType.GetMethod("WaitNoSpin", Flags)!;
+
+                if (contended)
+                {
+                    lockField.SetValue(stats, 1);
+                    statsField.SetValue(accumulator, stats);
+                }
+
+                Thread worker = ThreadTestHelpers.CreateGuardedThread(out Action waitForWorker, () =>
+                {
+                    Assert.Null(queueType.GetMethod("Dequeue", Flags)!.Invoke(queue, new object[] { false }));
+                    uint timestamp = (uint)trackingType.GetMethod("GetTimestamp", Flags)!.Invoke(null, null)!;
+                    for (int i = 0; i < 2; i++)
+                    {
+                        trackingType.GetMethod("RecordLocal", Flags)!.Invoke(null, new object[] { timestamp });
+                    }
+                    for (int i = 0; i < 3; i++)
+                    {
+                        trackingType.GetMethod("RecordGlobal", Flags)!.Invoke(null, new object[] { timestamp });
+                    }
+
+                    if (flushBeforeWaiting)
+                    {
+                        flush.Invoke(null, new object[] { queue });
+                        Assert.Equal(contended ? 2UL : 0UL, (ulong)countField.GetValue(localWaits.GetValue(null)!)!);
+                        Assert.Equal(contended ? 3UL : 0UL, (ulong)countField.GetValue(globalWaits.GetValue(null)!)!);
+                    }
+
+                    prepared.Set();
+                    startWait.CheckedWait();
+                    Assert.False((bool)wait.Invoke(semaphore, new object[] { 1 })!);
+                    Assert.Equal(0UL, (ulong)countField.GetValue(localWaits.GetValue(null)!)!);
+                    Assert.Equal(0UL, (ulong)countField.GetValue(globalWaits.GetValue(null)!)!);
+                });
+                worker.IsBackground = true;
+                worker.Start();
+
+                try
+                {
+                    prepared.CheckedWait();
+                    startWait.Set();
+                    enteredWait.CheckedWait();
+                    if (contended)
+                    {
+                        Assert.False(flushed.Wait(ExpectedTimeoutMilliseconds));
+                    }
+                }
+                finally
+                {
+                    if (contended)
+                    {
+                        lockField.SetValue(stats, 0);
+                        statsField.SetValue(accumulator, stats);
+                    }
+                    startWait.Set();
+                    waitForWorker();
+                }
+
+                published.CheckedWait();
+                Assert.Equal(2L, listener.LocalCount);
+                Assert.Equal(3L, listener.GlobalCount);
+            }, contended.ToString(), flushBeforeWaiting.ToString(), options).Dispose();
+        }
+
+        private sealed class WorkItemWaitTimeEventListener : EventListener
+        {
+            private readonly ManualResetEventSlim _published;
+
+            public long LocalCount { get; private set; }
+            public long GlobalCount { get; private set; }
+
+            public WorkItemWaitTimeEventListener(ManualResetEventSlim published) => _published = published;
+
+            protected override void OnEventSourceCreated(EventSource eventSource)
+            {
+                if (eventSource.Name == "System.Diagnostics.Eventing.FrameworkEventSource")
+                {
+                    EnableEvents(eventSource, EventLevel.Informational, (EventKeywords)0x2);
+                }
+            }
+
+            protected override void OnEventWritten(EventWrittenEventArgs eventData)
+            {
+                if (eventData.EventName == "ThreadPoolWorkItemWaitTimes")
+                {
+                    LocalCount = (long)eventData.Payload![eventData.PayloadNames!.IndexOf("localCount")]!;
+                    GlobalCount = (long)eventData.Payload[eventData.PayloadNames.IndexOf("globalCount")]!;
+                    _published.Set();
+                }
+            }
+        }
+
         private static RemoteInvokeOptions SingleProcessorQueueTestOptions(bool usePerCoreQueue)
         {
             RemoteInvokeOptions options = new RemoteInvokeOptions();
@@ -1702,6 +1852,10 @@ namespace System.Threading.ThreadPools.Tests
 
         public static bool IsThreadingAndRemoteExecutorSupportedAndNotNativeAot =>
             IsThreadingAndRemoteExecutorSupported && PlatformDetection.IsNotNativeAot;
+
+        public static bool IsPerCoreWorkQueueWaitTimeTrackingSupported =>
+            IsThreadingAndRemoteExecutorSupported && PlatformDetection.IsCoreCLR &&
+            Environment.Is64BitProcess && UsePortableThreadPool;
 
         // Timing-sensitive tests can be too flaky on a Debug runtime, which is much slower
         public static bool IsThreadingAndRemoteExecutorSupportedAndNotDebugRuntime =>
