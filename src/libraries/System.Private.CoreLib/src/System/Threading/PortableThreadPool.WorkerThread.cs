@@ -62,6 +62,17 @@ namespace System.Threading
                 new LowLevelLifoSemaphore(
                     onWait: () =>
                     {
+#if FEATURE_MULTITHREADING
+                        if (PerCoreThreadPoolWorkQueue.WaitTimeTracking.IsEnabled &&
+                            ThreadPool.s_workQueue is PerCoreThreadPoolWorkQueue workQueue)
+                        {
+                            PerCoreThreadPoolWorkQueue.WaitTimeTracking.ForceFlush(workQueue);
+
+                            // A periodic flush may have already handed off data while the gate was asleep.
+                            // The interlocked update orders publication before the gate can go idle.
+                            GateThread.EnsureRunningSlow(ThreadPoolInstance);
+                        }
+#endif
                         if (NativeRuntimeEventSource.Log.IsEnabled())
                         {
                             NativeRuntimeEventSource.Log.ThreadPoolWorkerThreadWait(

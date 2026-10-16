@@ -1898,8 +1898,9 @@ namespace System.Threading
         /// - A thread that dequeues an item adds the item's wait to thread-local statistics: count, total, min, max and a
         ///   power-of-two histogram. Local and global (fifo) queues are kept apart, since their latency and fairness
         ///   expectations differ.
-        /// - At the end of each dispatch quantum and when leaving the dispatch loop, the thread adds its statistics to the
-        ///   accumulator of its local queue, so the data does not stay with parked threads.
+        /// - At the end of each dispatch quantum and when leaving the dispatch loop, the thread attempts to add its
+        ///   statistics to the accumulator of its local queue. Before a portable worker blocks on its semaphore, it
+        ///   completes this handoff even if the accumulator is busy, so the data does not stay with parked threads.
         /// - About once a second, the gate thread of the portable thread pool drains the accumulators and publishes, for each
         ///   kind of queue over the elapsed window, the count, the min, average and max wait, and the 50th, 90th, 99th and
         ///   99.9th percentiles estimated from the histogram: in <see cref="s_lastSample"/>, and in the FrameworkEventSource
@@ -1997,12 +1998,22 @@ namespace System.Threading
             {
                 if (IsEnabled)
                 {
-                    FlushCore(workQueue);
+                    FlushCore(workQueue, force: false);
+                }
+            }
+
+            /// <summary>Flushes pending statistics before blocking, waiting for a busy accumulator if necessary.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal static void ForceFlush(PerCoreThreadPoolWorkQueue workQueue)
+            {
+                if (IsEnabled)
+                {
+                    FlushCore(workQueue, force: true);
                 }
             }
 
             [MethodImpl(MethodImplOptions.NoInlining)]
-            private static void FlushCore(PerCoreThreadPoolWorkQueue workQueue)
+            private static void FlushCore(PerCoreThreadPoolWorkQueue workQueue, bool force)
             {
                 ref WaitStats local = ref t_localQueueWaits;
                 ref WaitStats global = ref t_globalQueueWaits;
@@ -2012,13 +2023,26 @@ namespace System.Threading
                     return;
                 }
 
-                // If the accumulator is busy, keep the data for the next flush rather than wait.
                 Accumulator? accumulator = workQueue._WorkStealingQueues[localQueueIdx - 1]?._waitTimes;
-                if (accumulator is not null && accumulator.TryAdd(in local, in global))
+                if (accumulator is null)
                 {
-                    local = default;
-                    global = default;
+                    return;
                 }
+
+                SpinWait spinner = default;
+                while (!accumulator.TryAdd(in local, in global))
+                {
+                    // Periodic flushes can retry later, but a worker that is about to park may never run again.
+                    if (!force)
+                    {
+                        return;
+                    }
+
+                    spinner.SpinOnce();
+                }
+
+                local = default;
+                global = default;
             }
 
             /// <summary>
