@@ -162,6 +162,15 @@ namespace System.Threading
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void NotifyExternalWorkItemQueued()
+        {
+            if (!ThreadPool.UseWindowsThreadPool)
+            {
+                PortableThreadPool.ThreadPoolInstance.NotifyExternalWorkItemQueued();
+            }
+        }
+
         /// <summary>
         /// This method is called to notify the thread pool about pending work.
         /// It will start with an ordinary read to check if a request is already pending as we
