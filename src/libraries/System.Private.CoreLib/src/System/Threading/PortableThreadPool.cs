@@ -496,7 +496,8 @@ namespace System.Threading
                 // Record external producers even when another request is already outstanding.
                 // Avoid publishing the same timestamp repeatedly within a clock tick.
                 int currentTimeMs = Environment.TickCount;
-                if (Volatile.Read(ref _separated.lastExternalWorkItemTimeMs) != currentTimeMs)
+                // This is only an advisory duplicate-write check; no acquire ordering is needed.
+                if (_separated.lastExternalWorkItemTimeMs != currentTimeMs)
                 {
                     Volatile.Write(ref _separated.lastExternalWorkItemTimeMs, currentTimeMs);
                 }
