@@ -489,20 +489,20 @@ namespace System.Threading
             return _pendingBlockingAdjustment == PendingBlockingAdjustment.None;
         }
 
+        internal void NotifyExternalWorkItemQueued()
+        {
+            // Record external producers even when another request is already outstanding.
+            // Avoid publishing the same timestamp repeatedly within a clock tick.
+            int currentTimeMs = Environment.TickCount;
+            // This is only an advisory duplicate-write check; no acquire ordering is needed.
+            if (_separated.lastExternalWorkItemTimeMs != currentTimeMs)
+            {
+                Volatile.Write(ref _separated.lastExternalWorkItemTimeMs, currentTimeMs);
+            }
+        }
+
         internal void EnsureWorkerRequested()
         {
-            if (ThreadPoolWorkQueueThreadLocals.threadLocals == null)
-            {
-                // Record external producers even when another request is already outstanding.
-                // Avoid publishing the same timestamp repeatedly within a clock tick.
-                int currentTimeMs = Environment.TickCount;
-                // This is only an advisory duplicate-write check; no acquire ordering is needed.
-                if (_separated.lastExternalWorkItemTimeMs != currentTimeMs)
-                {
-                    Volatile.Write(ref _separated.lastExternalWorkItemTimeMs, currentTimeMs);
-                }
-            }
-
             // Only one worker is requested at a time to mitigate Thundering Herd problem.
             if (_separated._hasOutstandingThreadRequest == 0 &&
                 Interlocked.Exchange(ref _separated._hasOutstandingThreadRequest, 1) == 0)

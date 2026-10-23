@@ -81,6 +81,10 @@ namespace System.Threading
         {
         }
 
+        internal static void NotifyExternalWorkItemQueued()
+        {
+        }
+
         internal static void NotifyWorkItemProgress()
         {
         }

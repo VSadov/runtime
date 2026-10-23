@@ -622,18 +622,23 @@ namespace System.Threading
             else
 #endif
             {
-                ThreadPoolWorkQueueThreadLocals? tl;
-                if (!forceGlobal && (tl = ThreadPoolWorkQueueThreadLocals.threadLocals) != null)
+                ThreadPoolWorkQueueThreadLocals? tl = ThreadPoolWorkQueueThreadLocals.threadLocals;
+                if (!forceGlobal && tl is not null)
                 {
                     tl.workStealingQueue.LocalPush(callback);
                 }
                 else
                 {
                     WorkQueue queue =
-                        s_assignableWorkItemQueueCount > 0 && (tl = ThreadPoolWorkQueueThreadLocals.threadLocals) != null
+                        s_assignableWorkItemQueueCount > 0 && tl is not null
                             ? tl.assignedGlobalWorkItemQueue
                             : workItems;
                     queue.Enqueue(callback);
+
+                    if (tl is null)
+                    {
+                        ThreadPool.NotifyExternalWorkItemQueued();
+                    }
                 }
             }
 
@@ -673,6 +678,11 @@ namespace System.Threading
             }
 
             queue.Enqueue(callback);
+
+            if (tl is null)
+            {
+                ThreadPool.NotifyExternalWorkItemQueued();
+            }
         }
 #endif
 
@@ -685,6 +695,7 @@ namespace System.Threading
 
             highPriorityWorkItems.Enqueue(workItem);
 
+            ThreadPool.NotifyExternalWorkItemQueued();
             ThreadPool.EnsureWorkerRequested();
         }
 
