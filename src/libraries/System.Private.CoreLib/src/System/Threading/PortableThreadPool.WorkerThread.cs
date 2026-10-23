@@ -160,6 +160,7 @@ namespace System.Threading
             {
                 bool spurious;
                 short numProcessingWork;
+                int dispatchTimeMs = 0;
 
                 do
                 {
@@ -170,7 +171,8 @@ namespace System.Threading
                         Interlocked.Exchange(ref threadPoolInstance._separated._hasOutstandingThreadRequest, 0) != 0)
                     {
                         // We took the request, now we must Dispatch some work items.
-                        threadPoolInstance.NotifyDispatchProgress(Environment.TickCount);
+                        dispatchTimeMs = Environment.TickCount;
+                        threadPoolInstance.NotifyDispatchProgress(dispatchTimeMs);
                         switch (ThreadPoolWorkQueue.Dispatch())
                         {
                             case ThreadPoolWorkQueue.DispatchResult.Spurious:
@@ -212,8 +214,7 @@ namespace System.Threading
                 // An older sample conservatively defers parking; a later external request is still considered recent.
                 return spurious && (numProcessingWork > SpuriousDispatchNoSpinThreshold ||
                         (SpuriousDispatchExternalWorkItemRecencyMs >= 0 &&
-                         (Volatile.Read(ref threadPoolInstance._separated.lastDispatchTime) -
-                          Volatile.Read(ref threadPoolInstance._separated.lastExternalWorkItemTimeMs))
+                         dispatchTimeMs - Volatile.Read(ref threadPoolInstance._separated.lastExternalWorkItemTimeMs)
                             > SpuriousDispatchExternalWorkItemRecencyMs));
             }
 
