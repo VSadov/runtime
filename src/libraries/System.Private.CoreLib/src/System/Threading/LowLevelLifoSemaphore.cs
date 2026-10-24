@@ -15,19 +15,28 @@ namespace System.Threading
     /// </summary>
     internal sealed partial class LowLevelLifoSemaphore
     {
-        // The spin count is chosen to be in the range of typical thread wake latency and some additional overhead,
-        // all assuming a single spin is calibrated to around 35 nanoseconds.
-        // The thread wake latency commonly measures at ~10 microseconds (year 2026) and is unlikely to drastically change.
-        // But since the wakes are LIFO, the spin needs to survive additional overhead (we will need to take a lock, unlink the thread).
-        // So we limit the spin to about 35 microseconds.
-        private const int DefaultSemaphoreSpinCountLimit = 1024;
+        // After a brief initial spin-wait phase, spinning yields the processor time slice on each iteration
+        // in addition to exponential spin-waits, bounded by a microsecond spin limit.
+
+        // The upper bound of the spin, in microseconds. The previous bound was a spin count worth about 35 us, which is
+        // shorter than a thread wake on virtualized hosts (about 40-190 us measured). Where work arrives in short
+        // bursts (runtime async continuations, request/response workloads) most of the throughput was lost when every
+        // empty dispatch parked. Fixed limits of 128 us and above recovered it in measurements, 64 us recovered
+        // noticeably less. 256 us keeps a margin of about 1.3x over the longest wake that was measured.
+        private const int DefaultSemaphoreSpinLimitUsec = 256;
+
+        // The spin starts with a short busy-wait and then also yields the processor on every iteration, so that a
+        // runnable thread is not starved by the spinner. One spin-wait unit of Backoff.Exponential is about 35 ns,
+        // so 10 units are well under a microsecond: enough to catch a hand-off that is already in flight without a
+        // system call, and small compared to the cost of the yield that follows.
+        private const int SpinSleep0Threshold = 10;
         // The cooldown roughly serves as detection that the thread did not spend time being blocked.
         // If it woke in under 4 microseconds, it was likely a fast/trivial wake without blocking.
         private const int DefaultWakeCooldown = 4;
 
         private CacheLineSeparatedCounts _separated;
 
-        private readonly short _maxSpinCount;
+        private readonly short _spinLimitUsec;
         private readonly short _threadWakeCooldownUsec;
         private readonly Action _onWait;
 
@@ -70,10 +79,10 @@ namespace System.Threading
             _separated = default;
             _onWait = onWait;
 
-            _maxSpinCount = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
+            _spinLimitUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
                 "System.Threading.ThreadPool.UnfairSemaphoreSpinLimit",
                 "ThreadPool_UnfairSemaphoreSpinLimit",
-                DefaultSemaphoreSpinCountLimit,
+                DefaultSemaphoreSpinLimitUsec,
                 false);
 
             _threadWakeCooldownUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
@@ -108,25 +117,35 @@ namespace System.Threading
 
         private bool WaitSlow(int timeoutMs)
         {
-            int spinsRemaining = Environment.IsSingleProcessor ? 0 : _maxSpinCount;
-
-            uint iteration = 0;
-            while (spinsRemaining > 0)
+            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : _spinLimitUsec;
+            if (spinLimitUsec > 0)
             {
-                spinsRemaining -= Backoff.Exponential(iteration++);
-
-                Counts counts = _separated._counts;
-                if (counts.SignalCount != 0)
+                long spinLimitTicks = Stopwatch.Frequency * spinLimitUsec / 1_000_000;
+                long spinStartTick = Stopwatch.GetTimestamp();
+                uint iteration = 0;
+                int totalSpinWaits = 0;
+                do
                 {
-                    Counts newCounts = counts;
-                    newCounts.DecrementSignalCount();
-                    Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                    if (countsBeforeUpdate == counts)
+                    totalSpinWaits += Backoff.Exponential(iteration++);
+                    if (totalSpinWaits >= SpinSleep0Threshold)
                     {
-                        // we've consumed a signal
-                        return true;
+                        Thread.UninterruptibleSleep0();
+                    }
+
+                    Counts counts = _separated._counts;
+                    if (counts.SignalCount != 0)
+                    {
+                        Counts newCounts = counts;
+                        newCounts.DecrementSignalCount();
+                        Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+                        if (countsBeforeUpdate == counts)
+                        {
+                            // we've consumed a signal
+                            return true;
+                        }
                     }
                 }
+                while (Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
             }
 
             return WaitNoSpin(timeoutMs);
