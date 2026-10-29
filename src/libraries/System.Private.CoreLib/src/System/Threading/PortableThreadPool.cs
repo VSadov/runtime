@@ -123,10 +123,11 @@ namespace System.Threading
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 4 + sizeof(int))]
             public safe int gateThreadRunningState;
 
-            // Last worker request from outside the work-queue dispatcher, including coalesced requests.
-            /// <safety>This int occupies its own cache-line offset and overlaps no other field, so accessing it cannot forge a managed reference or read out of bounds.</safety>
+            // Stopwatch timestamp of a recent work item queued from outside the thread pool's workers,
+            // including items whose worker request was coalesced. See NotifyExternalWorkItemQueued.
+            /// <safety>This long occupies its own cache-line offset and overlaps no other field, so accessing it cannot forge a managed reference or read out of bounds.</safety>
             [FieldOffset(Internal.PaddingHelpers.CACHE_LINE_SIZE * 5)]
-            public safe int lastExternalWorkItemTimeMs;
+            public safe long lastExternalWorkItemTimestamp;
         }
 
         private long _currentSampleStartTime;
@@ -491,13 +492,21 @@ namespace System.Threading
 
         internal void NotifyExternalWorkItemQueued()
         {
-            // Record external producers even when another request is already outstanding.
-            // Avoid publishing the same timestamp repeatedly within a clock tick.
-            int currentTimeMs = Environment.TickCount;
-            // This is only an advisory duplicate-write check; no acquire ordering is needed.
-            if (_separated.lastExternalWorkItemTimeMs != currentTimeMs)
+            long granularity = WorkerThread.ExternalWorkItemTimestampGranularity;
+            if (granularity < 0)
             {
-                Volatile.Write(ref _separated.lastExternalWorkItemTimeMs, currentTimeMs);
+                // The recency check is disabled.
+                return;
+            }
+
+            // Record external producers even when another request is already outstanding.
+            // Publish at most once per granularity interval to limit writes to the shared cache line.
+            long currentTimestamp = Stopwatch.GetTimestamp();
+            // This is only an advisory duplicate-write check; no acquire ordering is needed.
+            // Volatile.Read keeps the 64-bit read atomic on 32-bit platforms.
+            if (currentTimestamp - Volatile.Read(ref _separated.lastExternalWorkItemTimestamp) >= granularity)
+            {
+                Volatile.Write(ref _separated.lastExternalWorkItemTimestamp, currentTimestamp);
             }
         }
 
