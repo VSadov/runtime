@@ -34,9 +34,39 @@ namespace System.Threading
         // If it woke in under 4 microseconds, it was likely a fast/trivial wake without blocking.
         private const int DefaultWakeCooldown = 4;
 
+        // The spin limit is the measured wake latency times this factor, bounded by [MinSpinLimitUsec, _spinLimitUsec].
+        // The factor of 0 disables the adaptation and always spins for _spinLimitUsec.
+        //
+        // Spinning only pays while it is cheaper than parking and waking a thread. Spinning for as long as one wake
+        // takes is never more than twice as expensive as the best choice, whatever the arrival pattern. The factor is
+        // larger than 1 because arrivals are bursty (an item is usually followed by more), so a longer spin catches
+        // more of them, and because the measured latency leaves out part of the cost of parking (the park and unpark
+        // system calls, cold caches). A factor of 5 reaches the configured limit when wakes take 51 us or more.
+        // Factors of 3 to 6 were measured: lower factors were better on Windows, where spinners compete with workers
+        // for processor resources, higher factors were better on virtualized Linux hosts, where wakes are slow.
+        // 5 is a compromise between the two.
+        // A missed spin costs up to the whole limit, so the longer spin relies on most spins succeeding. Sparse
+        // arrivals (about one item per millisecond) cost more CPU than not spinning.
+        private const int DefaultSpinWakeLatencyFactor = 5;
+
+        // The lower bound of the spin: a few times the cost of a park and unpark pair of system calls (on the order
+        // of 5 us), which a shorter spin cannot pay for. It also keeps the limit above the first few backoff
+        // iterations, which together take several microseconds, on hosts where wakes are very fast.
+        private const int MinSpinLimitUsec = 16;
+
+        // A new wake latency sample has the weight of 1 / 2^WakeLatencyAverageShift in the moving average.
+        // 1/8 follows a lasting change of the latency within about 8-16 wakes, while still smoothing out single
+        // samples, which vary several-fold with the idle state of the woken processor.
+        private const int WakeLatencyAverageShift = 3;
+
         private CacheLineSeparatedCounts _separated;
 
         private readonly short _spinLimitUsec;
+        private readonly short _spinWakeLatencyFactor;
+
+        // Moving average of the time from issuing an OS wake to the woken thread running. Written without
+        // synchronization, a lost update only makes the estimate slightly stale.
+        private long _wakeLatencyNs;
         private readonly short _threadWakeCooldownUsec;
         private readonly Action _onWait;
 
@@ -46,6 +76,7 @@ namespace System.Threading
         {
             internal LifoBlockerNode? _next;
             internal LowLevelThreadBlocker _blocker = new LowLevelThreadBlocker();
+            internal long _wakeIssuedTimestamp;
 
             ~LifoBlockerNode()
             {
@@ -85,6 +116,15 @@ namespace System.Threading
                 DefaultSemaphoreSpinLimitUsec,
                 false);
 
+            _spinWakeLatencyFactor = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
+                "System.Threading.ThreadPool.UnfairSemaphoreSpinWakeFactor",
+                "ThreadPool_UnfairSemaphoreSpinWakeFactor",
+                DefaultSpinWakeLatencyFactor,
+                false);
+
+            // Start at the configured spin limit until wake latency is observed.
+            _wakeLatencyNs = _spinWakeLatencyFactor > 0 ? _spinLimitUsec * 1000L / _spinWakeLatencyFactor : 0;
+
             _threadWakeCooldownUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
                 "System.Threading.ThreadPool.UnfairSemaphoreWakeCooldown",
                 "ThreadPool_UnfairSemaphoreWakeCooldown",
@@ -115,9 +155,47 @@ namespace System.Threading
             return WaitSlow(timeoutMs);
         }
 
+        private int GetSpinLimitUsec()
+        {
+            if (_spinWakeLatencyFactor == 0)
+            {
+                return _spinLimitUsec;
+            }
+
+            long usec = _spinWakeLatencyFactor * Volatile.Read(ref _wakeLatencyNs) / 1000;
+            return (int)Math.Clamp(usec, Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec), _spinLimitUsec);
+        }
+
+        private void RecordWakeLatency(LifoBlockerNode node)
+        {
+            long issued = node._wakeIssuedTimestamp;
+            if (issued == 0)
+            {
+                return;
+            }
+
+            node._wakeIssuedTimestamp = 0;
+            long ns = (Stopwatch.GetTimestamp() - issued) * 1_000_000_000 / Stopwatch.Frequency;
+
+            // Under 2 us the thread did not really park, for example it woke itself.
+            if (ns < 2_000)
+            {
+                return;
+            }
+
+            // The spin limit is at its maximum once the average reaches _spinLimitUsec / factor, so larger samples carry
+            // no further information. Clamping keeps a single outlier, such as a preempted thread, from holding the
+            // limit at the maximum for dozens of wakes: with a true latency of 10 us, one 4 ms sample would take 42
+            // wakes to recover from, versus 8 when clamped.
+            ns = Math.Min(ns, _spinLimitUsec * 1000L / _spinWakeLatencyFactor);
+
+            long average = Volatile.Read(ref _wakeLatencyNs);
+            Volatile.Write(ref _wakeLatencyNs, average + ((ns - average) >> WakeLatencyAverageShift));
+        }
+
         private bool WaitSlow(int timeoutMs)
         {
-            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : _spinLimitUsec;
+            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec();
             if (spinLimitUsec > 0)
             {
                 long spinLimitTicks = Stopwatch.Frequency * spinLimitUsec / 1_000_000;
@@ -373,6 +451,11 @@ namespace System.Threading
                         // just so we do not keep coming here again.
                         timeoutMs = 10;
                     }
+
+                    if (_spinWakeLatencyFactor > 0)
+                    {
+                        RecordWakeLatency(blockerNode);
+                    }
                 }
                 finally
                 {
@@ -452,6 +535,11 @@ namespace System.Threading
 
                 if (top != null)
                 {
+                    if (_spinWakeLatencyFactor > 0)
+                    {
+                        top._wakeIssuedTimestamp = Stopwatch.GetTimestamp();
+                    }
+
                     top._blocker.WakeOne();
                 }
 
