@@ -172,7 +172,8 @@ namespace System.Threading
             // returns true if the worker should Wait without spinning.
             private static bool WorkerDoWork(PortableThreadPool threadPoolInstance)
             {
-                bool spurious;
+                bool spurious = false;
+                bool didWork = false;
                 short numProcessingWork;
 
                 do
@@ -189,7 +190,7 @@ namespace System.Threading
                         {
                             case ThreadPoolWorkQueue.DispatchResult.Spurious:
                                 // We were invited but found no work. This is counterproductive. We may want to park.
-                                spurious = true;
+                                spurious = !didWork;
                                 break;
 
                             case ThreadPoolWorkQueue.DispatchResult.ShouldStop:
@@ -200,6 +201,7 @@ namespace System.Threading
                             default:
                                 // We did some work, but then there was nothing to do.
                                 // Spin a bit before parking in case we are invited back.
+                                didWork = true;
                                 spurious = false;
                                 break;
                         }
