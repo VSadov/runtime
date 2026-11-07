@@ -88,7 +88,25 @@ namespace System.Threading
         private const int SpinHitRateLow = SpinHitRateOne / 4;
         private const int SpinHitRateHigh = SpinHitRateOne / 2;
 
+        // Of the signals that were claimed by spinning, the share whose first dispatch found no work is kept as a moving
+        // average in fixed point, SpinClaimShareOne is every spin claim finding nothing. A claim has the weight of
+        // 1 / 2^SpinClaimShareShift, which makes the average follow the last few hundred claims. When most of the claims
+        // find nothing the spinners are mostly waiting for work that other workers hand to each other in turn, and more
+        // than a few of them only burn CPU: the share going to SpinClaimShareHigh or above turns the spinner cap on, and
+        // it is turned off again at SpinClaimShareLow or below. The gap keeps the cap from switching back and forth.
+        // The shares that were measured are listed with SpinCapOnEmpty in PortableThreadPool.WorkerThread.cs: the cells in
+        // which the cap was on all the time had shares from 0.69, the other cells had medians of 0.46 or lower, in single
+        // runs up to 0.62. The share is tracked also when the cap is off, which cost no measurable CPU per operation.
+        private const int SpinClaimShareOne = 1 << 16;
+        private const int SpinClaimShareShift = 8;
+        private const int SpinClaimShareHigh = SpinClaimShareOne * 55 / 100;
+        private const int SpinClaimShareLow = SpinClaimShareOne * 45 / 100;
+
         private CacheLineSeparatedCounts _separated;
+
+        // The share of spin claims that found no work and whether the spinner cap is on. Every spin claim writes them, so they
+        // have a cache line of their own, away from the counts and from the fields that are only read.
+        private CacheLineSeparatedSpinClaims _spinClaims;
 
         private readonly short _spinLimitUsec;
         private readonly short _spinWakeLatencyFactor;
@@ -117,6 +135,10 @@ namespace System.Threading
         // The time the wake that ended the last park of the thread was issued. Zero if there was none.
         [ThreadStatic]
         private static long t_lastWakeIssuedTimestamp;
+
+        // Set when the thread claims a signal while spinning, taken by the worker when it starts to dispatch.
+        [ThreadStatic]
+        private static bool t_claimedBySpin;
 
         // When we need to block threads we use a linked list of per-thread blockers.
         // When we need to wake a worker, we pop the topmost blocker and release it.
@@ -209,6 +231,58 @@ namespace System.Threading
 
             return WaitSlow(timeoutMs);
         }
+
+        // Estimates how many workers are spinning in WaitSlow, from the number of existing worker threads and the number
+        // of workers processing work. A worker that exists, is not processing work and is not registered as a waiter is
+        // spinning, or is on its way between spinning and waiting.
+        // The processing count includes a reservation for every unclaimed signal, because MaybeAddWorkingWorker raises it
+        // before any worker has claimed the signal. Those reservations are not busy workers, hence the added signal count.
+        // The counts are read at different times and a worker that moves between states can be counted twice or not at
+        // all, so the result is accurate to about one worker.
+        internal int EstimateSpinners(int numExistingThreads, int numProcessingWork)
+        {
+            Counts counts = _separated._counts;
+            return numExistingThreads - numProcessingWork - counts.WaiterCount + counts.SignalCount;
+        }
+
+        // Whether the signal that the calling thread claimed was claimed by spinning. The worker takes it when it starts to
+        // dispatch, so the flag does not outlive the claim.
+        internal static bool TakeSpinClaim()
+        {
+            bool claimedBySpin = t_claimedBySpin;
+            if (claimedBySpin)
+            {
+                t_claimedBySpin = false;
+            }
+
+            return claimedBySpin;
+        }
+
+        // Records whether the first dispatch of a worker that claimed its signal by spinning found no work. A lost update only
+        // makes the average slightly stale, so there is no synchronization, and nothing is written when the average does
+        // not change.
+        internal void RecordSpinClaimOutcome(bool empty)
+        {
+            int share = Volatile.Read(ref _spinClaims._emptyShare);
+            int updated = share + (((empty ? SpinClaimShareOne : 0) - share) >> SpinClaimShareShift);
+            if (updated != share)
+            {
+                Volatile.Write(ref _spinClaims._emptyShare, updated);
+            }
+
+            int capActive = Volatile.Read(ref _spinClaims._capActive);
+            if (capActive == 0 && updated >= SpinClaimShareHigh)
+            {
+                Volatile.Write(ref _spinClaims._capActive, 1);
+            }
+            else if (capActive != 0 && updated <= SpinClaimShareLow)
+            {
+                Volatile.Write(ref _spinClaims._capActive, 0);
+            }
+        }
+
+        // Whether most of the recent spin claims found no work, which is when the spinners are capped if the cap is on.
+        internal bool SpinCapActive => Volatile.Read(ref _spinClaims._capActive) != 0;
 
         // The spin limit without the feedback: the measured wake latency times the factor, or the fixed limit.
         private int FullSpinLimitUsec()
@@ -336,6 +410,7 @@ namespace System.Threading
                                 RecordSpinOutcome(hit: true);
                             }
 
+                            t_claimedBySpin = true;
                             return true;
                         }
                     }
@@ -811,6 +886,18 @@ namespace System.Threading
             /// <safety>The struct's single field is cache-line padded and overlaps nothing; Counts wraps only a ulong, so accessing it cannot forge a managed reference or read out of bounds.</safety>
             [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
             public safe Counts _counts;
+        }
+
+        [StructLayout(LayoutKind.Explicit, Size = 2 * PaddingHelpers.CACHE_LINE_SIZE)]
+        private struct CacheLineSeparatedSpinClaims
+        {
+            /// <safety>The fields are cache-line padded and overlap nothing; they are plain integers, so accessing them cannot forge a managed reference or read out of bounds.</safety>
+            [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
+            public safe int _emptyShare;
+
+            /// <safety>The fields overlap nothing and are plain integers, so accessing them cannot forge a managed reference or read out of bounds.</safety>
+            [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + sizeof(int))]
+            public safe int _capActive;
         }
     }
 }
