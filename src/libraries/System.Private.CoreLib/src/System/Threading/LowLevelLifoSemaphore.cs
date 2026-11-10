@@ -76,35 +76,10 @@ namespace System.Threading
 
         // A long-park wake is slow if it takes MinSpinLimitUsec, the shortest spin, or longer. When most of these wakes are
         // faster than that, keeping threads spinning to avoid a wake costs more CPU than the wake does, and more than a few
-        // spinners are not worth having. When many are slower, the spinners are what keeps work from waiting for a wake.
-        //
-        // The measure is the share of slow wakes rather than a mean latency. A mean is dominated by the rare very slow wakes,
-        // and clamping them to limit that brings the mean of a machine on which part of the wakes are slow close to the mean
-        // of a machine on which all are fast. The share counts each wake once, so rare extreme wakes cannot move it.
-        //
-        // The share is a moving average in fixed point, SlowWakeShareOne is every long-park wake slow. A wake has the weight
-        // of 1 / 2^SlowWakeShareShift, which makes the average follow the last few hundred wakes: a burst of slow wakes does
-        // not move it, and it still responds within a fraction of a second at the wake rate of a busy pool. It starts at
-        // one, so that the spinners are not limited until there is evidence.
-        private const int SlowWakeShareOne = 1 << 16;
-        private const int SlowWakeShareShift = 8;
-
-        // The switch that limits the spinners is one-sided. The limit saves CPU where the wakes are fast and costs throughput
-        // where they are slow, and over a short time the shares of the two kinds of machine are too close to tell them apart.
-        // The limit is therefore engaged only on sustained evidence: the share must stay below SlowWakeShareEngage for
-        // SpinLimitEngageSeconds, which is longer than the stretches in which the share of a machine with slow wakes dips
-        // below that level, and any update at or above it restarts the count. The limit is released at once when the share
-        // rises above SlowWakeShareRelease, because a limit that is wrong costs throughput while a saving that is missed
-        // costs only CPU. The engage level is lower than the release level, so that the share has to be clearly low to engage
-        // and clearly high to release. After a release the switch does not count for SpinLimitHoldOffSeconds. A machine on
-        // which the limit does not hold then has the limit for the short time that the average takes to respond, once per
-        // hold-off, instead of cycling between engaging and releasing.
-        private const int SlowWakeShareEngage = SlowWakeShareOne * 20 / 100;
-        private const int SlowWakeShareRelease = SlowWakeShareOne * 25 / 100;
-        private const int SpinLimitEngageSeconds = 2;
-        private const int SpinLimitHoldOffSeconds = 30;
-        private static readonly long s_spinLimitEngageTicks = SpinLimitEngageSeconds * Stopwatch.Frequency;
-        private static readonly long s_spinLimitHoldOffTicks = SpinLimitHoldOffSeconds * Stopwatch.Frequency;
+        // spinners are not worth having. When many are slower, the spinners are what keeps work from waiting for a wake. The
+        // share of slow wakes and the switch that it drives are in SpinLimitSwitch.
+        private static readonly long s_spinLimitEngageTicks = SpinLimitSwitch.EngageSeconds * Stopwatch.Frequency;
+        private static readonly long s_spinLimitHoldOffTicks = SpinLimitSwitch.HoldOffSeconds * Stopwatch.Frequency;
 
         // A spin that misses costs the whole limit, so spinning pays only while most spins catch an item. The semaphore
         // keeps a moving average of the outcomes of spins, the hit rate, and has two levels of spin limit: the full
@@ -159,15 +134,10 @@ namespace System.Threading
         // synchronization, a lost update only makes the estimate slightly stale.
         private long _wakeLatencyNs;
 
-        // The share of the long-park wakes that were slow, and the state of the switch that it drives (see
-        // UpdateSpinLimitSwitch): the time the share fell below the engage level, zero while it is not below, the time until
-        // which the switch does not count after a release, and whether the spinners are limited. They are written only when
-        // they change, without synchronization. A lost update only delays a switch, and a release repeats on the next update
-        // above the release level. They are tracked whenever wake times are recorded, whether or not the spinners are limited.
-        private int _slowWakeShare = SlowWakeShareOne;
-        private long _slowWakeBelowSince;
-        private long _spinLimitHoldOffUntil;
-        private int _spinLimitEngaged;
+        // The switch that limits the spinners. Every long-park wake writes its share of slow wakes, so it has a cache line of its
+        // own, away from the counts and from the fields that are only read. It is tracked whenever wake times are recorded,
+        // whether or not the spinners are limited.
+        private CacheLineSeparatedSpinLimit _spinLimit;
 
         // The hit rate of spins and whether the spin is at the minimum limit. They are written when spins end, without
         // synchronization, a lost update only makes them slightly stale. They are outside of _separated, so these writes
@@ -232,6 +202,7 @@ namespace System.Threading
         public LowLevelLifoSemaphore(Action onWait)
         {
             _separated = default;
+            _spinLimit._switch.Initialize();
             _onWait = onWait;
 
             _spinLimitUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
@@ -340,7 +311,7 @@ namespace System.Threading
 
         // Whether the spinners are limited because most of the recent wakes after long parks are fast, which is when the limit
         // is applied if SpinLimitOnFastWakes is on.
-        internal bool SpinLimitEngaged => Volatile.Read(ref _spinLimitEngaged) != 0;
+        internal bool SpinLimitEngaged => _spinLimit._switch.IsEngaged;
 
         // The spin limit without the feedback: the measured wake latency times the factor, or the fixed limit.
         private int FullSpinLimitUsec()
@@ -439,63 +410,7 @@ namespace System.Threading
             long parkUsec = (issued - waitStartTick) * 1_000_000 / Stopwatch.Frequency;
             if (parkUsec >= LongParkUsec && parkUsec < MaxLongParkUsec)
             {
-                RecordLongParkWake(now, ns);
-            }
-        }
-
-        // Records the wake latency of a worker that was woken at `timestamp` after a long park, and updates the switch.
-        private void RecordLongParkWake(long timestamp, long ns)
-        {
-            int share = Volatile.Read(ref _slowWakeShare);
-            int updated = share + ((((ns >= MinSpinLimitUsec * 1000L) ? SlowWakeShareOne : 0) - share) >> SlowWakeShareShift);
-            if (updated != share)
-            {
-                Volatile.Write(ref _slowWakeShare, updated);
-            }
-
-            UpdateSpinLimitSwitch(timestamp, updated);
-        }
-
-        // The whole switch: engage after the share has stayed below the engage level for the engage time, release at once when
-        // it rises above the release level, and do not count for the hold-off time after a release.
-        private void UpdateSpinLimitSwitch(long timestamp, int share)
-        {
-            if (Volatile.Read(ref _spinLimitEngaged) != 0)
-            {
-                if (share > SlowWakeShareRelease)
-                {
-                    Volatile.Write(ref _spinLimitEngaged, 0);
-                    Volatile.Write(ref _slowWakeBelowSince, 0);
-                    Volatile.Write(ref _spinLimitHoldOffUntil, timestamp + s_spinLimitHoldOffTicks);
-                }
-
-                return;
-            }
-
-            if (timestamp < Volatile.Read(ref _spinLimitHoldOffUntil))
-            {
-                return;
-            }
-
-            if (share > SlowWakeShareEngage)
-            {
-                if (Volatile.Read(ref _slowWakeBelowSince) != 0)
-                {
-                    Volatile.Write(ref _slowWakeBelowSince, 0);
-                }
-
-                return;
-            }
-
-            long since = Volatile.Read(ref _slowWakeBelowSince);
-            if (since == 0)
-            {
-                Volatile.Write(ref _slowWakeBelowSince, timestamp);
-            }
-            else if (timestamp - since >= s_spinLimitEngageTicks)
-            {
-                Volatile.Write(ref _spinLimitEngaged, 1);
-                Volatile.Write(ref _slowWakeBelowSince, 0);
+                _spinLimit._switch.RecordLongParkWake(now, ns >= MinSpinLimitUsec * 1000L, s_spinLimitEngageTicks, s_spinLimitHoldOffTicks);
             }
         }
 
@@ -1018,6 +933,14 @@ namespace System.Threading
             /// <safety>The fields overlap nothing and are plain integers, so accessing them cannot forge a managed reference or read out of bounds.</safety>
             [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + sizeof(int))]
             public safe int _capActive;
+        }
+
+        [StructLayout(LayoutKind.Explicit, Size = 2 * PaddingHelpers.CACHE_LINE_SIZE)]
+        private struct CacheLineSeparatedSpinLimit
+        {
+            /// <safety>The struct's single field is cache-line padded and overlaps nothing; SpinLimitSwitch holds only integers, so accessing it cannot forge a managed reference or read out of bounds.</safety>
+            [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
+            public safe SpinLimitSwitch _switch;
         }
     }
 }
