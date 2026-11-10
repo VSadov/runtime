@@ -18,6 +18,16 @@ namespace System.Threading
 
             private static readonly short SpuriousDispatchNoSpinThreshold = DetermineSpuriousDispatchNoSpinThreshold();
 
+            // Stopwatch ticks; -1 when the recency check is disabled.
+            private static readonly long SpuriousDispatchExternalWorkItemRecencyTicks = DetermineSpuriousDispatchExternalWorkItemRecencyTicks();
+
+            // Producers publish the external work item timestamp at most once per this many Stopwatch ticks to limit
+            // writes to the shared cache line, so the recency check may expire up to this much early.
+            // -1 when the recency check is disabled and producers do not need to publish anything.
+            internal static readonly long ExternalWorkItemTimestampGranularity =
+                SpuriousDispatchExternalWorkItemRecencyTicks < 0 ? -1 :
+                Math.Max(SpuriousDispatchExternalWorkItemRecencyTicks / 8, Stopwatch.Frequency / 100_000);
+
             // This value represents an assumption of how much uncommitted stack space a worker thread may use in the future.
             // Used in calculations to estimate when to throttle the rate of thread injection to reduce the possibility of
             // preexisting threads from running out of memory when using new stack space in low-memory situations.
@@ -46,13 +56,34 @@ namespace System.Threading
 
                 // After a recent external thread request, park an empty dispatch without spinning when more than
                 // this number of workers are still processing work. Set to 0 to park when at least one other worker
-                // is processing work. Without a recent external request, empty dispatches park at any worker count.
+                // is processing work. With the recency check enabled, empty dispatches without a recent external
+                // request park at any worker count.
                 short threshold =
                     AppContextConfigHelper.GetInt16Config(
                         "System.Threading.ThreadPool.SpuriousDispatchNoSpinThreshold",
                         "DOTNET_ThreadPool_SpuriousDispatchNoSpinThreshold",
                         DefaultSpuriousDispatchNoSpinThreshold);
                 return threshold >= 0 ? threshold : DefaultSpuriousDispatchNoSpinThreshold;
+            }
+
+            private static long DetermineSpuriousDispatchExternalWorkItemRecencyTicks()
+            {
+                const int DefaultRecencyUsec = 250;
+
+                // This window, in microseconds, controls spinning after a spurious dispatch: within this long after an
+                // external work item is observed, a spurious dispatch spins before parking.
+                // Set to -1 to disable the recency check and retain only the processing-worker threshold.
+                int recencyUsec =
+                    AppContextConfigHelper.GetInt32Config(
+                        "System.Threading.ThreadPool.SpuriousDispatchExternalWorkItemRecencyUsec",
+                        "DOTNET_ThreadPool_SpuriousDispatchExternalWorkItemRecencyUsec",
+                        DefaultRecencyUsec);
+                if (recencyUsec < -1)
+                {
+                    recencyUsec = DefaultRecencyUsec;
+                }
+
+                return recencyUsec < 0 ? -1 : Stopwatch.Frequency * recencyUsec / 1_000_000;
             }
 
             /// <summary>
@@ -191,12 +222,12 @@ namespace System.Threading
                 // imply that another poller is useful. Preserve polling capacity for recent external producers,
                 // which can introduce another burst after the queues drain. For work produced entirely by
                 // workers, park empty dispatches promptly instead of competing with the productive workers.
-                // This worker refreshed dispatch progress before its empty scan, so reuse that clock sample.
-                // An older sample conservatively defers parking; a later external request is still considered recent.
+                // The clock is read only on this path, after an empty dispatch. A timestamp published after the
+                // clock read gives a negative difference, which counts as recent.
                 return spurious && (numProcessingWork > SpuriousDispatchNoSpinThreshold ||
-                        (Volatile.Read(ref threadPoolInstance._separated.lastDispatchTime) -
-                         Volatile.Read(ref threadPoolInstance._separated.lastExternalWorkItemTimeMs))
-                            > (int)ThreadPoolWorkQueue.DispatchQuantumMs);
+                        (SpuriousDispatchExternalWorkItemRecencyTicks >= 0 &&
+                         Stopwatch.GetTimestamp() - Volatile.Read(ref threadPoolInstance._separated.lastExternalWorkItemTimestamp)
+                            > SpuriousDispatchExternalWorkItemRecencyTicks));
             }
 
             // returns true if the worker is shutting down

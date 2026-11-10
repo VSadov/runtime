@@ -69,6 +69,12 @@ namespace System.Threading
         internal static bool NotifyWorkItemComplete(ThreadInt64PersistentCounter.ThreadLocalNode threadLocalCompletionCountNode, int currentTimeMs) =>
             PortableThreadPool.ThreadPoolInstance.NotifyWorkItemComplete(threadLocalCompletionCountNode, currentTimeMs);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void NotifyExternalWorkItemQueued()
+        {
+            PortableThreadPool.ThreadPoolInstance.NotifyExternalWorkItemQueued();
+        }
+
         /// <summary>
         /// This method is called to request a new thread pool worker to handle pending work.
         /// </summary>
