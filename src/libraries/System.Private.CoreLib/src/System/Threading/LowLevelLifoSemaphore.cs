@@ -66,7 +66,13 @@ namespace System.Threading
         // park the processor has not gone idle yet and the wake is fast on every machine, so only the wakes after a park of
         // LongParkUsec or longer are used. A park of about a millisecond is long enough for a processor to enter a deep idle
         // state.
+        //
+        // Parks of MaxLongParkUsec or longer are left out. A park that long means that the pool ran out of work. When work comes
+        // back, the workers that were parked through the pause wake together, from processors that have been idle all along.
+        // Those wakes are slower than the others on every machine, and as a burst they would release the switch below whenever
+        // the load resumes after a pause.
         private const int LongParkUsec = 1024;
+        private const int MaxLongParkUsec = 64 * LongParkUsec;
 
         // A long-park wake is slow if it takes MinSpinLimitUsec, the shortest spin, or longer. When most of these wakes are
         // faster than that, keeping threads spinning to avoid a wake costs more CPU than the wake does, and more than a few
@@ -430,7 +436,8 @@ namespace System.Threading
             }
 
             // The park lasted from the start of the wait to the wake being issued.
-            if ((issued - waitStartTick) * 1_000_000 / Stopwatch.Frequency >= LongParkUsec)
+            long parkUsec = (issued - waitStartTick) * 1_000_000 / Stopwatch.Frequency;
+            if (parkUsec >= LongParkUsec && parkUsec < MaxLongParkUsec)
             {
                 RecordLongParkWake(now, ns);
             }
