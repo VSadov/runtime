@@ -62,6 +62,44 @@ namespace System.Threading
         // samples, which vary several-fold with the idle state of the woken processor.
         private const int WakeLatencyAverageShift = 3;
 
+        // A thread that wakes after a long park shows how fast the machine wakes a processor that has gone idle. After a short
+        // park the processor has not gone idle yet and the wake is fast on every machine, so only the wakes after a park of
+        // LongParkUsec or longer are used. A park of about a millisecond is long enough for a processor to enter a deep idle
+        // state.
+        private const int LongParkUsec = 1024;
+
+        // A long-park wake is slow if it takes MinSpinLimitUsec, the shortest spin, or longer. When most of these wakes are
+        // faster than that, keeping threads spinning to avoid a wake costs more CPU than the wake does, and more than a few
+        // spinners are not worth having. When many are slower, the spinners are what keeps work from waiting for a wake.
+        //
+        // The measure is the share of slow wakes rather than a mean latency. A mean is dominated by the rare very slow wakes,
+        // and clamping them to limit that brings the mean of a machine on which part of the wakes are slow close to the mean
+        // of a machine on which all are fast. The share counts each wake once, so rare extreme wakes cannot move it.
+        //
+        // The share is a moving average in fixed point, SlowWakeShareOne is every long-park wake slow. A wake has the weight
+        // of 1 / 2^SlowWakeShareShift, which makes the average follow the last few hundred wakes: a burst of slow wakes does
+        // not move it, and it still responds within a fraction of a second at the wake rate of a busy pool. It starts at
+        // one, so that the spinners are not limited until there is evidence.
+        private const int SlowWakeShareOne = 1 << 16;
+        private const int SlowWakeShareShift = 8;
+
+        // The switch that limits the spinners is one-sided. The limit saves CPU where the wakes are fast and costs throughput
+        // where they are slow, and over a short time the shares of the two kinds of machine are too close to tell them apart.
+        // The limit is therefore engaged only on sustained evidence: the share must stay below SlowWakeShareEngage for
+        // SpinLimitEngageSeconds, which is longer than the stretches in which the share of a machine with slow wakes dips
+        // below that level, and any update at or above it restarts the count. The limit is released at once when the share
+        // rises above SlowWakeShareRelease, because a limit that is wrong costs throughput while a saving that is missed
+        // costs only CPU. The engage level is lower than the release level, so that the share has to be clearly low to engage
+        // and clearly high to release. After a release the switch does not count for SpinLimitHoldOffSeconds. A machine on
+        // which the limit does not hold then has the limit for the short time that the average takes to respond, once per
+        // hold-off, instead of cycling between engaging and releasing.
+        private const int SlowWakeShareEngage = SlowWakeShareOne * 20 / 100;
+        private const int SlowWakeShareRelease = SlowWakeShareOne * 25 / 100;
+        private const int SpinLimitEngageSeconds = 2;
+        private const int SpinLimitHoldOffSeconds = 30;
+        private static readonly long s_spinLimitEngageTicks = SpinLimitEngageSeconds * Stopwatch.Frequency;
+        private static readonly long s_spinLimitHoldOffTicks = SpinLimitHoldOffSeconds * Stopwatch.Frequency;
+
         // A spin that misses costs the whole limit, so spinning pays only while most spins catch an item. The semaphore
         // keeps a moving average of the outcomes of spins, the hit rate, and has two levels of spin limit: the full
         // limit, which is the limit the spin would have without the feedback, and the minimum limit while the hit rate
@@ -114,6 +152,16 @@ namespace System.Threading
         // Moving average of the time from issuing an OS wake to the woken thread running. Written without
         // synchronization, a lost update only makes the estimate slightly stale.
         private long _wakeLatencyNs;
+
+        // The share of the long-park wakes that were slow, and the state of the switch that it drives (see
+        // UpdateSpinLimitSwitch): the time the share fell below the engage level, zero while it is not below, the time until
+        // which the switch does not count after a release, and whether the spinners are limited. They are written only when
+        // they change, without synchronization. A lost update only delays a switch, and a release repeats on the next update
+        // above the release level. They are tracked whenever wake times are recorded, whether or not the spinners are limited.
+        private int _slowWakeShare = SlowWakeShareOne;
+        private long _slowWakeBelowSince;
+        private long _spinLimitHoldOffUntil;
+        private int _spinLimitEngaged;
 
         // The hit rate of spins and whether the spin is at the minimum limit. They are written when spins end, without
         // synchronization, a lost update only makes them slightly stale. They are outside of _separated, so these writes
@@ -284,6 +332,10 @@ namespace System.Threading
         // Whether most of the recent spin claims found no work, which is when the spinners are capped if the cap is on.
         internal bool SpinCapActive => Volatile.Read(ref _spinClaims._capActive) != 0;
 
+        // Whether the spinners are limited because most of the recent wakes after long parks are fast, which is when the limit
+        // is applied if SpinLimitOnFastWakes is on.
+        internal bool SpinLimitEngaged => Volatile.Read(ref _spinLimitEngaged) != 0;
+
         // The spin limit without the feedback: the measured wake latency times the factor, or the fixed limit.
         private int FullSpinLimitUsec()
         {
@@ -345,7 +397,7 @@ namespace System.Threading
             RecordSpinOutcome(arrivalUsec <= FullSpinLimitUsec());
         }
 
-        private void RecordWakeLatency(LifoBlockerNode node)
+        private void RecordWakeLatency(LifoBlockerNode node, long waitStartTick)
         {
             long issued = node._wakeIssuedTimestamp;
             t_lastWakeIssuedTimestamp = issued;
@@ -355,12 +407,8 @@ namespace System.Threading
             }
 
             node._wakeIssuedTimestamp = 0;
-            if (_spinWakeLatencyFactor == 0)
-            {
-                return;
-            }
-
-            long ns = (Stopwatch.GetTimestamp() - issued) * 1_000_000_000 / Stopwatch.Frequency;
+            long now = Stopwatch.GetTimestamp();
+            long ns = (now - issued) * 1_000_000_000 / Stopwatch.Frequency;
 
             // Under 2 us the thread did not really park, for example it woke itself.
             if (ns < 2_000)
@@ -368,15 +416,80 @@ namespace System.Threading
                 return;
             }
 
-            // The spin limit is at its maximum once the average reaches _spinLimitUsec / factor, so larger samples carry
-            // no further information. Clamping keeps a single outlier, such as a preempted thread, from holding the
-            // limit at the maximum for dozens of wakes: with a true latency of 10 us, one 4 ms sample would take 42
-            // wakes to bring the average back to 12 us (a limit of 72 us, 20% above the steady 60 us), versus 6 when
-            // clamped.
-            ns = Math.Min(ns, _spinLimitUsec * 1000L / _spinWakeLatencyFactor);
+            if (_spinWakeLatencyFactor != 0)
+            {
+                // The spin limit is at its maximum once the average reaches _spinLimitUsec / factor, so larger samples carry
+                // no further information. Clamping keeps a single outlier, such as a preempted thread, from holding the
+                // limit at the maximum for dozens of wakes: with a true latency of 10 us, one 4 ms sample would take 42
+                // wakes to bring the average back to 12 us (a limit of 72 us, 20% above the steady 60 us), versus 6 when
+                // clamped.
+                long sample = Math.Min(ns, _spinLimitUsec * 1000L / _spinWakeLatencyFactor);
 
-            long average = Volatile.Read(ref _wakeLatencyNs);
-            Volatile.Write(ref _wakeLatencyNs, average + ((ns - average) >> WakeLatencyAverageShift));
+                long average = Volatile.Read(ref _wakeLatencyNs);
+                Volatile.Write(ref _wakeLatencyNs, average + ((sample - average) >> WakeLatencyAverageShift));
+            }
+
+            // The park lasted from the start of the wait to the wake being issued.
+            if ((issued - waitStartTick) * 1_000_000 / Stopwatch.Frequency >= LongParkUsec)
+            {
+                RecordLongParkWake(now, ns);
+            }
+        }
+
+        // Records the wake latency of a worker that was woken at `timestamp` after a long park, and updates the switch.
+        private void RecordLongParkWake(long timestamp, long ns)
+        {
+            int share = Volatile.Read(ref _slowWakeShare);
+            int updated = share + ((((ns >= MinSpinLimitUsec * 1000L) ? SlowWakeShareOne : 0) - share) >> SlowWakeShareShift);
+            if (updated != share)
+            {
+                Volatile.Write(ref _slowWakeShare, updated);
+            }
+
+            UpdateSpinLimitSwitch(timestamp, updated);
+        }
+
+        // The whole switch: engage after the share has stayed below the engage level for the engage time, release at once when
+        // it rises above the release level, and do not count for the hold-off time after a release.
+        private void UpdateSpinLimitSwitch(long timestamp, int share)
+        {
+            if (Volatile.Read(ref _spinLimitEngaged) != 0)
+            {
+                if (share > SlowWakeShareRelease)
+                {
+                    Volatile.Write(ref _spinLimitEngaged, 0);
+                    Volatile.Write(ref _slowWakeBelowSince, 0);
+                    Volatile.Write(ref _spinLimitHoldOffUntil, timestamp + s_spinLimitHoldOffTicks);
+                }
+
+                return;
+            }
+
+            if (timestamp < Volatile.Read(ref _spinLimitHoldOffUntil))
+            {
+                return;
+            }
+
+            if (share > SlowWakeShareEngage)
+            {
+                if (Volatile.Read(ref _slowWakeBelowSince) != 0)
+                {
+                    Volatile.Write(ref _slowWakeBelowSince, 0);
+                }
+
+                return;
+            }
+
+            long since = Volatile.Read(ref _slowWakeBelowSince);
+            if (since == 0)
+            {
+                Volatile.Write(ref _slowWakeBelowSince, timestamp);
+            }
+            else if (timestamp - since >= s_spinLimitEngageTicks)
+            {
+                Volatile.Write(ref _spinLimitEngaged, 1);
+                Volatile.Write(ref _slowWakeBelowSince, 0);
+            }
         }
 
         private bool WaitSlow(int timeoutMs)
@@ -510,7 +623,7 @@ namespace System.Threading
                 // We do not need to reduce the timeout after spurious wakes as that will only result
                 // in workers that are woken spuriously to eventually exit and be replaced by new workers.
                 t_lastWakeIssuedTimestamp = 0;
-                if (!Block(timeoutMs))
+                if (!Block(timeoutMs, waitStartTick))
                 {
                     t_missedSpinLimitUsec = 0;
 
@@ -590,7 +703,7 @@ namespace System.Threading
             MaybeWakeWaiter(counts);
         }
 
-        private bool Block(int timeoutMs)
+        private bool Block(int timeoutMs, long waitStartTick)
         {
             Debug.Assert(timeoutMs >= -1);
 
@@ -660,7 +773,7 @@ namespace System.Threading
 
                     if (_recordWakeTimes)
                     {
-                        RecordWakeLatency(blockerNode);
+                        RecordWakeLatency(blockerNode, waitStartTick);
                     }
                 }
                 finally
