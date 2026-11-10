@@ -23,19 +23,9 @@ namespace System.Threading
             private static readonly short SpuriousDispatchSpinnerLimit = DetermineSpuriousDispatchSpinnerLimit();
 
             // While most of the recent spin claims find no work (see LowLevelLifoSemaphore.SpinCapActive), the limit above
-            // is SpinCapSpinners when it is not set. On by default, SpinCapOnEmpty=0 turns it off.
-            //
-            // What the cap and the two thresholds of LowLevelLifoSemaphore (SpinClaimShareHigh, SpinClaimShareLow) rest on, from
-            // the measurements of this change. The share is that of the spin claims whose first dispatch found no work:
-            // - Mix cells (an async chain next to an external producer): shares of 0.69-0.79, with the cap on for the whole
-            //   window and no switching. The cap cut the CPU per chain operation by 13-76% on WSL and by 21-60% on Windows.
-            // - WSL async cells: medians of 0.36-0.46, single runs from 0.29 to 0.62. With the cap on, it was on for at most a
-            //   quarter of a window; without it the flag was on for the whole window in one run of the state-machine chain.
-            // - Windows JSON 16/16: 0.30. Windows WS 16/24: 0.24.
-            // - Every other cell that was measured: a median of 0.19 or lower.
-            // A static limit of SpinCapSpinners (SpuriousDispatchSpinnerLimit=2) also saved CPU in cells whose share stayed below
-            // SpinClaimShareHigh: Windows JSON 16/16, Windows WS 16/24, the 4-chain mix and the async state-machine chain. The
-            // cap does not engage there.
+            // is SpinCapSpinners when it is not set. On by default, SpinCapOnEmpty=0 turns it off. The cap follows the share
+            // instead of being a fixed limit, because a fixed limit also holds back the spinners of workloads in which they
+            // do find work, and costs those workloads throughput or latency.
             private static readonly bool SpinCapOnEmpty = DetermineSpinCapOnEmpty();
 
             // While most of the wakes after long parks are fast (see LowLevelLifoSemaphore.SpinLimitEngaged), the limit above is
@@ -113,16 +103,16 @@ namespace System.Threading
             }
 
             private static bool DetermineSpinCapOnEmpty() =>
-                AppContextConfigHelper.GetInt16Config(
+                AppContextConfigHelper.GetBooleanConfig(
                     "System.Threading.ThreadPool.SpinCapOnEmpty",
                     "DOTNET_ThreadPool_SpinCapOnEmpty",
-                    1) != 0;
+                    defaultValue: true);
 
             private static bool DetermineSpinLimitOnFastWakes() =>
-                AppContextConfigHelper.GetInt16Config(
+                AppContextConfigHelper.GetBooleanConfig(
                     "System.Threading.ThreadPool.SpinLimitOnFastWakes",
                     "DOTNET_ThreadPool_SpinLimitOnFastWakes",
-                    1) != 0;
+                    defaultValue: true);
 
             private static long DetermineSpuriousDispatchExternalWorkItemRecencyTicks()
             {
@@ -261,9 +251,10 @@ namespace System.Threading
                             case ThreadPoolWorkQueue.DispatchResult.ShouldStop:
                                 // We are above goal and this worker is already removed in the counts.
                                 // Chances to be invited back right away are low, so just park.
+                                // Dispatch stops only after it ran a work item, so the claim led to work.
                                 if (claimedBySpin)
                                 {
-                                    s_semaphore.RecordSpinClaimOutcome(empty: true);
+                                    s_semaphore.RecordSpinClaimOutcome(empty: false);
                                 }
 
                                 return true;

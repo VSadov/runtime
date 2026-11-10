@@ -103,11 +103,12 @@ namespace System.Threading
                 }
                 else if (timestamp - above >= releaseTicks)
                 {
-                    // Both counts are cleared on a switch, in case an update that raced with the previous switch left one set.
+                    // The hold-off is written before the flag, so that an update that sees the switch released also sees the
+                    // hold-off. Both counts are cleared on a switch, in case an update that raced with it left one set.
+                    Volatile.Write(ref _holdOffUntil, timestamp + holdOffTicks);
                     Volatile.Write(ref _engaged, 0);
                     Volatile.Write(ref _aboveSince, 0);
                     Volatile.Write(ref _belowSince, 0);
-                    Volatile.Write(ref _holdOffUntil, timestamp + holdOffTicks);
                 }
 
                 return;

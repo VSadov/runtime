@@ -49,7 +49,7 @@ namespace System.Threading
         // band the extra CPU per us of latency saved is about the factor itself (3 to 5: 4.7-5.6; 5 to 6: 5.5-6). The
         // factor is therefore an exchange rate between CPU and latency rather than a value the measurements determine.
         // 6 was chosen: compared with 5 it brings the mean latency at 200-220 us arrival periods from 22-35 us down to
-        // 4-6 us for 4-8% more CPU, and it costs up to 2.5x the CPU of not spinning at arrival periods around 300 us.
+        // 4-6 us for 4-9% more CPU, and it costs up to 2.5x the CPU of not spinning at arrival periods around 300 us.
         private const int DefaultSpinWakeLatencyFactor = 6;
 
         // The lower bound of the spin: a few times the cost of a park and unpark pair of system calls (on the order
@@ -114,9 +114,8 @@ namespace System.Threading
         // find nothing the spinners are mostly waiting for work that other workers hand to each other in turn, and more
         // than a few of them only burn CPU: the share going to SpinClaimShareHigh or above turns the spinner cap on, and
         // it is turned off again at SpinClaimShareLow or below. The gap keeps the cap from switching back and forth.
-        // The shares that were measured are listed with SpinCapOnEmpty in PortableThreadPool.WorkerThread.cs: the cells in
-        // which the cap was on all the time had shares from 0.69, the other cells had medians of 0.46 or lower, in single
-        // runs up to 0.62. The share is tracked also when the cap is off, which cost no measurable CPU per operation.
+        // The levels sit around one half, so that the cap is on only while finding nothing is the usual outcome of a spin
+        // claim. The share is tracked also when the cap is off, so that the setting changes only the decision.
         private const int SpinClaimShareOne = 1 << 16;
         private const int SpinClaimShareShift = 8;
         private const int SpinClaimShareHigh = SpinClaimShareOne * 55 / 100;
@@ -371,9 +370,15 @@ namespace System.Threading
             }
 
             long idleTicks = Math.Max(0, issued - waitStartTick);
-            long arrivalUsec = usedUsec + idleTicks * 1_000_000 / Stopwatch.Frequency;
+            long arrivalUsec = usedUsec + ToUnits(idleTicks, 1_000_000);
             RecordSpinOutcome(arrivalUsec <= FullSpinLimitUsec());
         }
+
+        // Converts a Stopwatch interval to units of 1 / unitsPerSecond, with the interval capped at one second. Every limit
+        // that wakes and parks are compared with is far below a second, and the cap keeps the product from overflowing
+        // when a wake or a park takes very long, for example while the process is suspended.
+        private static long ToUnits(long ticks, long unitsPerSecond) =>
+            Math.Min(ticks, Stopwatch.Frequency) * unitsPerSecond / Stopwatch.Frequency;
 
         private void RecordWakeLatency(LifoBlockerNode node, long waitStartTick)
         {
@@ -386,7 +391,7 @@ namespace System.Threading
 
             node._wakeIssuedTimestamp = 0;
             long now = Stopwatch.GetTimestamp();
-            long ns = (now - issued) * 1_000_000_000 / Stopwatch.Frequency;
+            long ns = ToUnits(now - issued, 1_000_000_000);
 
             // Under 2 us the thread did not really park, for example it woke itself.
             if (ns < 2_000)
@@ -408,7 +413,7 @@ namespace System.Threading
             }
 
             // The park lasted from the start of the wait to the wake being issued.
-            long parkUsec = (issued - waitStartTick) * 1_000_000 / Stopwatch.Frequency;
+            long parkUsec = ToUnits(issued - waitStartTick, 1_000_000);
             if (parkUsec >= LongParkUsec && parkUsec < MaxLongParkUsec)
             {
                 _spinLimit._switch.RecordLongParkWake(now, ns >= MinSpinLimitUsec * 1000L, s_spinLimitEngageTicks, s_spinLimitReleaseTicks, s_spinLimitHoldOffTicks);
@@ -453,9 +458,10 @@ namespace System.Threading
                 }
                 while (Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
 
-                if (_spinFeedback)
+                if (_spinFeedback && timeoutMs != 0)
                 {
-                    // The outcome is decided when the park ends, see RecordMissedSpinOutcome.
+                    // The outcome is decided when the park ends, see RecordMissedSpinOutcome. A wait with a timeout of 0 returns
+                    // without parking, and then no wake tells the outcome.
                     t_missedSpinLimitUsec = spinLimitUsec;
                 }
             }
@@ -936,7 +942,9 @@ namespace System.Threading
             public safe int _capActive;
         }
 
-        [StructLayout(LayoutKind.Explicit, Size = 2 * PaddingHelpers.CACHE_LINE_SIZE)]
+        // The switch is larger than the other padded fields, so it gets a whole cache line of padding after it as well as before
+        // it, whatever the alignment of the object.
+        [StructLayout(LayoutKind.Explicit, Size = 3 * PaddingHelpers.CACHE_LINE_SIZE)]
         private struct CacheLineSeparatedSpinLimit
         {
             /// <safety>The struct's single field is cache-line padded and overlaps nothing; SpinLimitSwitch holds only integers, so accessing it cannot forge a managed reference or read out of bounds.</safety>
