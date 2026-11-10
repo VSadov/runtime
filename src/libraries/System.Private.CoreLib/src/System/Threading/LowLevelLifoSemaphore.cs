@@ -79,6 +79,7 @@ namespace System.Threading
         // spinners are not worth having. When many are slower, the spinners are what keeps work from waiting for a wake. The
         // share of slow wakes and the switch that it drives are in SpinLimitSwitch.
         private static readonly long s_spinLimitEngageTicks = SpinLimitSwitch.EngageSeconds * Stopwatch.Frequency;
+        private static readonly long s_spinLimitReleaseTicks = SpinLimitSwitch.ReleaseSeconds * Stopwatch.Frequency;
         private static readonly long s_spinLimitHoldOffTicks = SpinLimitSwitch.HoldOffSeconds * Stopwatch.Frequency;
 
         // A spin that misses costs the whole limit, so spinning pays only while most spins catch an item. The semaphore
@@ -410,7 +411,7 @@ namespace System.Threading
             long parkUsec = (issued - waitStartTick) * 1_000_000 / Stopwatch.Frequency;
             if (parkUsec >= LongParkUsec && parkUsec < MaxLongParkUsec)
             {
-                _spinLimit._switch.RecordLongParkWake(now, ns >= MinSpinLimitUsec * 1000L, s_spinLimitEngageTicks, s_spinLimitHoldOffTicks);
+                _spinLimit._switch.RecordLongParkWake(now, ns >= MinSpinLimitUsec * 1000L, s_spinLimitEngageTicks, s_spinLimitReleaseTicks, s_spinLimitHoldOffTicks);
             }
         }
 

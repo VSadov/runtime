@@ -23,24 +23,32 @@ namespace System.Threading
         // The switch is one-sided. The limit saves CPU where the wakes are fast and costs throughput where they are slow, and over a
         // short time the shares of the two kinds of machine are too close to tell them apart. The limit is therefore engaged only on
         // sustained evidence: the share must stay at or below SlowWakeShareEngage for EngageSeconds, which is longer than the stretches
-        // in which the share of a machine with slow wakes dips below that level, and any update above it restarts the count. The limit
-        // is released at once when the share rises above SlowWakeShareRelease, because a limit that is wrong costs throughput while a
-        // saving that is missed costs only CPU. The engage level is lower than the release level, so that the share has to be clearly
-        // low to engage and clearly high to release. After a release the switch does not count for HoldOffSeconds. A machine on which
-        // the limit does not hold then has the limit for the short time that the average takes to respond, once per hold-off, instead
-        // of cycling between engaging and releasing.
+        // in which the share of a machine with slow wakes dips below that level, and any update above it restarts the count. The engage
+        // level is lower than the release level, so that the share has to be clearly low to engage and clearly high to release.
+        //
+        // The limit is released when the share has stayed above SlowWakeShareRelease for ReleaseSeconds. When work resumes after an
+        // idle period, the cores wake from deep idle states and the first wakes are slow on any machine. That burst lifts the share
+        // above the release level for a fraction of a second, so a release at once would drop the limit at every resumption on the
+        // machines where it saves the most. The release time is shorter than the engage time, because a limit that is wrong costs
+        // throughput while a saving that is missed costs only CPU.
+        //
+        // After a release the switch does not count for HoldOffSeconds. A machine on which the limit does not hold then has the limit
+        // for the short time that the average takes to respond, once per hold-off, instead of cycling between engaging and releasing.
         internal const int SlowWakeShareEngage = SlowWakeShareOne * 20 / 100;
         internal const int SlowWakeShareRelease = SlowWakeShareOne * 25 / 100;
         internal const int EngageSeconds = 2;
+        internal const int ReleaseSeconds = 1;
         internal const int HoldOffSeconds = 30;
 
-        // The fields are written only when they change, without synchronization. A lost update only delays a switch, and a release
-        // repeats on the next update above the release level.
+        // The fields are written only when they change, without synchronization. A lost update only delays a switch.
         private int _slowWakeShare;
         private int _engaged;
 
-        // The time the share fell to the engage level or below, zero while it is above.
+        // While released, the time the share fell to the engage level or below, zero while it is above.
         private long _belowSince;
+
+        // While engaged, the time the share rose above the release level, zero while it is at or below.
+        private long _aboveSince;
 
         // The time until which the switch does not count after a release.
         private long _holdOffUntil;
@@ -51,6 +59,7 @@ namespace System.Threading
             _slowWakeShare = SlowWakeShareOne;
             _engaged = 0;
             _belowSince = 0;
+            _aboveSince = 0;
             _holdOffUntil = 0;
         }
 
@@ -64,8 +73,9 @@ namespace System.Threading
         /// <param name="timestamp">The time of the wake. It must not be zero.</param>
         /// <param name="slow">Whether the wake took the shortest spin or longer.</param>
         /// <param name="engageTicks">The engage time in the units of <paramref name="timestamp"/>.</param>
+        /// <param name="releaseTicks">The release time in the units of <paramref name="timestamp"/>.</param>
         /// <param name="holdOffTicks">The hold-off time in the units of <paramref name="timestamp"/>.</param>
-        public void RecordLongParkWake(long timestamp, bool slow, long engageTicks, long holdOffTicks)
+        public void RecordLongParkWake(long timestamp, bool slow, long engageTicks, long releaseTicks, long holdOffTicks)
         {
             int share = Volatile.Read(ref _slowWakeShare);
             int updated = share + (((slow ? SlowWakeShareOne : 0) - share) >> SlowWakeShareShift);
@@ -76,9 +86,26 @@ namespace System.Threading
 
             if (Volatile.Read(ref _engaged) != 0)
             {
-                if (updated > SlowWakeShareRelease)
+                if (updated <= SlowWakeShareRelease)
                 {
+                    if (Volatile.Read(ref _aboveSince) != 0)
+                    {
+                        Volatile.Write(ref _aboveSince, 0);
+                    }
+
+                    return;
+                }
+
+                long above = Volatile.Read(ref _aboveSince);
+                if (above == 0)
+                {
+                    Volatile.Write(ref _aboveSince, timestamp);
+                }
+                else if (timestamp - above >= releaseTicks)
+                {
+                    // Both counts are cleared on a switch, in case an update that raced with the previous switch left one set.
                     Volatile.Write(ref _engaged, 0);
+                    Volatile.Write(ref _aboveSince, 0);
                     Volatile.Write(ref _belowSince, 0);
                     Volatile.Write(ref _holdOffUntil, timestamp + holdOffTicks);
                 }
@@ -110,6 +137,7 @@ namespace System.Threading
             {
                 Volatile.Write(ref _engaged, 1);
                 Volatile.Write(ref _belowSince, 0);
+                Volatile.Write(ref _aboveSince, 0);
             }
         }
     }

@@ -10,6 +10,7 @@ namespace System.Threading.ThreadPools.Tests
     public static class SpinLimitSwitchTests
     {
         private const long EngageTicks = 2_000;
+        private const long ReleaseTicks = 1_000;
         private const long HoldOffTicks = 30_000;
         private const int One = SpinLimitSwitch.SlowWakeShareOne;
 
@@ -21,7 +22,7 @@ namespace System.Threading.ThreadPools.Tests
         }
 
         private static void Record(ref SpinLimitSwitch spinLimit, long timestamp, bool slow) =>
-            spinLimit.RecordLongParkWake(timestamp, slow, EngageTicks, HoldOffTicks);
+            spinLimit.RecordLongParkWake(timestamp, slow, EngageTicks, ReleaseTicks, HoldOffTicks);
 
         // Fast wakes one tick apart after `from` until the share is at the engage level or below; returns the time of the last one,
         // which is when the count of the switch starts.
@@ -102,16 +103,58 @@ namespace System.Threading.ThreadPools.Tests
             Assert.True(spinLimit.IsEngaged);
         }
 
-        [Fact]
-        public static void ReleasesAtOnceWhenTheShareRisesAboveTheReleaseLevel()
+        // Slow wakes one tick apart after `from` until the share is above the release level; returns the time of the last one,
+        // which is when the release count of an engaged switch starts.
+        private static long FeedSlowUntilHigh(ref SpinLimitSwitch spinLimit, long from)
         {
-            SpinLimitSwitch spinLimit = CreateEngagedSwitch(out long timestamp);
+            long timestamp = from;
             while (spinLimit.SlowWakeShare <= SpinLimitSwitch.SlowWakeShareRelease)
             {
-                Assert.True(spinLimit.IsEngaged);
                 Record(ref spinLimit, ++timestamp, slow: true);
             }
 
+            return timestamp;
+        }
+
+        [Fact]
+        public static void ReleasesWhenTheShareHasStayedHighForTheReleaseTime()
+        {
+            SpinLimitSwitch spinLimit = CreateEngagedSwitch(out long timestamp);
+            long since = FeedSlowUntilHigh(ref spinLimit, timestamp);
+            Assert.True(spinLimit.IsEngaged);
+
+            Record(ref spinLimit, since + ReleaseTicks - 1, slow: true);
+            Assert.True(spinLimit.IsEngaged);
+
+            Record(ref spinLimit, since + ReleaseTicks, slow: true);
+            Assert.False(spinLimit.IsEngaged);
+        }
+
+        [Fact]
+        public static void ABriefRiseAboveTheReleaseLevelDoesNotRelease()
+        {
+            SpinLimitSwitch spinLimit = CreateEngagedSwitch(out long timestamp);
+
+            // A burst of slow wakes, as when work resumes after an idle period, lifts the share above the release level, and the
+            // fast wakes that follow bring it back down before the release time; that restarts the count.
+            long since = FeedSlowUntilHigh(ref spinLimit, timestamp);
+            timestamp = since;
+            while (spinLimit.SlowWakeShare > SpinLimitSwitch.SlowWakeShareRelease)
+            {
+                Record(ref spinLimit, ++timestamp, slow: false);
+            }
+
+            Assert.True(timestamp - since < ReleaseTicks);
+            Assert.True(spinLimit.IsEngaged);
+
+            // Counted from the first rise, the switch would release here.
+            long restart = FeedSlowUntilHigh(ref spinLimit, since + ReleaseTicks);
+            Assert.True(spinLimit.IsEngaged);
+
+            Record(ref spinLimit, restart + ReleaseTicks - 1, slow: true);
+            Assert.True(spinLimit.IsEngaged);
+
+            Record(ref spinLimit, restart + ReleaseTicks, slow: true);
             Assert.False(spinLimit.IsEngaged);
         }
 
