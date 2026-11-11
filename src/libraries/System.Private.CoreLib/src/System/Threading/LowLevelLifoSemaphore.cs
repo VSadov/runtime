@@ -41,16 +41,18 @@ namespace System.Threading
         // spent to avoid one wake. Spinning for as long as one wake takes is never more than twice as expensive as the
         // best choice, whatever the arrival pattern. The factor is larger than 1 because arrivals are bursty (an item is
         // usually followed by more), so a longer spin catches more of them, and because the measured latency leaves out
-        // part of the cost of parking (the park and unpark system calls, cold caches). A factor of 6 reaches the
-        // configured limit when wakes take about 43 us or more.
+        // part of the cost of parking (the park and unpark system calls, cold caches). A factor of 4 reaches the
+        // configured limit when wakes take 64 us or more.
         // Factors of 3 to 7 were measured on WSL (wakes of 35-40 us). Every factor has a band of arrival periods in
         // which the spin costs about twice the CPU of not spinning, and a higher factor widens that band rather than
         // moving it. Items that arrive just past the limit pay for the spin and then for a wake, so at the top of each
-        // band the extra CPU per us of latency saved is about the factor itself (3 to 5: 4.7-5.6; 5 to 6: 5.5-6). The
-        // factor is therefore an exchange rate between CPU and latency rather than a value the measurements determine.
-        // 6 was chosen: compared with 5 it brings the mean latency at 200-220 us arrival periods from 22-35 us down to
-        // 4-6 us for 4-9% more CPU, and it costs up to 2.5x the CPU of not spinning at arrival periods around 300 us.
-        private const int DefaultSpinWakeLatencyFactor = 6;
+        // band the extra CPU per us of latency saved is about the factor itself. The factor is therefore an exchange
+        // rate between CPU and latency rather than a value the measurements determine.
+        // 4 was chosen over 6. With 6, the spin bought lower latency for sparse arrivals at a price of several times the
+        // CPU of the previous spin, and where wakes are fast it outlasted the floor and cost CPU per operation without
+        // more throughput. 4 keeps the gains that come from covering slow wakes, where the spin is several times longer
+        // than the floor.
+        private const int DefaultSpinWakeLatencyFactor = 4;
 
         // The lower bound of the spin: a few times the cost of a park and unpark pair of system calls (on the order
         // of 5 us), which a shorter spin cannot pay for. It also keeps the limit above the first few backoff
@@ -455,7 +457,7 @@ namespace System.Threading
                 // The spin limit is at its maximum once the average reaches _spinLimitUsec / factor, so larger samples carry
                 // no further information. Clamping keeps a single outlier, such as a preempted thread, from holding the
                 // limit at the maximum for dozens of wakes: with a true latency of 10 us, one 4 ms sample would take 42
-                // wakes to bring the average back to 12 us (a limit of 72 us, 20% above the steady 60 us), versus 6 when
+                // wakes to bring the average back to 12 us (a limit of 48 us, 20% above the steady 40 us), versus 10 when
                 // clamped.
                 long sample = Math.Min(ns, _spinLimitUsec * 1000L / _spinWakeLatencyFactor);
 
