@@ -69,9 +69,10 @@ namespace System.Threading
         // samples, which vary several-fold with the idle state of the woken processor.
         private const int WakeLatencyAverageShift = 3;
 
-        // The length of a full spin that ran out has the same weight in its moving average. The length changes with the
-        // wake latency, and from spin to spin with how long the yields take.
-        private const int FullSpinAverageShift = WakeLatencyAverageShift;
+        // The length of a full spin follows the shortest recent full spins that ran out: a longer spin moves it by
+        // 1 / 2^FullSpinLengthUpShift of the difference, a shorter one replaces it. A spinner that is preempted while it
+        // yields comes back late, and such a spin looks longer than a full spin is; the shortest spins show the length.
+        private const int FullSpinLengthUpShift = 5;
 
         // A thread that wakes after a long park shows how fast the machine wakes a processor that has gone idle. After a short
         // park the processor has not gone idle yet and the wake is fast on every machine, so only the wakes after a park of
@@ -98,11 +99,12 @@ namespace System.Threading
         // limit, which is the limit the spin would have without the feedback, and the minimum limit while the hit rate
         // is low. The feedback is on by default and UnfairSemaphoreSpinFeedback=0 turns it off.
         //
-        // A spin that claims a signal is a hit. A spin that runs out and parks is judged when its thread is woken: it
-        // was a hit if the wake was issued within the length of a full spin from the start of the spin, that is, if a
-        // full spin would have caught the item. A full spin lasts the full limit, or longer where the floor of
-        // MinSpinWaits spin-wait units takes longer; the length is measured. Judging a spin against the limit that it had
-        // would hold a short limit in place, because the short spin keeps missing items that a longer one would catch.
+        // A spin that claims a signal is a hit, and a full spin that runs out is a miss. A spin at the minimum limit that runs
+        // out and parks is judged when its thread is woken: it was a hit if the wake was issued within the length of a full
+        // spin from the start of the spin, that is, if a full spin would have caught the item. A full spin lasts the full
+        // limit, or longer where the floor of MinSpinWaits spin-wait units takes longer; the length is measured. Judging a
+        // spin against the limit that it had would hold a short limit in place, because the short spin keeps missing items
+        // that a longer one would catch.
         //
         // The limit has two levels rather than being scaled by the hit rate. A limit scaled by the rate can settle at a
         // length that catches almost nothing and still costs the CPU of spinning.
@@ -146,9 +148,9 @@ namespace System.Threading
         // synchronization, a lost update only makes the estimate slightly stale.
         private long _wakeLatencyNs;
 
-        // Moving average of how long the full spins that ran out lasted. A full spin lasts the full limit or, where the floor
-        // of MinSpinWaits spin-wait units takes longer, as long as the floor; a missed spin is judged against that length.
-        // Written without synchronization, like the wake latency.
+        // How long a full spin lasts, measured on the full spins that ran out. A full spin lasts the full limit or, where the
+        // floor of MinSpinWaits spin-wait units takes longer, as long as the floor; a spin at the minimum limit that ran out is
+        // judged against that length. Written without synchronization, like the wake latency.
         private long _fullSpinNs;
 
         // The switch that limits the spinners. Every long-park wake writes its share of slow wakes, so it has a cache line of its
@@ -172,6 +174,10 @@ namespace System.Threading
         // waits to be judged.
         [ThreadStatic]
         private static int t_missedSpinUsec;
+
+        // Whether the spin that waits to be judged was a full spin.
+        [ThreadStatic]
+        private static bool t_missedSpinWasFull;
 
         // The time the wake that ended the last park of the thread was issued. Zero if there was none.
         [ThreadStatic]
@@ -391,18 +397,27 @@ namespace System.Threading
                 return;
             }
 
+            if (t_missedSpinWasFull)
+            {
+                // A full spin that ran out is a miss: a full spin did not catch the item.
+                RecordSpinOutcome(hit: false);
+                return;
+            }
+
             long idleTicks = Math.Max(0, issued - waitStartTick);
             long arrivalUsec = spunUsec + ToUnits(idleTicks, 1_000_000);
             RecordSpinOutcome(arrivalUsec <= Math.Max(FullSpinLimitUsec(), Volatile.Read(ref _fullSpinNs) / 1000));
         }
 
-        // Records how long a full spin that ran out lasted. A sample is capped at the configured limit, so that a spinner that
-        // was preempted while it yielded does not make the full spin look longer than any spin is allowed to be.
         private void RecordFullSpinLength(long spinTicks)
         {
             long sample = Math.Min(ToUnits(spinTicks, 1_000_000_000), _spinLimitUsec * 1000L);
-            long average = Volatile.Read(ref _fullSpinNs);
-            Volatile.Write(ref _fullSpinNs, average + ((sample - average) >> FullSpinAverageShift));
+            long length = Volatile.Read(ref _fullSpinNs);
+            long updated = length == 0 || sample < length ? sample : length + ((sample - length) >> FullSpinLengthUpShift);
+            if (updated != length)
+            {
+                Volatile.Write(ref _fullSpinNs, updated);
+            }
         }
 
         // Converts a Stopwatch interval to units of 1 / unitsPerSecond, with the interval capped at one second. Every limit
@@ -497,6 +512,7 @@ namespace System.Threading
                     // without parking, and then no wake tells the outcome.
                     long spinTicks = Stopwatch.GetTimestamp() - spinStartTick;
                     t_missedSpinUsec = (int)Math.Max(1, ToUnits(spinTicks, 1_000_000));
+                    t_missedSpinWasFull = fullSpin;
                     if (fullSpin)
                     {
                         RecordFullSpinLength(spinTicks);
