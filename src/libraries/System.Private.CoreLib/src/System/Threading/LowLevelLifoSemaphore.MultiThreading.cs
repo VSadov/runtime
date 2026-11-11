@@ -13,7 +13,8 @@ internal sealed partial class LowLevelLifoSemaphore
         RuntimeFeature.ThrowIfBlockingIsNotSupported(timeoutMs);
 
         int minSpinWaits = 0;
-        int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec(out minSpinWaits);
+        bool fullSpin = false;
+        int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec(out minSpinWaits, out fullSpin);
         if (spinLimitUsec > 0)
         {
             long spinLimitTicks = Stopwatch.Frequency * spinLimitUsec / 1_000_000;
@@ -53,7 +54,13 @@ internal sealed partial class LowLevelLifoSemaphore
             {
                 // The outcome is decided when the park ends, see RecordMissedSpinOutcome. A wait with a timeout of 0 returns
                 // without parking, and then no wake tells the outcome.
-                t_missedSpinLimitUsec = spinLimitUsec;
+                long spinTicks = Stopwatch.GetTimestamp() - spinStartTick;
+                t_missedSpinUsec = (int)Math.Max(1, ToUnits(spinTicks, 1_000_000));
+                t_missedSpinWasFull = fullSpin;
+                if (fullSpin)
+                {
+                    RecordFullSpinLength(spinTicks);
+                }
             }
         }
 
