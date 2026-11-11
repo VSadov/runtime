@@ -57,6 +57,13 @@ namespace System.Threading
         // iterations, which together take several microseconds, on hosts where wakes are very fast.
         private const int MinSpinLimitUsec = 16;
 
+        // The spin never ends before MinSpinWaits spin-wait units, the length of the spin before it was bounded in microseconds.
+        // A spin-wait unit lasts as long as the processor's pause instruction allows, which differs several-fold between processors,
+        // so on some machines that spin lasted much longer than the limit that fast wakes give. A shorter spin there left fewer
+        // threads spinning between bursts of work, and the pool kept fewer processors busy and completed less work. The limit in
+        // microseconds still lengthens the spin where wakes are slow.
+        private const int MinSpinWaits = 1024;
+
         // A new wake latency sample has the weight of 1 / 2^WakeLatencyAverageShift in the moving average.
         // 1/8 follows a lasting change of the latency within about 8-16 wakes, while still smoothing out single
         // samples, which vary several-fold with the idle state of the woken processor.
@@ -456,7 +463,7 @@ namespace System.Threading
                         }
                     }
                 }
-                while (Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
+                while (totalSpinWaits < MinSpinWaits || Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
 
                 if (_spinFeedback && timeoutMs != 0)
                 {
