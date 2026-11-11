@@ -69,6 +69,10 @@ namespace System.Threading
         // samples, which vary several-fold with the idle state of the woken processor.
         private const int WakeLatencyAverageShift = 3;
 
+        // The length of a full spin that ran out has the same weight in its moving average. The length changes with the
+        // wake latency, and from spin to spin with how long the yields take.
+        private const int FullSpinAverageShift = WakeLatencyAverageShift;
+
         // A thread that wakes after a long park shows how fast the machine wakes a processor that has gone idle. After a short
         // park the processor has not gone idle yet and the wake is fast on every machine, so only the wakes after a park of
         // LongParkUsec or longer are used. A park of about a millisecond is long enough for a processor to enter a deep idle
@@ -95,9 +99,10 @@ namespace System.Threading
         // is low. The feedback is on by default and UnfairSemaphoreSpinFeedback=0 turns it off.
         //
         // A spin that claims a signal is a hit. A spin that runs out and parks is judged when its thread is woken: it
-        // was a hit if the wake was issued within the full limit of the start of the spin, that is, if a spin of the
-        // full limit would have caught the item. Judging it against the limit that it had would hold a short limit in
-        // place, because the short spin keeps missing items that a longer one would catch.
+        // was a hit if the wake was issued within the length of a full spin from the start of the spin, that is, if a
+        // full spin would have caught the item. A full spin lasts the full limit, or longer where the floor of
+        // MinSpinWaits spin-wait units takes longer; the length is measured. Judging a spin against the limit that it had
+        // would hold a short limit in place, because the short spin keeps missing items that a longer one would catch.
         //
         // The limit has two levels rather than being scaled by the hit rate. A limit scaled by the rate can settle at a
         // length that catches almost nothing and still costs the CPU of spinning.
@@ -141,6 +146,11 @@ namespace System.Threading
         // synchronization, a lost update only makes the estimate slightly stale.
         private long _wakeLatencyNs;
 
+        // Moving average of how long the full spins that ran out lasted. A full spin lasts the full limit or, where the floor
+        // of MinSpinWaits spin-wait units takes longer, as long as the floor; a missed spin is judged against that length.
+        // Written without synchronization, like the wake latency.
+        private long _fullSpinNs;
+
         // The switch that limits the spinners. Every long-park wake writes its share of slow wakes, so it has a cache line of its
         // own, away from the counts and from the fields that are only read. It is tracked whenever wake times are recorded,
         // whether or not the spinners are limited.
@@ -158,10 +168,10 @@ namespace System.Threading
         private readonly short _threadWakeCooldownUsec;
         private readonly Action _onWait;
 
-        // The limit of a spin that ran out, until the park that follows ends and the spin is judged. Zero when no spin
+        // How long the spin that ran out lasted, until the park that follows ends and the spin is judged. Zero when no spin
         // waits to be judged.
         [ThreadStatic]
-        private static int t_missedSpinLimitUsec;
+        private static int t_missedSpinUsec;
 
         // The time the wake that ended the last park of the thread was issued. Zero if there was none.
         [ThreadStatic]
@@ -332,16 +342,18 @@ namespace System.Threading
             return (int)Math.Clamp(usec, Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec), _spinLimitUsec);
         }
 
-        private int GetSpinLimitUsec(out int minSpinWaits)
+        private int GetSpinLimitUsec(out int minSpinWaits, out bool fullSpin)
         {
             if (_spinFeedback && Volatile.Read(ref _spinLow) != 0)
             {
                 // At the minimum limit the feedback has found that spins miss, and a floor would only add to their cost.
                 minSpinWaits = 0;
+                fullSpin = false;
                 return Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec);
             }
 
             minSpinWaits = MinSpinWaits;
+            fullSpin = true;
             return FullSpinLimitUsec();
         }
 
@@ -368,8 +380,8 @@ namespace System.Threading
 
         private void RecordMissedSpinOutcome(long waitStartTick)
         {
-            int usedUsec = t_missedSpinLimitUsec;
-            t_missedSpinLimitUsec = 0;
+            int spunUsec = t_missedSpinUsec;
+            t_missedSpinUsec = 0;
 
             // The arrival is when the wake was issued, measured from the start of the park. No wake time was recorded
             // if the thread did not park (a racing unblock), then there is nothing to learn from this spin.
@@ -380,8 +392,17 @@ namespace System.Threading
             }
 
             long idleTicks = Math.Max(0, issued - waitStartTick);
-            long arrivalUsec = usedUsec + ToUnits(idleTicks, 1_000_000);
-            RecordSpinOutcome(arrivalUsec <= FullSpinLimitUsec());
+            long arrivalUsec = spunUsec + ToUnits(idleTicks, 1_000_000);
+            RecordSpinOutcome(arrivalUsec <= Math.Max(FullSpinLimitUsec(), Volatile.Read(ref _fullSpinNs) / 1000));
+        }
+
+        // Records how long a full spin that ran out lasted. A sample is capped at the configured limit, so that a spinner that
+        // was preempted while it yielded does not make the full spin look longer than any spin is allowed to be.
+        private void RecordFullSpinLength(long spinTicks)
+        {
+            long sample = Math.Min(ToUnits(spinTicks, 1_000_000_000), _spinLimitUsec * 1000L);
+            long average = Volatile.Read(ref _fullSpinNs);
+            Volatile.Write(ref _fullSpinNs, average + ((sample - average) >> FullSpinAverageShift));
         }
 
         // Converts a Stopwatch interval to units of 1 / unitsPerSecond, with the interval capped at one second. Every limit
@@ -433,7 +454,8 @@ namespace System.Threading
         private bool WaitSlow(int timeoutMs)
         {
             int minSpinWaits = 0;
-            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec(out minSpinWaits);
+            bool fullSpin = false;
+            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec(out minSpinWaits, out fullSpin);
             if (spinLimitUsec > 0)
             {
                 long spinLimitTicks = Stopwatch.Frequency * spinLimitUsec / 1_000_000;
@@ -473,7 +495,12 @@ namespace System.Threading
                 {
                     // The outcome is decided when the park ends, see RecordMissedSpinOutcome. A wait with a timeout of 0 returns
                     // without parking, and then no wake tells the outcome.
-                    t_missedSpinLimitUsec = spinLimitUsec;
+                    long spinTicks = Stopwatch.GetTimestamp() - spinStartTick;
+                    t_missedSpinUsec = (int)Math.Max(1, ToUnits(spinTicks, 1_000_000));
+                    if (fullSpin)
+                    {
+                        RecordFullSpinLength(spinTicks);
+                    }
                 }
             }
 
@@ -565,14 +592,14 @@ namespace System.Threading
                 t_lastWakeIssuedTimestamp = 0;
                 if (!Block(timeoutMs, waitStartTick))
                 {
-                    t_missedSpinLimitUsec = 0;
+                    t_missedSpinUsec = 0;
 
                     // Unregister the waiter, but do not decrement wake count, the thread did not observe a wake.
                     _separated._counts.InterlockedDecrementWaiterCount();
                     return false;
                 }
 
-                if (t_missedSpinLimitUsec != 0)
+                if (t_missedSpinUsec != 0)
                 {
                     RecordMissedSpinOutcome(waitStartTick);
                 }
