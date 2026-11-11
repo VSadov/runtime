@@ -46,7 +46,7 @@ internal sealed partial class LowLevelLifoSemaphore
                     }
                 }
             }
-            while (Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
+            while (totalSpinWaits < MinSpinWaits || Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
 
             if (_spinFeedback && timeoutMs != 0)
             {
