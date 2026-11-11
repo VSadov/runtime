@@ -144,6 +144,10 @@ namespace System.Threading
         private readonly short _spinLimitUsec;
         private readonly short _spinWakeLatencyFactor;
 
+        // The floor of the full spin in spin-wait units: MinSpinWaits, or 0 when the spin limit is configured below its default, so that a
+        // shorter limit that was asked for holds.
+        private readonly int _minSpinWaits;
+
         // Moving average of the time from issuing an OS wake to the woken thread running. Written without
         // synchronization, a lost update only makes the estimate slightly stale.
         private long _wakeLatencyNs;
@@ -233,6 +237,7 @@ namespace System.Threading
                 "ThreadPool_UnfairSemaphoreSpinLimit",
                 DefaultSemaphoreSpinLimitUsec,
                 false);
+            _minSpinWaits = _spinLimitUsec < DefaultSemaphoreSpinLimitUsec ? 0 : MinSpinWaits;
 
             _spinWakeLatencyFactor = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
                 "System.Threading.ThreadPool.UnfairSemaphoreSpinWakeFactor",
@@ -358,7 +363,7 @@ namespace System.Threading
                 return Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec);
             }
 
-            minSpinWaits = MinSpinWaits;
+            minSpinWaits = _minSpinWaits;
             fullSpin = true;
             return FullSpinLimitUsec();
         }
