@@ -16,8 +16,8 @@ namespace System.Threading
     internal sealed partial class LowLevelLifoSemaphore
     {
         // After a brief initial spin-wait phase, spinning yields the processor time slice on each iteration
-        // in addition to exponential spin-waits, bounded by a microsecond spin limit and never shorter than
-        // MinSpinWaits spin-wait units.
+        // in addition to exponential spin-waits, bounded by a microsecond spin limit and, at the full limit, never
+        // shorter than MinSpinWaits spin-wait units.
 
         // The upper bound of the spin, in microseconds. The previous bound was a spin count (MinSpinWaits) that lasts
         // about 35-45 us on many machines, which is shorter than a thread wake on virtualized hosts (about 40-190 us
@@ -59,10 +59,11 @@ namespace System.Threading
         // iterations, which together take several microseconds, on hosts where wakes are very fast.
         private const int MinSpinLimitUsec = 16;
 
-        // The spin never ends before MinSpinWaits spin-wait units, the length of the spin before it was bounded in microseconds.
-        // How long a spin-wait unit takes differs between processors, so on some machines that spin lasted much longer than the
-        // limit that fast wakes give. A shorter spin there left fewer threads spinning between bursts of work, and the pool kept
-        // fewer processors busy and completed less work. The limit in microseconds still lengthens the spin where wakes are slow.
+        // The full spin never ends before MinSpinWaits spin-wait units, the length of the spin before it was bounded in
+        // microseconds. How long a spin-wait unit takes differs between processors, so on some machines that spin lasted much
+        // longer than the limit that fast wakes give. A shorter spin there left fewer threads spinning between bursts of work,
+        // and the pool kept fewer processors busy and completed less work. The limit in microseconds still lengthens the spin
+        // where wakes are slow. The minimum spin of the hit-rate feedback has no floor: there the spins have been found to miss.
         private const int MinSpinWaits = 1024;
 
         // A new wake latency sample has the weight of 1 / 2^WakeLatencyAverageShift in the moving average.
@@ -301,13 +302,16 @@ namespace System.Threading
             return (int)Math.Clamp(usec, Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec), _spinLimitUsec);
         }
 
-        private int GetSpinLimitUsec()
+        private int GetSpinLimitUsec(out int minSpinWaits)
         {
             if (_spinFeedback && Volatile.Read(ref _spinLow) != 0)
             {
+                // At the minimum limit the feedback has found that spins miss, and a floor would only add to their cost.
+                minSpinWaits = 0;
                 return Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec);
             }
 
+            minSpinWaits = MinSpinWaits;
             return FullSpinLimitUsec();
         }
 

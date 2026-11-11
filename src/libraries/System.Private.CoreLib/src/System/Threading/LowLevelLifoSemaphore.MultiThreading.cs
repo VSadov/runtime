@@ -12,7 +12,8 @@ internal sealed partial class LowLevelLifoSemaphore
     {
         RuntimeFeature.ThrowIfBlockingIsNotSupported(timeoutMs);
 
-        int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec();
+        int minSpinWaits = 0;
+        int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec(out minSpinWaits);
         if (spinLimitUsec > 0)
         {
             long spinLimitTicks = Stopwatch.Frequency * spinLimitUsec / 1_000_000;
@@ -46,7 +47,7 @@ internal sealed partial class LowLevelLifoSemaphore
                     }
                 }
             }
-            while (totalSpinWaits < MinSpinWaits || Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
+            while (totalSpinWaits < minSpinWaits || Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
 
             if (_spinFeedback && timeoutMs != 0)
             {
