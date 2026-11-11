@@ -57,11 +57,11 @@ namespace System.Threading
         // iterations, which together take several microseconds, on hosts where wakes are very fast.
         private const int MinSpinLimitUsec = 16;
 
-        // The spin never ends before MinSpinWaits spin-wait units, the length of the spin before it was bounded in microseconds.
-        // A spin-wait unit lasts as long as the processor's pause instruction allows, which differs several-fold between processors,
-        // so on some machines that spin lasted much longer than the limit that fast wakes give. A shorter spin there left fewer
-        // threads spinning between bursts of work, and the pool kept fewer processors busy and completed less work. The limit in
-        // microseconds still lengthens the spin where wakes are slow.
+        // The full spin never ends before MinSpinWaits spin-wait units, the length of the spin before it was bounded in
+        // microseconds. How long a spin-wait unit takes differs between processors, so on some machines that spin lasted much
+        // longer than the limit that fast wakes give. A shorter spin there left fewer threads spinning between bursts of work,
+        // and the pool kept fewer processors busy and completed less work. The limit in microseconds still lengthens the spin
+        // where wakes are slow. The minimum spin of the hit-rate feedback has no floor: there the spins have been found to miss.
         private const int MinSpinWaits = 1024;
 
         // A new wake latency sample has the weight of 1 / 2^WakeLatencyAverageShift in the moving average.
@@ -332,13 +332,16 @@ namespace System.Threading
             return (int)Math.Clamp(usec, Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec), _spinLimitUsec);
         }
 
-        private int GetSpinLimitUsec()
+        private int GetSpinLimitUsec(out int minSpinWaits)
         {
             if (_spinFeedback && Volatile.Read(ref _spinLow) != 0)
             {
+                // At the minimum limit the feedback has found that spins miss, and a floor would only add to their cost.
+                minSpinWaits = 0;
                 return Math.Min(MinSpinLimitUsec, (int)_spinLimitUsec);
             }
 
+            minSpinWaits = MinSpinWaits;
             return FullSpinLimitUsec();
         }
 
@@ -429,7 +432,8 @@ namespace System.Threading
 
         private bool WaitSlow(int timeoutMs)
         {
-            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec();
+            int minSpinWaits = 0;
+            int spinLimitUsec = Environment.IsSingleProcessor ? 0 : GetSpinLimitUsec(out minSpinWaits);
             if (spinLimitUsec > 0)
             {
                 long spinLimitTicks = Stopwatch.Frequency * spinLimitUsec / 1_000_000;
@@ -463,7 +467,7 @@ namespace System.Threading
                         }
                     }
                 }
-                while (totalSpinWaits < MinSpinWaits || Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
+                while (totalSpinWaits < minSpinWaits || Stopwatch.GetTimestamp() - spinStartTick < spinLimitTicks);
 
                 if (_spinFeedback && timeoutMs != 0)
                 {
