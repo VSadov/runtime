@@ -41,6 +41,7 @@ internal sealed partial class LowLevelLifoSemaphore
                             RecordSpinOutcome(hit: true);
                         }
 
+                        t_claimedBySpin = true;
                         return true;
                     }
                 }

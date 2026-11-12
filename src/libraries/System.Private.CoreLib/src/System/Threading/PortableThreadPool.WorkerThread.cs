@@ -18,6 +18,16 @@ namespace System.Threading
 
             private static readonly short SpuriousDispatchNoSpinThreshold = DetermineSpuriousDispatchNoSpinThreshold();
 
+            // While most of the recent spin claims find no work (see LowLevelLifoSemaphore.SpinCapActive), an empty dispatch
+            // parks without spinning when SpinCapSpinners other workers are already spinning. On by default, SpinCapOnEmpty=0
+            // turns it off. The cap follows the share instead of being a fixed limit, because a fixed limit also holds back the
+            // spinners of workloads in which they do find work, and costs those workloads throughput or latency.
+            private static readonly bool SpinCapOnEmpty = DetermineSpinCapOnEmpty();
+
+            // The spinners that are left while the cap is on. 2 is the value that was measured with the cap, and as a
+            // static limit in the sweeps.
+            private const short SpinCapSpinners = 2;
+
             // Stopwatch ticks; -1 when the recency check is disabled.
             private static readonly long SpuriousDispatchExternalWorkItemRecencyTicks = DetermineSpuriousDispatchExternalWorkItemRecencyTicks();
 
@@ -65,6 +75,12 @@ namespace System.Threading
                         DefaultSpuriousDispatchNoSpinThreshold);
                 return threshold >= 0 ? threshold : DefaultSpuriousDispatchNoSpinThreshold;
             }
+
+            private static bool DetermineSpinCapOnEmpty() =>
+                AppContextConfigHelper.GetBooleanConfig(
+                    "System.Threading.ThreadPool.SpinCapOnEmpty",
+                    "DOTNET_ThreadPool_SpinCapOnEmpty",
+                    defaultValue: true);
 
             private static long DetermineSpuriousDispatchExternalWorkItemRecencyTicks()
             {
@@ -175,9 +191,16 @@ namespace System.Threading
                 bool spurious = false;
                 bool didWork = false;
                 short numProcessingWork;
+                short numExistingThreads;
+
+                // Whether the signal this worker claimed was claimed by spinning; the share of such claims that lead to no work
+                // is recorded by the first dispatch.
+                bool claimedBySpin = LowLevelLifoSemaphore.TakeSpinClaim();
 
                 do
                 {
+                    bool foundWork = false;
+
                     // We generally avoid spurious wakes by requesting one thread at a time. We nearly always should see a request.
                     // However, we allow external wakes when thread goals change, which can result in "stolen" requests.
                     // Therefore we check for request before clearing it and dispatching workitems.
@@ -196,12 +219,19 @@ namespace System.Threading
                             case ThreadPoolWorkQueue.DispatchResult.ShouldStop:
                                 // We are above goal and this worker is already removed in the counts.
                                 // Chances to be invited back right away are low, so just park.
+                                // Dispatch stops only after it ran a work item, so the claim led to work.
+                                if (claimedBySpin)
+                                {
+                                    s_semaphore.RecordSpinClaimOutcome(empty: false);
+                                }
+
                                 return true;
 
                             default:
                                 // We did some work, but then there was nothing to do.
                                 // Spin a bit before parking in case we are invited back.
                                 didWork = true;
+                                foundWork = true;
                                 spurious = false;
                                 break;
                         }
@@ -213,12 +243,19 @@ namespace System.Threading
                         spurious = false;
                     }
 
+                    if (claimedBySpin)
+                    {
+                        // Whether the signal that brought this worker here led to work, by the first dispatch.
+                        s_semaphore.RecordSpinClaimOutcome(empty: !foundWork);
+                        claimedBySpin = false;
+                    }
+
                     // We could not find more work in the queue and will try to stop being active.
                     // One caveat - in Saturated state we have seen a thread request but could not signal for a worker
                     // to come and see to it. Thus in Saturated state, one thread will clear the state and will come
                     // back for another try to clear the thread request and do Dispatch - without consuming a signal.
                     // See `TryIncrementProcessingWork` for details about Saturated state.
-                } while (!TryRemoveWorkingWorker(threadPoolInstance, out numProcessingWork));
+                } while (!TryRemoveWorkingWorker(threadPoolInstance, out numProcessingWork, out numExistingThreads));
 
                 // Spinners have already left NumProcessingWork, so a low processing count alone does not
                 // imply that another poller is useful. Preserve polling capacity for recent external producers,
@@ -226,10 +263,23 @@ namespace System.Threading
                 // workers, park empty dispatches promptly instead of competing with the productive workers.
                 // The clock is read only on this path, after an empty dispatch. A timestamp published after the
                 // clock read gives a negative difference, which counts as recent.
+                // Recency tells whether more work is coming, the spinner count whether other workers are already
+                // waiting for it. Even with recent external work, a worker that finds the others already spinning
+                // parks instead of adding to them.
                 return spurious && (numProcessingWork > SpuriousDispatchNoSpinThreshold ||
                         (SpuriousDispatchExternalWorkItemRecencyTicks >= 0 &&
                          Stopwatch.GetTimestamp() - Volatile.Read(ref threadPoolInstance._separated.lastExternalWorkItemTimestamp)
-                            > SpuriousDispatchExternalWorkItemRecencyTicks));
+                            > SpuriousDispatchExternalWorkItemRecencyTicks) ||
+                        TooManySpinners(numExistingThreads, numProcessingWork));
+            }
+
+            // Whether the cap is on, most of the recent spin claims found no work, and the other workers that are already spinning
+            // reach SpinCapSpinners.
+            private static bool TooManySpinners(short numExistingThreads, short numProcessingWork)
+            {
+                // The current worker has already left NumProcessingWork and is not one of the other spinners.
+                return SpinCapOnEmpty && s_semaphore.SpinCapActive &&
+                    s_semaphore.EstimateSpinners(numExistingThreads, numProcessingWork) - 1 >= SpinCapSpinners;
             }
 
             // returns true if the worker is shutting down
@@ -297,9 +347,10 @@ namespace System.Threading
             /// If we are in a Saturated state, clears the state instead and returns false.
             /// Returns true if number of active threads was actually reduced.
             /// <paramref name="numProcessingWork"/> receives the resulting number of workers processing work.
+            /// <paramref name="numExistingThreads"/> receives the number of existing worker threads at the same moment.
             /// See `TryDecrementProcessingWork` for details about Saturated state.
             /// </summary>
-            private static bool TryRemoveWorkingWorker(PortableThreadPool threadPoolInstance, out short numProcessingWork)
+            private static bool TryRemoveWorkingWorker(PortableThreadPool threadPoolInstance, out short numProcessingWork, out short numExistingThreads)
             {
                 uint collisionCount = 0;
                 while (true)
@@ -310,6 +361,7 @@ namespace System.Threading
                     if (threadPoolInstance._separated.counts.InterlockedCompareExchange(newCounts, oldCounts) == oldCounts)
                     {
                         numProcessingWork = newCounts.NumProcessingWork;
+                        numExistingThreads = newCounts.NumExistingThreads;
                         return decremented;
                     }
 
