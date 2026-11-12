@@ -16,17 +16,19 @@ namespace System.Threading
     internal sealed partial class LowLevelLifoSemaphore
     {
         // After a brief initial spin-wait phase, spinning yields the processor time slice on each iteration
-        // in addition to exponential spin-waits, bounded by a microsecond spin limit.
+        // in addition to exponential spin-waits, bounded by a microsecond spin limit and, at the full limit, never
+        // shorter than MinSpinWaits spin-wait units.
 
-        // The upper bound of the spin, in microseconds. The previous bound was a spin count worth about 35 us, which is
-        // shorter than a thread wake on virtualized hosts (about 40-190 us measured). Where work arrives in short
-        // bursts (runtime async continuations, request/response workloads) most of the throughput was lost when every
-        // empty dispatch parked. Fixed limits of 128 us and above recovered it in measurements, 64 us recovered
-        // noticeably less. 256 us keeps a margin of about 1.3x over the longest wake that was measured.
+        // The upper bound of the spin, in microseconds. The previous bound was a spin count (MinSpinWaits) that lasts
+        // about 35-45 us on many machines, which is shorter than a thread wake on virtualized hosts (about 40-190 us
+        // measured). Where work arrives in short bursts (runtime async continuations, request/response workloads) most
+        // of the throughput was lost when every empty dispatch parked. Fixed limits of 128 us and above recovered it in
+        // measurements, 64 us recovered noticeably less. 256 us keeps a margin of about 1.3x over the longest wake that
+        // was measured.
         private const int DefaultSemaphoreSpinLimitUsec = 256;
 
         // The spin starts with a short busy-wait and then also yields the processor on every iteration, so that a
-        // runnable thread is not starved by the spinner. One spin-wait unit of Backoff.Exponential is about 35 ns,
+        // runnable thread is not starved by the spinner. One spin-wait unit of Backoff.Exponential is tens of ns,
         // so 10 units are well under a microsecond: enough to catch a hand-off that is already in flight without a
         // system call, and small compared to the cost of the yield that follows.
         private const int SpinSleep0Threshold = 10;
