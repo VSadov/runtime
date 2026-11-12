@@ -78,26 +78,6 @@ namespace System.Threading
         // yields comes back late, and such a spin looks longer than a full spin is; the shortest spins show the length.
         private const int FullSpinLengthUpShift = 5;
 
-        // A thread that wakes after a long park shows how fast the machine wakes a processor that has gone idle. After a short
-        // park the processor has not gone idle yet and the wake is fast on every machine, so only the wakes after a park of
-        // LongParkUsec or longer are used. A park of about a millisecond is long enough for a processor to enter a deep idle
-        // state.
-        //
-        // Parks of MaxLongParkUsec or longer are left out. A park that long means that the pool ran out of work. When work comes
-        // back, the workers that were parked through the pause wake together, from processors that have been idle all along.
-        // Those wakes are slower than the others on every machine, and as a burst they would release the switch below whenever
-        // the load resumes after a pause.
-        private const int LongParkUsec = 1024;
-        private const int MaxLongParkUsec = 64 * LongParkUsec;
-
-        // A long-park wake is slow if it takes MinSpinLimitUsec, the shortest spin, or longer. When most of these wakes are
-        // faster than that, keeping threads spinning to avoid a wake costs more CPU than the wake does, and more than a few
-        // spinners are not worth having. When many are slower, the spinners are what keeps work from waiting for a wake. The
-        // share of slow wakes and the switch that it drives are in SpinLimitSwitch.
-        private static readonly long s_spinLimitEngageTicks = SpinLimitSwitch.EngageSeconds * Stopwatch.Frequency;
-        private static readonly long s_spinLimitReleaseTicks = SpinLimitSwitch.ReleaseSeconds * Stopwatch.Frequency;
-        private static readonly long s_spinLimitHoldOffTicks = SpinLimitSwitch.HoldOffSeconds * Stopwatch.Frequency;
-
         // A spin that misses costs the whole limit, so spinning pays only while most spins catch an item. The semaphore
         // keeps a moving average of the outcomes of spins, the hit rate, and has two levels of spin limit: the full
         // limit, which is the limit the spin would have without the feedback, and the minimum limit while the hit rate
@@ -160,11 +140,6 @@ namespace System.Threading
         // floor of MinSpinWaits spin-wait units takes longer, as long as the floor; a spin at the minimum limit that ran out is
         // judged against that length. Written without synchronization, like the wake latency.
         private long _fullSpinNs;
-
-        // The switch that limits the spinners. Every long-park wake writes its share of slow wakes, so it has a cache line of its
-        // own, away from the counts and from the fields that are only read. It is tracked whenever wake times are recorded,
-        // whether or not the spinners are limited.
-        private CacheLineSeparatedSpinLimit _spinLimit;
 
         // The hit rate of spins and whether the spin is at the minimum limit. They are written when spins end, without
         // synchronization, a lost update only makes them slightly stale. They are outside of _separated, so these writes
@@ -233,7 +208,6 @@ namespace System.Threading
         public LowLevelLifoSemaphore(Action onWait)
         {
             _separated = default;
-            _spinLimit._switch.Initialize();
             _onWait = onWait;
 
             _spinLimitUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
@@ -341,10 +315,6 @@ namespace System.Threading
         // Whether most of the recent spin claims found no work, which is when the spinners are capped if the cap is on.
         internal bool SpinCapActive => Volatile.Read(ref _spinClaims._capActive) != 0;
 
-        // Whether the spinners are limited because most of the recent wakes after long parks are fast, which is when the limit
-        // is applied if SpinLimitOnFastWakes is on.
-        internal bool SpinLimitEngaged => _spinLimit._switch.IsEngaged;
-
         // The spin limit without the feedback: the measured wake latency times the factor, or the fixed limit.
         private int FullSpinLimitUsec()
         {
@@ -435,7 +405,7 @@ namespace System.Threading
         private static long ToUnits(long ticks, long unitsPerSecond) =>
             Math.Min(ticks, Stopwatch.Frequency) * unitsPerSecond / Stopwatch.Frequency;
 
-        private void RecordWakeLatency(LifoBlockerNode node, long waitStartTick)
+        private void RecordWakeLatency(LifoBlockerNode node)
         {
             long issued = node._wakeIssuedTimestamp;
             t_lastWakeIssuedTimestamp = issued;
@@ -445,8 +415,12 @@ namespace System.Threading
             }
 
             node._wakeIssuedTimestamp = 0;
-            long now = Stopwatch.GetTimestamp();
-            long ns = ToUnits(now - issued, 1_000_000_000);
+            if (_spinWakeLatencyFactor == 0)
+            {
+                return;
+            }
+
+            long ns = ToUnits(Stopwatch.GetTimestamp() - issued, 1_000_000_000);
 
             // Under 2 us the thread did not really park, for example it woke itself.
             if (ns < 2_000)
@@ -454,25 +428,15 @@ namespace System.Threading
                 return;
             }
 
-            if (_spinWakeLatencyFactor != 0)
-            {
-                // The spin limit is at its maximum once the average reaches _spinLimitUsec / factor, so larger samples carry
-                // no further information. Clamping keeps a single outlier, such as a preempted thread, from holding the
-                // limit at the maximum for dozens of wakes: with a true latency of 10 us, one 4 ms sample would take 42
-                // wakes to bring the average back to 12 us (a limit of 48 us, 20% above the steady 40 us), versus 10 when
-                // clamped.
-                long sample = Math.Min(ns, _spinLimitUsec * 1000L / _spinWakeLatencyFactor);
+            // The spin limit is at its maximum once the average reaches _spinLimitUsec / factor, so larger samples carry
+            // no further information. Clamping keeps a single outlier, such as a preempted thread, from holding the
+            // limit at the maximum for dozens of wakes: with a true latency of 10 us, one 4 ms sample would take 42
+            // wakes to bring the average back to 12 us (a limit of 48 us, 20% above the steady 40 us), versus 10 when
+            // clamped.
+            ns = Math.Min(ns, _spinLimitUsec * 1000L / _spinWakeLatencyFactor);
 
-                long average = Volatile.Read(ref _wakeLatencyNs);
-                Volatile.Write(ref _wakeLatencyNs, average + ((sample - average) >> WakeLatencyAverageShift));
-            }
-
-            // The park lasted from the start of the wait to the wake being issued.
-            long parkUsec = ToUnits(issued - waitStartTick, 1_000_000);
-            if (parkUsec >= LongParkUsec && parkUsec < MaxLongParkUsec)
-            {
-                _spinLimit._switch.RecordLongParkWake(now, ns >= MinSpinLimitUsec * 1000L, s_spinLimitEngageTicks, s_spinLimitReleaseTicks, s_spinLimitHoldOffTicks);
-            }
+            long average = Volatile.Read(ref _wakeLatencyNs);
+            Volatile.Write(ref _wakeLatencyNs, average + ((ns - average) >> WakeLatencyAverageShift));
         }
 
         private bool WaitSlow(int timeoutMs)
@@ -615,7 +579,7 @@ namespace System.Threading
                 // We do not need to reduce the timeout after spurious wakes as that will only result
                 // in workers that are woken spuriously to eventually exit and be replaced by new workers.
                 t_lastWakeIssuedTimestamp = 0;
-                if (!Block(timeoutMs, waitStartTick))
+                if (!Block(timeoutMs))
                 {
                     t_missedSpinUsec = 0;
 
@@ -695,7 +659,7 @@ namespace System.Threading
             MaybeWakeWaiter(counts);
         }
 
-        private bool Block(int timeoutMs, long waitStartTick)
+        private bool Block(int timeoutMs)
         {
             Debug.Assert(timeoutMs >= -1);
 
@@ -765,7 +729,7 @@ namespace System.Threading
 
                     if (_recordWakeTimes)
                     {
-                        RecordWakeLatency(blockerNode, waitStartTick);
+                        RecordWakeLatency(blockerNode);
                     }
                 }
                 finally
@@ -1003,16 +967,6 @@ namespace System.Threading
             /// <safety>The fields overlap nothing and are plain integers, so accessing them cannot forge a managed reference or read out of bounds.</safety>
             [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE + sizeof(int))]
             public safe int _capActive;
-        }
-
-        // The switch is larger than the other padded fields, so it gets a whole cache line of padding after it as well as before
-        // it, whatever the alignment of the object.
-        [StructLayout(LayoutKind.Explicit, Size = 3 * PaddingHelpers.CACHE_LINE_SIZE)]
-        private struct CacheLineSeparatedSpinLimit
-        {
-            /// <safety>The struct's single field is cache-line padded and overlaps nothing; SpinLimitSwitch holds only integers, so accessing it cannot forge a managed reference or read out of bounds.</safety>
-            [FieldOffset(PaddingHelpers.CACHE_LINE_SIZE)]
-            public safe SpinLimitSwitch _switch;
         }
     }
 }

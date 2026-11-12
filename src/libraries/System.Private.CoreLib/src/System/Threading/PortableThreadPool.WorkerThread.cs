@@ -19,7 +19,7 @@ namespace System.Threading
             private static readonly short SpuriousDispatchNoSpinThreshold = DetermineSpuriousDispatchNoSpinThreshold();
 
             // Park an empty dispatch without spinning when at least this many other workers are already spinning.
-            // 0 disables the check, except for the cap and the limit on fast wakes below; a non-zero value replaces both.
+            // 0 disables the check, except for the cap below; a non-zero value replaces the cap.
             private static readonly short SpuriousDispatchSpinnerLimit = DetermineSpuriousDispatchSpinnerLimit();
 
             // While most of the recent spin claims find no work (see LowLevelLifoSemaphore.SpinCapActive), the limit above
@@ -27,15 +27,6 @@ namespace System.Threading
             // instead of being a fixed limit, because a fixed limit also holds back the spinners of workloads in which they
             // do find work, and costs those workloads throughput or latency.
             private static readonly bool SpinCapOnEmpty = DetermineSpinCapOnEmpty();
-
-            // While most of the wakes after long parks are fast (see LowLevelLifoSemaphore.SpinLimitEngaged), the limit above is
-            // SpinCapSpinners when it is not set. Off by default, SpinLimitOnFastWakes=1 turns it on. Where workers that were
-            // parked for a long time come back quickly, the spinners that are kept to avoid a wake cost more CPU than the wakes
-            // do; where those wakes are slow, the spinners are what keeps the work from waiting for them. The semaphore decides
-            // from the wakes it measures, not from the operating system or the processor. It is off by default because with only
-            // a few spinners left, work that arrives in large bursts waits for the wakes of the threads that it needs, one after
-            // another, and the pool can settle at fewer busy processors and less throughput even where each wake is fast.
-            private static readonly bool SpinLimitOnFastWakes = DetermineSpinLimitOnFastWakes();
 
             // The spinners that are left while the cap is on. 2 is the value that was measured with the cap, and as the
             // static limit in the sweeps.
@@ -109,12 +100,6 @@ namespace System.Threading
                     "System.Threading.ThreadPool.SpinCapOnEmpty",
                     "DOTNET_ThreadPool_SpinCapOnEmpty",
                     defaultValue: true);
-
-            private static bool DetermineSpinLimitOnFastWakes() =>
-                AppContextConfigHelper.GetBooleanConfig(
-                    "System.Threading.ThreadPool.SpinLimitOnFastWakes",
-                    "DOTNET_ThreadPool_SpinLimitOnFastWakes",
-                    defaultValue: false);
 
             private static long DetermineSpuriousDispatchExternalWorkItemRecencyTicks()
             {
@@ -308,13 +293,11 @@ namespace System.Threading
             }
 
             // Whether the other workers that are already spinning reach the spinner limit, which is the configured limit, or
-            // SpinCapSpinners while the cap is on and most of the recent spin claims found no work, or while the spinners are
-            // limited because the wakes after long parks are fast and SpinLimitOnFastWakes is on.
+            // SpinCapSpinners while the cap is on and most of the recent spin claims found no work.
             private static bool TooManySpinners(short numExistingThreads, short numProcessingWork)
             {
                 short limit = SpuriousDispatchSpinnerLimit;
-                if (limit == 0 &&
-                    ((SpinCapOnEmpty && s_semaphore.SpinCapActive) || (SpinLimitOnFastWakes && s_semaphore.SpinLimitEngaged)))
+                if (limit == 0 && SpinCapOnEmpty && s_semaphore.SpinCapActive)
                 {
                     limit = SpinCapSpinners;
                 }

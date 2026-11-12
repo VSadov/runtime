@@ -11,15 +11,12 @@
   <ItemGroup>
     <Compile Include="ThreadPoolTests.cs" />
     <Compile Include="RegisteredWaitTests.cs" />
-    <Compile Include="SpinLimitSwitchTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="$(CommonTestPath)System\IO\TempFile.cs"
              Link="CommonTest\System\IO\TempFile.cs" />
     <Compile Include="$(CommonTestPath)System\Threading\ThreadTestHelpers.cs"
              Link="CommonTest\System\Threading\ThreadTestHelpers.cs" />
-    <Compile Include="$(CoreLibSharedDir)System\Threading\SpinLimitSwitch.cs"
-             Link="ProductionCode\System\Threading\SpinLimitSwitch.cs" />
   </ItemGroup>
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.UseWindowsThreadPool" Value="false" />
