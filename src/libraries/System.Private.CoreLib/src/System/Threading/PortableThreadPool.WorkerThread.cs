@@ -24,8 +24,7 @@ namespace System.Threading
             // spinners of workloads in which they do find work, and costs those workloads throughput or latency.
             private static readonly bool SpinCapOnEmpty = DetermineSpinCapOnEmpty();
 
-            // The spinners that are left while the cap is on. 2 is the value that was measured with the cap, and as a
-            // static limit in the sweeps.
+            // The spinners that are left while the cap is on. 2 is the value that was measured with the cap.
             private const short SpinCapSpinners = 2;
 
             // Stopwatch ticks; -1 when the recency check is disabled.
