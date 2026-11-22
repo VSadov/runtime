@@ -159,6 +159,110 @@ LOCAL_LABEL(HijackReturn):
     EPILOG_RETURN
 NESTED_END OnHijackTripThread, _TEXT
 
+// ------------------------------------------------------------------
+// GC poll helper (CORINFO_HELP_POLL_GC) for signalless mode. JIT-compiled code expects it to preserve all general
+// purpose registers other than x12, x16, x17 and lr (RBM_SIGNALLESS_POLL_GC_TRASH in the JIT), and the GC info at
+// the return address of the call describes the GC references in any of them.
+LEAF_ENTRY JIT_PollGCPreservingRegs, _TEXT
+    PREPARE_EXTERNAL_VAR g_TrapReturningThreads, x16
+    ldr     w16, [x16]
+    cbnz    w16, C_FUNC(JIT_PollGCPreservingRegsRare)
+    ret     lr
+LEAF_END JIT_PollGCPreservingRegs, _TEXT
+
+// Captures the registers of the method that polled in a CONTEXT, as an interruption at the return address of the poll
+// would, and lets JIT_PollGCPreservingRegsWorker stop the thread there. The GC may update references held in the
+// registers through the CONTEXT, so they are reloaded from it. The thread then returns to the method that polled, or
+// raises a pending abort at the poll.
+NESTED_ENTRY JIT_PollGCPreservingRegsRare, _TEXT, NoHandler
+    PROLOG_SAVE_REG_PAIR_INDEXED fp, lr, -16
+    PROLOG_STACK_ALLOC SIZEOF__CONTEXT
+
+    stp     x0, x1, [sp, #(OFFSETOF__CONTEXT__X0 + 0)]
+    stp     x2, x3, [sp, #(OFFSETOF__CONTEXT__X0 + 16)]
+    stp     x4, x5, [sp, #(OFFSETOF__CONTEXT__X0 + 32)]
+    stp     x6, x7, [sp, #(OFFSETOF__CONTEXT__X0 + 48)]
+    stp     x8, x9, [sp, #(OFFSETOF__CONTEXT__X0 + 64)]
+    stp     x10, x11, [sp, #(OFFSETOF__CONTEXT__X0 + 80)]
+    stp     x12, x13, [sp, #(OFFSETOF__CONTEXT__X0 + 96)]
+    stp     x14, x15, [sp, #(OFFSETOF__CONTEXT__X0 + 112)]
+    stp     x16, x17, [sp, #(OFFSETOF__CONTEXT__X0 + 128)]
+    stp     x18, x19, [sp, #(OFFSETOF__CONTEXT__X0 + 144)]
+    stp     x20, x21, [sp, #(OFFSETOF__CONTEXT__X0 + 160)]
+    stp     x22, x23, [sp, #(OFFSETOF__CONTEXT__X0 + 176)]
+    stp     x24, x25, [sp, #(OFFSETOF__CONTEXT__X0 + 192)]
+    stp     x26, x27, [sp, #(OFFSETOF__CONTEXT__X0 + 208)]
+    str     x28, [sp, #(OFFSETOF__CONTEXT__X0 + 224)]
+
+    // The JIT expects the poll to preserve only d8-d15 of the floating point registers, which nothing here changes.
+    // Raising an abort with the CONTEXT needs all of them though: funclets get d8-d15 from it, and resuming after a
+    // catch restores the registers from it.
+    stp     q0, q1, [sp, #(OFFSETOF__CONTEXT__V + 0)]
+    stp     q2, q3, [sp, #(OFFSETOF__CONTEXT__V + 32)]
+    stp     q4, q5, [sp, #(OFFSETOF__CONTEXT__V + 64)]
+    stp     q6, q7, [sp, #(OFFSETOF__CONTEXT__V + 96)]
+    stp     q8, q9, [sp, #(OFFSETOF__CONTEXT__V + 128)]
+    stp     q10, q11, [sp, #(OFFSETOF__CONTEXT__V + 160)]
+    stp     q12, q13, [sp, #(OFFSETOF__CONTEXT__V + 192)]
+    stp     q14, q15, [sp, #(OFFSETOF__CONTEXT__V + 224)]
+    stp     q16, q17, [sp, #(OFFSETOF__CONTEXT__V + 256)]
+    stp     q18, q19, [sp, #(OFFSETOF__CONTEXT__V + 288)]
+    stp     q20, q21, [sp, #(OFFSETOF__CONTEXT__V + 320)]
+    stp     q22, q23, [sp, #(OFFSETOF__CONTEXT__V + 352)]
+    stp     q24, q25, [sp, #(OFFSETOF__CONTEXT__V + 384)]
+    stp     q26, q27, [sp, #(OFFSETOF__CONTEXT__V + 416)]
+    stp     q28, q29, [sp, #(OFFSETOF__CONTEXT__V + 448)]
+    stp     q30, q31, [sp, #(OFFSETOF__CONTEXT__V + 480)]
+    mrs     x16, fpcr
+    str     w16, [sp, #OFFSETOF__CONTEXT__Fpcr]
+    mrs     x16, fpsr
+    str     w16, [sp, #OFFSETOF__CONTEXT__Fpsr]
+
+    // The prolog saved fp and lr of the method that polled. Its lr is the return address of the poll.
+    add     x16, sp, #SIZEOF__CONTEXT
+    ldp     x16, x17, [x16]
+    stp     x16, x17, [sp, #OFFSETOF__CONTEXT__Fp]           // Fp, Lr
+    add     x16, sp, #(SIZEOF__CONTEXT + 16)
+    stp     x16, x17, [sp, #OFFSETOF__CONTEXT__Sp]           // Sp, Pc
+    movz    w16, #(CONTEXT_CONTROL_INTEGER_FLOATING_POINT & 0xFFFF)
+    movk    w16, #(CONTEXT_CONTROL_INTEGER_FLOATING_POINT >> 16), lsl #16
+    stp     w16, wzr, [sp, #OFFSETOF__CONTEXT__ContextFlags] // ContextFlags, Cpsr
+
+    mov     x0, sp
+    bl      C_FUNC(JIT_PollGCPreservingRegsWorker)
+    mov     w17, w0
+
+    ldp     x0, x1, [sp, #(OFFSETOF__CONTEXT__X0 + 0)]
+    ldp     x2, x3, [sp, #(OFFSETOF__CONTEXT__X0 + 16)]
+    ldp     x4, x5, [sp, #(OFFSETOF__CONTEXT__X0 + 32)]
+    ldp     x6, x7, [sp, #(OFFSETOF__CONTEXT__X0 + 48)]
+    ldp     x8, x9, [sp, #(OFFSETOF__CONTEXT__X0 + 64)]
+    ldp     x10, x11, [sp, #(OFFSETOF__CONTEXT__X0 + 80)]
+    ldp     x12, x13, [sp, #(OFFSETOF__CONTEXT__X0 + 96)]
+    ldp     x14, x15, [sp, #(OFFSETOF__CONTEXT__X0 + 112)]
+    // x16 and x17 are trashed, and x18 is the platform register.
+    ldr     x19, [sp, #(OFFSETOF__CONTEXT__X0 + 152)]
+    ldp     x20, x21, [sp, #(OFFSETOF__CONTEXT__X0 + 160)]
+    ldp     x22, x23, [sp, #(OFFSETOF__CONTEXT__X0 + 176)]
+    ldp     x24, x25, [sp, #(OFFSETOF__CONTEXT__X0 + 192)]
+    ldp     x26, x27, [sp, #(OFFSETOF__CONTEXT__X0 + 208)]
+    ldr     x28, [sp, #(OFFSETOF__CONTEXT__X0 + 224)]
+
+    cbnz    w17, LOCAL_LABEL(JIT_PollGCPreservingRegsAbort)
+
+    .cfi_remember_state
+    EPILOG_STACK_RESTORE
+    EPILOG_RESTORE_REG_PAIR_INDEXED fp, lr, 16
+    EPILOG_RETURN
+
+    .cfi_restore_state
+LOCAL_LABEL(JIT_PollGCPreservingRegsAbort):
+    // Raise a pending abort at the return address of the poll, which RedirectForThreadAbort expects in lr.
+    EPILOG_STACK_RESTORE
+    EPILOG_RESTORE_REG_PAIR_INDEXED fp, lr, 16
+    b       C_FUNC(RedirectForThreadAbort)
+NESTED_END JIT_PollGCPreservingRegsRare, _TEXT
+
 #endif // FEATURE_HIJACK
 
 // ------------------------------------------------------------------

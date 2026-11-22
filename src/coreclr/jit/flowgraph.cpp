@@ -66,6 +66,8 @@ static bool blockNeedsGCPoll(BasicBlock* block)
 // Notes:
 //    The tree nodes are scanned to find calls to methods with SuppressGCTransitionAttribute.
 //
+//    In signalless mode, also insert the GC polls that fgFindSignallessGCPollBlocks asks for.
+//
 //    This must be done after any transformations that would add control flow between
 //    calls.
 //
@@ -76,10 +78,52 @@ PhaseStatus Compiler::fgInsertGCPolls()
 {
     PhaseStatus result = PhaseStatus::MODIFIED_NOTHING;
 
+    // Signalless mode needs more polls. Find out where before the polls below change the flow graph.
+    const bool     signalless         = opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS);
+    const unsigned signallessMaxBBNum = fgBBNumMax;
+    BitVecTraits   signallessTraits(signallessMaxBBNum + 1, this);
+    BitVec         signallessPollBlocks(BitVecOps::UninitVal());
+    bool           signallessEntryPoll = false;
+
+    if (signalless)
+    {
+        signallessPollBlocks = BitVecOps::MakeEmpty(&signallessTraits);
+        signallessEntryPoll  = fgFindSignallessGCPollBlocks(&signallessTraits, &signallessPollBlocks);
+
+        if (signallessEntryPoll || !BitVecOps::IsEmpty(&signallessTraits, signallessPollBlocks))
+        {
+            optMethodFlags |= OMF_NEEDS_GCPOLLS;
+        }
+    }
+
     if ((optMethodFlags & OMF_NEEDS_GCPOLLS) == 0)
     {
         return result;
     }
+
+    // Blocks created below get larger numbers, and none of them need signalless polls.
+    auto needsSignallessPoll = [&](BasicBlock* block) {
+        return signalless && (block->bbNum <= signallessMaxBBNum) &&
+               BitVecOps::IsMember(&signallessTraits, signallessPollBlocks, block->bbNum);
+    };
+
+    // Splitting a return block moves the return into a new block.
+    auto replaceReturnBlock = [this](BasicBlock* oldBlock, BasicBlock* newBlock) {
+        assert(newBlock->KindIs(BBJ_RETURN));
+
+        if (genReturnBB == oldBlock)
+        {
+            genReturnBB = newBlock;
+        }
+
+        for (BasicBlockList* retBlocks = fgReturnBlocks; retBlocks != nullptr; retBlocks = retBlocks->next)
+        {
+            if (retBlocks->block == oldBlock)
+            {
+                retBlocks->block = newBlock;
+            }
+        }
+    };
 
     bool createdPollBlocks = false;
 
@@ -89,7 +133,7 @@ PhaseStatus Compiler::fgInsertGCPolls()
     {
         compCurBB = block;
 
-        if (!blockNeedsGCPoll(block))
+        if (!blockNeedsGCPoll(block) && !needsSignallessPoll(block))
         {
             continue;
         }
@@ -109,15 +153,18 @@ PhaseStatus Compiler::fgInsertGCPolls()
         // We'd like to insert an inline poll. Below is the list of places where we
         // can't or don't want to emit an inline poll. Check all of those. If after all of that we still
         // have INLINE, then emit an inline check.
+        //
+        // Signalless code polls far more often, so it uses inline polls even when not optimizing,
+        // and in the single return block.
 
-        if (opts.OptimizationDisabled())
+        if (opts.OptimizationDisabled() && !signalless)
         {
             // Don't split blocks and create inlined polls unless we're optimizing.
             //
             JITDUMP("Selecting CALL poll in block " FMT_BB " because of debug/minopts\n", block->bbNum);
             pollType = GCPOLL_CALL;
         }
-        else if (genReturnBB == block)
+        else if ((genReturnBB == block) && !signalless)
         {
             // we don't want to split the single return block
             //
@@ -148,12 +195,39 @@ PhaseStatus Compiler::fgInsertGCPolls()
         }
 
         BasicBlock* curBasicBlock = fgCreateGCPoll(pollType, block);
-        createdPollBlocks |= (block != curBasicBlock);
+        if (block != curBasicBlock)
+        {
+            createdPollBlocks = true;
+
+            if (curBasicBlock->KindIs(BBJ_RETURN))
+            {
+                replaceReturnBlock(block, curBasicBlock);
+            }
+        }
+
         block = curBasicBlock;
     }
 
-    // We should never split blocks unless we're optimizing.
-    assert(!createdPollBlocks || opts.OptimizationEnabled());
+    if (signallessEntryPoll)
+    {
+        // Move the code of the first block into a new block, so that the method polls before doing anything else.
+        BasicBlock* const entryBlock = fgFirstBB;
+        BasicBlock* const codeBlock  = fgSplitBlockAtBeginning(entryBlock);
+        if (codeBlock->KindIs(BBJ_RETURN))
+        {
+            replaceReturnBlock(entryBlock, codeBlock);
+        }
+
+        JITDUMP("Signalless: adding a GC poll on entry in " FMT_BB "\n", entryBlock->bbNum);
+        compCurBB = entryBlock;
+        fgCreateGCPoll(GCPOLL_INLINE, entryBlock);
+
+        createdPollBlocks = true;
+        result            = PhaseStatus::MODIFIED_EVERYTHING;
+    }
+
+    // We should never split blocks unless we're optimizing, or need the polls of signalless mode.
+    assert(!createdPollBlocks || opts.OptimizationEnabled() || signalless);
 
     return result;
 }
@@ -4187,7 +4261,9 @@ PhaseStatus Compiler::fgSetBlockOrder()
     BasicBlock::s_nMaxTrees = 0;
 #endif
 
-    if (fgHasCycleWithoutGCSafePoint())
+    // In signalless mode nothing interrupts a thread at an arbitrary instruction, so cycles without GC safe
+    // points do not call for fully interruptible code. fgInsertGCPolls makes such cycles poll instead.
+    if (!opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS) && fgHasCycleWithoutGCSafePoint())
     {
 #if defined(TARGET_WASM)
         // TODO-WASM: insert GC polls for loops, and arrange it so the
@@ -4228,8 +4304,9 @@ class GCSafePointSuccessorEnumerator
 
 public:
     // Constructs an enumerator of successors to be used for checking for GC
-    // safe point cycles.
-    GCSafePointSuccessorEnumerator(Compiler* comp, BasicBlock* block)
+    // safe point cycles. Unless 'tailCallsLoopToEntry' is false, a block that
+    // ends with a tail call gets the method entry as a pseudo successor.
+    GCSafePointSuccessorEnumerator(Compiler* comp, BasicBlock* block, bool tailCallsLoopToEntry = true)
         : m_block(block)
     {
         m_numSuccs = 0;
@@ -4245,7 +4322,7 @@ public:
 
         if (m_numSuccs == 0)
         {
-            if (block->endsWithTailCallOrJmp(comp, true))
+            if (tailCallsLoopToEntry && block->endsWithTailCallOrJmp(comp, true))
             {
                 // This tail call might combine with other tail calls to form a
                 // loop. Add a pseudo successor back to the entry to model
@@ -4381,6 +4458,195 @@ bool Compiler::fgHasCycleWithoutGCSafePoint()
     }
 
     return false;
+}
+
+//------------------------------------------------------------------------------
+// fgFindSignallessGCPollBlocks: Determine where the method needs GC polls in
+//   signalless mode.
+//
+// Arguments:
+//   traits     - traits for block sets indexed by bbNum
+//   pollBlocks - [in, out] set of blocks that need a GC poll
+//
+// Returns:
+//   True if the method also needs a GC poll on entry.
+//
+// Notes:
+//   In signalless mode (JIT_FLAG_SIGNALLESS) the runtime never interrupts a
+//   running thread: there is neither return address hijacking nor
+//   redirection of threads stopped in fully interruptible code. A thread
+//   running managed code must reach a GC poll in bounded time on its own, so
+//   every cycle in the flow graph must poll, and so must deep chains of calls.
+//
+//   JitSignallessPolls selects whether calls count as polls:
+//
+//   0 - Calls do not poll. Every cycle polls, unless it goes through a block
+//       with a GC transition or a GC poll of its own, and methods that make
+//       managed calls poll on entry to bound the work done between polls in
+//       deep recursion.
+//
+//   1 - Calls poll on return, like calls that return address hijacking would
+//       stop. Every method polls before it returns, so blocks with managed
+//       calls poll too and only cycles without them need polls of their own.
+//       A tail call does not return to its caller, so the method polls before
+//       making one.
+//
+//   2 - Calls poll on entry. Every method polls on entry, so blocks with
+//       managed calls poll too and only cycles without them need polls of
+//       their own.
+//
+//   3 - Loops and returns poll. Every cycle polls as in mode 0, and every
+//       method polls before it returns as in mode 1. Modes 1 and 2 rely on
+//       every callee to poll, while precompiled (ReadyToRun) code does not,
+//       so a loop that only calls such code would never poll in them.
+//
+//   Calls to special intrinsics do not count as polls in modes 1 and 2, as
+//   Lowering can expand them into code without calls.
+//
+//   Reverse P/Invoke methods never poll on entry or return: they are not in
+//   cooperative mode there, and their GC mode transitions poll anyway.
+//
+//   Every cycle in a graph has a back edge with respect to any DFS forest of
+//   that graph, so a DFS that does not enter polling blocks, and places a
+//   poll at one end of each back edge it finds, makes every cycle poll.
+//   Exceptional flow is not followed, as exception dispatch makes GC mode
+//   transitions on its own.
+//
+bool Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBlocks)
+{
+    assert(opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS));
+
+    const unsigned placement   = JitConfig.JitSignallessPolls();
+    const bool     callsPoll   = (placement == 1) || (placement == 2);
+    const bool     returnsPoll = (placement == 1) || (placement == 3);
+
+    // Find the blocks that poll, or that will poll, regardless of their location in the flow graph.
+    BitVec pollingBlocks(BitVecOps::MakeEmpty(traits));
+    bool   hasManagedCalls = false;
+
+    for (BasicBlock* const block : Blocks())
+    {
+        // fgInsertGCPolls adds polls to these blocks anyway.
+        bool isPolling = block->HasFlag(BBF_NEEDS_GCPOLL);
+
+        if (block->HasFlag(BBF_HAS_JMP))
+        {
+            // The block ends with a tail call or a jmp.
+            hasManagedCalls = true;
+        }
+
+        for (Statement* const stmt : block->NonPhiStatements())
+        {
+            if ((stmt->GetRootNode()->gtFlags & GTF_CALL) == 0)
+            {
+                continue;
+            }
+
+            for (GenTree* const tree : stmt->TreeList())
+            {
+                if (tree->OperIs(GT_GCPOLL))
+                {
+                    isPolling = true;
+                }
+                else if (tree->IsCall())
+                {
+                    GenTreeCall* const call = tree->AsCall();
+                    if (call->IsUnmanaged())
+                    {
+                        // Either the GC transition polls, or the transition is suppressed and fgInsertGCPolls
+                        // adds a poll after the call.
+                        isPolling = true;
+                    }
+                    else if (!call->IsHelperCall() && ((call->gtCallMoreFlags & GTF_CALL_M_NOGCCHECK) == 0))
+                    {
+                        hasManagedCalls = true;
+
+                        // A fast tail call does not return here, and Lowering can expand a special intrinsic into
+                        // code without a call.
+                        isPolling |= callsPoll && !call->IsFastTailCall() && !call->IsSpecialIntrinsic();
+                    }
+                }
+            }
+        }
+
+        if (isPolling)
+        {
+            BitVecOps::AddElemD(traits, pollingBlocks, block->bbNum);
+        }
+    }
+
+    // Make every cycle without a polling block poll.
+    ArrayStack<GCSafePointSuccessorEnumerator> stack(getAllocator(CMK_ArrayStack));
+    BitVec                                     visited(BitVecOps::MakeEmpty(traits));
+    BitVec                                     finished(BitVecOps::MakeEmpty(traits));
+
+    for (BasicBlock* const root : Blocks())
+    {
+        if (BitVecOps::IsMember(traits, pollingBlocks, root->bbNum) ||
+            BitVecOps::IsMember(traits, visited, root->bbNum))
+        {
+            continue;
+        }
+
+        BitVecOps::AddElemD(traits, visited, root->bbNum);
+        stack.Emplace(this, root, /* tailCallsLoopToEntry */ false);
+
+        while (stack.Height() > 0)
+        {
+            BasicBlock* const block = stack.TopRef().Block();
+            BasicBlock* const succ  = stack.TopRef().NextSuccessor();
+
+            if (succ == nullptr)
+            {
+                BitVecOps::AddElemD(traits, finished, block->bbNum);
+                stack.Pop();
+                continue;
+            }
+
+            if (BitVecOps::IsMember(traits, pollingBlocks, succ->bbNum) ||
+                BitVecOps::IsMember(traits, finished, succ->bbNum))
+            {
+                continue;
+            }
+
+            if (BitVecOps::TryAddElemD(traits, visited, succ->bbNum))
+            {
+                stack.Emplace(this, succ, /* tailCallsLoopToEntry */ false);
+                continue;
+            }
+
+            // 'succ' is on the DFS stack, so this is a back edge. Control never actually flows through a
+            // BBJ_CALLFINALLYRET (codegen jumps directly to its successor), so poll in its successor instead.
+            BasicBlock* const pollBlock = block->KindIs(BBJ_CALLFINALLYRET) ? succ : block;
+            JITDUMP("Signalless: back edge " FMT_BB " -> " FMT_BB " needs a GC poll in " FMT_BB "\n", block->bbNum,
+                    succ->bbNum, pollBlock->bbNum);
+            BitVecOps::AddElemD(traits, *pollBlocks, pollBlock->bbNum);
+        }
+    }
+
+    if (opts.IsReversePInvoke())
+    {
+        return false;
+    }
+
+    if (returnsPoll)
+    {
+        for (BasicBlock* const block : Blocks())
+        {
+            if (block->KindIs(BBJ_RETURN) && !BitVecOps::IsMember(traits, pollingBlocks, block->bbNum))
+            {
+                JITDUMP("Signalless: return block " FMT_BB " needs a GC poll\n", block->bbNum);
+                BitVecOps::AddElemD(traits, *pollBlocks, block->bbNum);
+            }
+        }
+
+        return false;
+    }
+
+    const bool needsEntryPoll =
+        ((placement == 2) || hasManagedCalls) && !BitVecOps::IsMember(traits, pollingBlocks, fgFirstBB->bbNum);
+    JITDUMP("Signalless: %s GC poll on entry\n", needsEntryPoll ? "needs a" : "does not need a");
+    return needsEntryPoll;
 }
 
 /*****************************************************************************/

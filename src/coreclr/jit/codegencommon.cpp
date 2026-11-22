@@ -969,6 +969,12 @@ regMaskTP Compiler::compHelperCallKillSet(CorInfoHelpFunc helper)
             return RBM_INTERFACELOOKUP_FOR_SLOT_TRASH;
 #endif
 
+#ifdef RBM_SIGNALLESS_POLL_GC_TRASH
+        case CORINFO_HELP_POLL_GC:
+            return opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS) ? RBM_SIGNALLESS_POLL_GC_TRASH
+                                                                       : RBM_CALLEE_TRASH;
+#endif
+
         default:
             return RBM_CALLEE_TRASH;
     }

@@ -3769,6 +3769,20 @@ private:
 public:
     static void StaticInitialize();
 
+    // Signalless mode (DOTNET_signalless=1): the runtime never interrupts a thread asynchronously - no OS thread
+    // suspension, special user-mode APCs, activation signals, redirection or return address hijacking.
+    // Suspension relies entirely on threads polling for it: GC mode transitions and the GC polls that the JIT
+    // inserts into managed code when compiling with CORJIT_FLAG_SIGNALLESS.
+    static bool IsSignalless()
+    {
+        LIMITED_METHOD_CONTRACT;
+        return s_isSignalless;
+    }
+
+private:
+    static bool s_isSignalless;
+
+public:
 #if defined(TARGET_WINDOWS)
     static bool AreShadowStacksEnabled()
     {
@@ -3809,7 +3823,7 @@ public:
         LIMITED_METHOD_CONTRACT;
 
     #ifndef DISABLE_THREADSUSPEND
-        return !UseSpecialUserModeApc();
+        return !IsSignalless() && !UseSpecialUserModeApc();
     #else
         return false;
     #endif

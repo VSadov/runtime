@@ -10740,6 +10740,14 @@ regMaskTP emitter::emitGetGCRegsSavedOrModified(CORINFO_METHOD_HANDLE methHnd)
         return RBM_ALLINT & ~RBM_INTERFACELOOKUP_FOR_SLOT_TRASH;
     }
 #endif
+#ifdef RBM_SIGNALLESS_POLL_GC_TRASH
+    else if ((helper == CORINFO_HELP_POLL_GC) && m_compiler->opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS))
+    {
+        // This one is not no-gc either, but it preserves the general purpose registers that it does not trash,
+        // and the runtime reports the GC references in them while the thread is stopped at the poll.
+        return RBM_ALLINT & ~RBM_SIGNALLESS_POLL_GC_TRASH;
+    }
+#endif
     else
     {
         // This is the saved set of registers after a normal call.

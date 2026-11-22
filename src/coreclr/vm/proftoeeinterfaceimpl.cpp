@@ -8657,6 +8657,13 @@ HRESULT ProfToEEInterfaceImpl::DoStackSnapshot(ThreadID thread,
         hr = E_NOTIMPL;
         goto Cleanup;
 #else
+        if (Thread::IsSignalless())
+        {
+            // Walking a thread that is not suspended requires OS-suspending it, which signalless mode never does.
+            hr = E_NOTIMPL;
+            goto Cleanup;
+        }
+
         // Walking separate thread, so it must be suspended.  First, ensure that
         // target thread exists.
         //

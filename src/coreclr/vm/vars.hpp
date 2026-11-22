@@ -324,7 +324,22 @@ GARY_DECL(TypeHandle, g_pPredefinedArrayTypes, ELEMENT_TYPE_MAX);
 // Other bits are used as a counter to enable thread trapping for other reasons, such as ThreadAbort.
 // There could be several active reasons for thread trapping at a time, like aborting multiple threads,
 // thus g_TrapReturningThreads value could be > 3.
-extern "C" volatile int32_t g_TrapReturningThreads;
+//
+// The GC polls in managed code read the flag, and they can be very frequent on all the threads. The flag has a cache
+// line of its own, so that writes to other data do not keep evicting it from the caches of the polling threads. 128 bytes
+// cover the cache lines of Apple Silicon and the pairs of lines that the spatial prefetchers of x64 CPUs fetch together.
+// Assembly helpers and JIT-compiled code use the address of g_TrapReturningThreads as the address of the flag.
+struct alignas(128) TrapReturningThreadsFlag
+{
+    volatile int32_t Value;
+
+    operator int32_t() const
+    {
+        return Value;
+    }
+};
+
+extern "C" TrapReturningThreadsFlag g_TrapReturningThreads;
 
 #ifdef _DEBUG
 // next two variables are used to enforce an ASSERT in Thread::DbgFindThread

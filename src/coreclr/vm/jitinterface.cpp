@@ -10787,6 +10787,17 @@ static CORJIT_FLAGS GetCompileFlags(PrepareCodeConfig* prepareConfig, MethodDesc
         flags.Set(CORJIT_FLAGS::CORJIT_FLAG_FROZEN_ALLOC_ALLOWED);
     }
 
+#ifdef FEATURE_MULTITHREADING
+    // Nothing interrupts running threads in signalless mode, so the JIT must make the code poll for suspension.
+    // The exception is the GC poll helper itself, which would otherwise recurse while a suspension is pending.
+    if (Thread::IsSignalless()
+        && (ftn != CoreLibBinder::GetMethod(METHOD__THREAD__POLLGC))
+        && (ftn != CoreLibBinder::GetMethod(METHOD__THREAD__POLLGC_WORKER)))
+    {
+        flags.Set(CORJIT_FLAGS::CORJIT_FLAG_SIGNALLESS);
+    }
+#endif // FEATURE_MULTITHREADING
+
     // Set optimization flags
     if (!flags.IsSet(CORJIT_FLAGS::CORJIT_FLAG_MIN_OPT))
     {

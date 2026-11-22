@@ -4513,7 +4513,7 @@ BOOL ThreadStore::DbgFindThread(Thread *target)
 
     // Cache the current change stamp for g_TrapReturningThreads
     LONG chgStamp = g_trtChgStamp;
-    STRESS_LOG3(LF_STORE, LL_INFO100, "ThreadStore::DbgFindThread - [thread=%p]. trt=%d. chgStamp=%d\n", GetThreadNULLOk(), g_TrapReturningThreads, chgStamp);
+    STRESS_LOG3(LF_STORE, LL_INFO100, "ThreadStore::DbgFindThread - [thread=%p]. trt=%d. chgStamp=%d\n", GetThreadNULLOk(), (int32_t)g_TrapReturningThreads, chgStamp);
 
 #if 0 // g_TrapReturningThreads debug code.
         int             iRetry = 0;
@@ -4586,7 +4586,7 @@ Retry:
     }
 #endif // g_TrapReturningThreads debug code.
 
-    STRESS_LOG4(LF_STORE, LL_INFO100, "ThreadStore::DbgFindThread - [thread=%p]. trt=%d. chg=%d. cnt=%d\n", GetThreadNULLOk(), g_TrapReturningThreads, g_trtChgStamp.Load(), cntReturn);
+    STRESS_LOG4(LF_STORE, LL_INFO100, "ThreadStore::DbgFindThread - [thread=%p]. trt=%d. chg=%d. cnt=%d\n", GetThreadNULLOk(), (int32_t)g_TrapReturningThreads, g_trtChgStamp.Load(), cntReturn);
 
     // Because of race conditions and the fact that the GC places its
     // own count, I can't assert this precisely.  But I do want to be
@@ -6610,18 +6610,30 @@ BOOL dbgOnly_IsSpecialEEThread()
 
 #endif // _DEBUG
 
+bool Thread::s_isSignalless = false;
+
 void Thread::StaticInitialize()
 {
     WRAPPER_NO_CONTRACT;
 
-#ifdef FEATURE_SPECIAL_USER_MODE_APC
-    InitializeSpecialUserModeApc();
+    // On ARM64, code compiled for signalless mode expects the register preserving GC poll helper, which needs FEATURE_HIJACK.
+#if !defined(TARGET_ARM64) || defined(FEATURE_HIJACK)
+    s_isSignalless = CLRConfig::GetConfigValue(CLRConfig::UNSUPPORTED_signalless) != 0;
+#endif
 
-    // When shadow stacks are enabled, support for special user-mode APCs with the necessary functionality is required
-    if (AreShadowStacksEnabled() && !UseSpecialUserModeApc())
+#ifdef FEATURE_SPECIAL_USER_MODE_APC
+    // Special user-mode APCs are only used to interrupt threads, which signalless mode never does.
+    // That also removes the need for them when shadow stacks are enabled, as nothing redirects or hijacks threads.
+    if (!IsSignalless())
     {
-        EEPOLICY_HANDLE_FATAL_ERROR_WITH_MESSAGE(COR_E_EXECUTIONENGINE,
-            W("Your Windows doesn't fully support CET. Please install all available Windows updates."));
+        InitializeSpecialUserModeApc();
+
+        // When shadow stacks are enabled, support for special user-mode APCs with the necessary functionality is required
+        if (AreShadowStacksEnabled() && !UseSpecialUserModeApc())
+        {
+            EEPOLICY_HANDLE_FATAL_ERROR_WITH_MESSAGE(COR_E_EXECUTIONENGINE,
+                W("Your Windows doesn't fully support CET. Please install all available Windows updates."));
+        }
     }
 #endif
 }

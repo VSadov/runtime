@@ -447,6 +447,7 @@ CONFIG_DWORD_INFO(INTERNAL_DiagnosticSuspend, W("DiagnosticSuspend"), 0, "")
 CONFIG_DWORD_INFO(INTERNAL_SuspendDeadlockTimeout, W("SuspendDeadlockTimeout"), 40000, "")
 CONFIG_DWORD_INFO(INTERNAL_SuspendThreadDeadlockTimeoutMs, W("SuspendThreadDeadlockTimeoutMs"), 2000, "")
 RETAIL_CONFIG_DWORD_INFO(INTERNAL_ThreadSuspendInjection, W("INTERNAL_ThreadSuspendInjection"), 1, "Specifies whether to inject activations for thread suspension on Unix")
+RETAIL_CONFIG_DWORD_INFO(UNSUPPORTED_signalless, W("signalless"), 0, "Experimental: never interrupt threads asynchronously (no OS thread suspension, special user APCs, activation signals or return address hijacking). Thread suspension relies entirely on polling, and the JIT inserts GC polls into the code it generates.")
 
 ///
 /// Thread (miscellaneous)

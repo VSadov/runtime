@@ -1104,6 +1104,11 @@ void Thread::SetAbortEndTime(ULONGLONG endTime, BOOL fRudeAbort)
 
 bool UseActivationInjection()
 {
+    // In signalless mode nothing is injected (see Thread::InjectActivation), but this path must still be
+    // preferred over the one that OS-suspends the target thread.
+    if (Thread::IsSignalless())
+        return true;
+
 #ifdef TARGET_UNIX
     return true;
 #else
@@ -1345,13 +1350,18 @@ Thread::UserAbort(EEPolicy::ThreadAbortTypes abortType, DWORD timeout)
             break;
         }
 
+        if (IsSignalless())
+        {
+            // Nothing interrupts the thread. It will notice the abort request when it polls for it,
+            // which the abort request enables via TrapReturningThreads.
+        }
 #ifdef FEATURE_THREAD_ACTIVATION
-        if (UseActivationInjection())
+        else if (UseActivationInjection())
         {
             InjectActivation(ActivationReason::ThreadAbort);
         }
-        else
 #endif // FEATURE_THREAD_ACTIVATION
+        else
         {
 #ifdef TARGET_UNIX
             _ASSERTE_MSG(false, "Thread::UserAbort: Activation injection is required on Unix platforms");
@@ -3239,6 +3249,10 @@ void ThreadSuspend::SuspendAllThreads()
     uint32_t rehijackDelay = 8;
     uint32_t usecsSinceYield = 0;
 
+    // In signalless mode there is nothing we can do to speed up threads that are running in cooperative mode.
+    // We only observe and wait for them to reach a GC poll or a transition to preemptive mode.
+    const bool canInterrupt = !Thread::IsSignalless();
+
     while(true)
     {
         int remaining = 0;
@@ -3263,7 +3277,7 @@ void ThreadSuspend::SuspendAllThreads()
 
         // if we see progress or have just done a hijacking pass
         // do not hijack in the next iteration
-        if (remaining < prevRemaining || !observeOnly)
+        if (remaining < prevRemaining || !observeOnly || !canInterrupt)
         {
             // 5 usec delay, then check for more progress
             minipal_microdelay(5, &usecsSinceYield);
@@ -3314,6 +3328,12 @@ void Thread::Hijack()
     if (IsGCSpecial())
     {
         // GC threads can not be forced to run preemptively, so we will not try.
+        return;
+    }
+
+    if (IsSignalless())
+    {
+        // Threads are never interrupted in signalless mode. They will rendezvous at their next GC poll.
         return;
     }
 
@@ -3897,7 +3917,7 @@ bool Thread::SysStartSuspendForDebug(AppDomain *pAppDomain)
     }
 
     LOG((LF_CORDB, LL_INFO1000, "[0x%x] SUSPEND: starting suspend.  Trap count: %d\n",
-         pCurThread ? pCurThread->GetThreadId() : (DWORD) -1, g_TrapReturningThreads));
+         pCurThread ? pCurThread->GetThreadId() : (DWORD) -1, (int32_t)g_TrapReturningThreads));
 
     // Caller is expected to be holding the ThreadStore lock
     _ASSERTE(ThreadStore::HoldingThreadStore() || IsAtProcessExit());
@@ -4348,7 +4368,7 @@ void Thread::SysResumeFromDebug(AppDomain *pAppDomain)
         }
     }
 
-    LOG((LF_CORDB, LL_INFO1000, "RESUME: resume complete. Trap count: %d\n", g_TrapReturningThreads));
+    LOG((LF_CORDB, LL_INFO1000, "RESUME: resume complete. Trap count: %d\n", (int32_t)g_TrapReturningThreads));
 }
 
 /*
@@ -5904,6 +5924,11 @@ void Thread::ApcActivationCallback(ULONG_PTR Parameter)
 
 bool Thread::InjectActivation(ActivationReason reason)
 {
+    if (IsSignalless())
+    {
+        return false;
+    }
+
     // Try to avoid sending signals/APCs when another one is in progress,
     // as they may interrupt one another or queue up.
     // Just one at a time is enough. More is not better here.
@@ -5966,12 +5991,74 @@ bool Thread::InjectActivation(ActivationReason reason)
 
 #endif // FEATURE_THREAD_ACTIVATION
 
+#if defined(TARGET_ARM64) && defined(FEATURE_HIJACK) && defined(FEATURE_MULTITHREADING)
+
+// The GC poll helper of signalless mode. It preserves the general purpose registers of the method that polled.
+extern "C" void JIT_PollGCPreservingRegs();
+
+// Called by JIT_PollGCPreservingRegs when a poll is taken. The CONTEXT holds the registers of the method that polled,
+// at the return address of the poll. That is a GC safe point, and as the JIT treats the poll helper as preserving
+// registers, the GC info there describes the references held in any of them. The thread stops there as a thread
+// interrupted at a safe point would, with the references reported and updated through the CONTEXT.
+//
+// Returns whether the thread is to raise a pending abort there. Throwing it from here would unwind the frames above
+// the poll with the registers that the native frames below saved, missing the references that the GC updated in the
+// CONTEXT. Instead, as for a thread redirected at a safe point (see Thread::RedirectedHandledJITCase),
+// JIT_PollGCPreservingRegs resumes the thread under control in THROW_CONTROL_FOR_THREAD_FUNCTION, which raises the
+// abort with the registers from the CONTEXT.
+extern "C" BOOL JIT_PollGCPreservingRegsWorker(CONTEXT* pContext)
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        GC_TRIGGERS;
+        MODE_COOPERATIVE;
+    }
+    CONTRACTL_END;
+
+    PreserveLastErrorHolder preserveLastError;
+
+    Thread* pThread = GetThread();
+
+    RedirectedThreadFrame frame(pContext);
+    frame.Push(pThread);
+
+    pThread->PulseGCMode();
+
+    BOOL abort = FALSE;
+    if (pThread->IsAbortRequested())
+    {
+        // COMPlusCheckForAbort walks the stack, which goes through the frame, to tell whether the abort can be raised.
+        CopyOSContext(pThread->m_OSContext, pContext);
+        abort = (COMPlusCheckForAbort() != NULL);
+    }
+
+    frame.Pop(pThread);
+
+    return abort;
+}
+
+#endif // TARGET_ARM64 && FEATURE_HIJACK && FEATURE_MULTITHREADING
+
 // Initialize thread suspension support
 void ThreadSuspend::Initialize()
 {
+#if defined(TARGET_ARM64) && defined(FEATURE_HIJACK) && defined(FEATURE_MULTITHREADING)
+    if (Thread::IsSignalless())
+    {
+        // Code compiled for signalless mode polls often, and the JIT expects the poll helper to preserve registers.
+        SetJitHelperFunction(CORINFO_HELP_POLL_GC, JIT_PollGCPreservingRegs);
+    }
+#endif // TARGET_ARM64 && FEATURE_HIJACK && FEATURE_MULTITHREADING
+
 #ifdef FEATURE_HIJACK
 #if defined(TARGET_UNIX)
-    ::PAL_SetActivationFunction(HandleSuspensionForInterruptedThread, CheckActivationSafePoint);
+    // In signalless mode activations are never injected. Without a registered activation function, the activation
+    // signal handler does not act on activation signals and only forwards them to a previously installed handler.
+    if (!Thread::IsSignalless())
+    {
+        ::PAL_SetActivationFunction(HandleSuspensionForInterruptedThread, CheckActivationSafePoint);
+    }
 #elif defined(TARGET_WINDOWS)
     if (Thread::AreShadowStacksEnabled())
     {
