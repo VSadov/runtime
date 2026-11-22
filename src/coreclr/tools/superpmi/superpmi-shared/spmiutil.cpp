@@ -299,9 +299,9 @@ void PutArm64Rel12(UINT32* pCode, INT32 imm12)
 
 void PutArm64Rel12Ldr(UINT32* pCode, INT32 imm12)
 {
-    // For a 64-bit LDR the encoded immediate is scaled by the access size (8).
-    INT32  scaledImm12 = imm12 >> 3;
+    // The encoded immediate is scaled by the access size, whose log2 is in bits 31-30.
     UINT32 ldrInstr    = *pCode;
+    INT32  scaledImm12 = imm12 >> (ldrInstr >> 30);
     ldrInstr &= 0xFFC003FF;
     ldrInstr |= (scaledImm12 << 10);
     *pCode = ldrInstr;

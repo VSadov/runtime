@@ -3096,8 +3096,51 @@ void Lowering::ContainCheckIndir(GenTreeIndir* indirNode)
     {
         MakeSrcContained(indirNode, addr);
     }
+    else if (IsPCRelativeLoadAddress(indirNode, addr))
+    {
+        // Codegen loads with "adrp reg, addr@PAGE; ldr reg, [reg, addr@PAGEOFF]".
+        MakeSrcContained(indirNode, addr);
+    }
 #endif // TARGET_ARM64
 }
+
+#ifdef TARGET_ARM64
+//------------------------------------------------------------------------
+// IsPCRelativeLoadAddress: Determine whether an indir can load from its constant address
+//   relative to the PC, with the address computed by ADRP into the destination register.
+//
+// Arguments:
+//    indirNode - The indirection node
+//    addr      - The address of the indirection
+//
+// Return Value:
+//    True if the address is a runtime global that the VM expects to be within reach of
+//    the code and the indirection is a plain integer load from it.
+//
+bool Lowering::IsPCRelativeLoadAddress(GenTreeIndir* indirNode, GenTree* addr)
+{
+    if (!indirNode->OperIs(GT_IND) || !addr->IsIconHandle(GTF_ICON_GLOBAL_PTR) || m_compiler->opts.compReloc)
+    {
+        return false;
+    }
+
+    // Small types would need extending loads; GC types and volatile or unaligned loads are left alone.
+    if (!varTypeIsIntegral(indirNode) || varTypeIsSmall(indirNode) || indirNode->IsVolatile() ||
+        indirNode->IsUnaligned())
+    {
+        return false;
+    }
+
+    // The page offset is encoded scaled by the access size.
+    ssize_t address = addr->AsIntCon()->IconValue();
+    if ((address % genTypeSize(indirNode)) != 0)
+    {
+        return false;
+    }
+
+    return m_compiler->eeGetRelocTypeHint((void*)address) == CorInfoReloc::ARM64_PAGEBASE_REL21;
+}
+#endif // TARGET_ARM64
 
 //------------------------------------------------------------------------
 // ContainCheckBinary: Determine whether a binary op's operands should be contained.

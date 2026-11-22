@@ -816,7 +816,7 @@ public:
         m_usedUnwindInfos = 0;
     }
 
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
+#if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
     void SetAllowRel32(BOOL fAllowRel32)
     {
         LIMITED_METHOD_CONTRACT;
@@ -900,7 +900,7 @@ public:
           m_theUnwindBlock(NULL),
           m_totalUnwindInfos(0),
           m_usedUnwindInfos(0)
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
+#if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
         , m_fAllowRel32(FALSE)
 #endif
 #if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
@@ -962,8 +962,8 @@ protected :
     ULONG                   m_totalUnwindInfos; // Number of RUNTIME_FUNCTION needed
     ULONG                   m_usedUnwindInfos;
 
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
-    BOOL                    m_fAllowRel32;      // Use 32-bit PC relative address modes
+#if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
+    BOOL                    m_fAllowRel32;      // Use 32-bit PC relative address modes (ARM64: ADRP based addressing of data)
 #endif
 #if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
     BOOL                    m_fJumpStubOverflow;   // Overflow while trying to alocate jump stub slot within PC relative branch region

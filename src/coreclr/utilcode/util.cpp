@@ -1822,8 +1822,8 @@ void PutArm64Rel12(UINT32 * pCode, INT32 imm12)
 }
 
 //*****************************************************************************
-//  Extract the 12-bit page offset from an LDR instruction (unsigned immediate).
-//  For a 64-bit LDR the encoded immediate is scaled by 8 bytes.
+//  Extract the 12-bit page offset from an integer LDR/STR instruction (unsigned
+//  immediate). The encoded immediate is scaled by the access size.
 //*****************************************************************************
 INT32 GetArm64Rel12Ldr(UINT32 * pCode)
 {
@@ -1834,27 +1834,30 @@ INT32 GetArm64Rel12Ldr(UINT32 * pCode)
     // 21-10 contains the scaled immediate. Mask 12 bits and shift by 10 bits.
     INT32 scaledImm12 = (INT32)(ldrInstr & 0x003FFC00) >> 10;
 
-    // Scale back to a byte offset (multiply by 8).
-    return scaledImm12 << 3;
+    // Scale back to a byte offset. Bits 31-30 contain log2 of the access size.
+    return scaledImm12 << (ldrInstr >> 30);
 }
 
 //*****************************************************************************
-//  Deposit the PC-Relative page offset 'imm12' into an LDR instruction (unsigned
-//  immediate). For a 64-bit LDR the immediate represents offset/8 (scaled by 8).
+//  Deposit the PC-Relative page offset 'imm12' into an integer LDR/STR instruction
+//  (unsigned immediate). The immediate represents the offset divided by the access size.
 //*****************************************************************************
 void PutArm64Rel12Ldr(UINT32 * pCode, INT32 imm12)
 {
     LIMITED_METHOD_CONTRACT;
 
-    // Verify that we got a valid offset that is aligned to 8 bytes.
-    _ASSERTE(FitsInRel12(imm12));
-    _ASSERTE((imm12 & 7) == 0);
-
     UINT32 ldrInstr = *pCode;
-    // Check ldr opcode: 1111 1001 0100 .... (LDR 64-bit, unsigned immediate)
-    _ASSERTE((ldrInstr & 0xFFC00000) == 0xF9400000);
+    // Check integer load/store, unsigned immediate: ss11 1001 ....
+    _ASSERTE((ldrInstr & 0x3F000000) == 0x39000000);
 
-    INT32 scaledImm12 = imm12 >> 3;       // scale the offset by the access size (8)
+    // Bits 31-30 contain log2 of the access size.
+    UINT32 scale = ldrInstr >> 30;
+
+    // Verify that we got a valid offset that is aligned to the access size.
+    _ASSERTE(FitsInRel12(imm12));
+    _ASSERTE((imm12 & ((1 << scale) - 1)) == 0);
+
+    INT32 scaledImm12 = imm12 >> scale;   // scale the offset by the access size
 
     ldrInstr &= 0xFFC003FF;               // keep bits 31-22, 9-0
     ldrInstr |= (scaledImm12 << 10);      // Occupy 21-10.

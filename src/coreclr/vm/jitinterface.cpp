@@ -12116,7 +12116,25 @@ void CEEJitInfo::recordRelocation(void *       location,
         INT64 targetPage = (INT64)target & 0xFFFFFFFFFFFFF000LL;
         INT64 locationPage = (INT64)location & 0xFFFFFFFFFFFFF000LL;
         INT64 relPage = (INT64)(targetPage - locationPage);
-        INT32 imm21 = (INT32)(relPage >> 12) & 0x1FFFFF;
+        INT64 relPageCount = relPage >> 12;
+
+        // ADRP reaches +/-4GB: the page delta is a signed 21-bit count of 4KB pages.
+        if ((relPageCount < -0x100000) || (relPageCount > 0xFFFFF))
+        {
+            // The JIT addresses data with ADRP only when getRelocTypeHint expects it to be within reach,
+            // which requires m_fAllowRel32 == TRUE. The code ended up too far from the data, so retry with
+            // m_fAllowRel32 == FALSE.
+            if (!m_fAllowRel32)
+            {
+                _ASSERTE(!"ADRP target out of range");
+                EEPOLICY_HANDLE_FATAL_ERROR(COR_E_EXECUTIONENGINE);
+            }
+
+            m_fJumpStubOverflow = TRUE;
+            break;
+        }
+
+        INT32 imm21 = (INT32)relPageCount & 0x1FFFFF;
         PutArm64Rel21((UINT32 *)locationRW, imm21);
         break;
     }
@@ -12268,6 +12286,15 @@ CorInfoReloc CEEJitInfo::getRelocTypeHint(void * target)
             return CorInfoReloc::RELATIVE32;
     }
 #endif // TARGET_AMD64 || TARGET_RISCV64
+
+#ifdef TARGET_ARM64
+    // The preferred region spans less than 4 GB, so code in it can reach data in it with ADRP.
+    if (m_fAllowRel32)
+    {
+        if (ExecutableAllocator::IsPreferredExecutableRange(target))
+            return CorInfoReloc::ARM64_PAGEBASE_REL21;
+    }
+#endif // TARGET_ARM64
 
     // No hints
     return CorInfoReloc::NONE;
@@ -13401,9 +13428,7 @@ static TADDR UnsafeJitFunctionWorker(
 class JumpStubOverflowCheck final
 {
 #if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
     static BOOL g_fAllowRel32;
-#endif // TARGET_AMD64 || TARGET_RISCV64
 
     BOOL _fForceJumpStubOverflow;
     BOOL _fAllowRel32;
@@ -13423,10 +13448,7 @@ public:
             _fForceJumpStubOverflow = TRUE;
 #endif
 
-        _fAllowRel32 = FALSE;
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
         _fAllowRel32 = (g_fAllowRel32 | _fForceJumpStubOverflow) && g_pConfig->JitEnableOptionalRelocs();
-#endif // TARGET_AMD64 || TARGET_RISCV64
 
         _reserveForJumpStubs = 0;
 #endif // defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
@@ -13442,11 +13464,11 @@ public:
 #if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
         if (_fForceJumpStubOverflow)
             jitInfo.SetJumpStubOverflow(_fAllowRel32);
-        jitInfo.SetAllowRel32(_fAllowRel32);
 #else
         if (_fForceJumpStubOverflow)
             jitInfo.SetJumpStubOverflow(_fForceJumpStubOverflow);
 #endif
+        jitInfo.SetAllowRel32(_fAllowRel32);
         jitInfo.SetReserveForJumpStubs(_reserveForJumpStubs);
 #endif // defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
     }
@@ -13460,12 +13482,10 @@ public:
         {
             // Try again with fAllowRel32 == FALSE.
 
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
             // Disallow rel32 relocs in future.
             g_fAllowRel32 = FALSE;
 
             _fAllowRel32 = FALSE;
-#endif // TARGET_AMD64 || TARGET_RISCV64
 #if defined(TARGET_ARM64)
             _fForceJumpStubOverflow = FALSE;
 #endif // TARGET_ARM64
@@ -13480,9 +13500,9 @@ public:
     }
 };
 
-#if defined(TARGET_AMD64) || defined(TARGET_RISCV64)
+#if defined(TARGET_AMD64) || defined(TARGET_ARM64) || defined(TARGET_RISCV64)
 BOOL JumpStubOverflowCheck::g_fAllowRel32 = TRUE;
-#endif // TARGET_AMD64 || TARGET_RISCV64
+#endif // TARGET_AMD64 || TARGET_ARM64 || TARGET_RISCV64
 
 static void LogJitMethodBegin(MethodDesc* ftn)
 {

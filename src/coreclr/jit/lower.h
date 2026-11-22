@@ -583,6 +583,7 @@ public:
 
 #ifdef TARGET_ARM64
     bool IsContainableUnaryOrBinaryOp(GenTree* parentNode, GenTree* childNode) const;
+    bool IsPCRelativeLoadAddress(GenTreeIndir* indirNode, GenTree* addr);
 #endif // TARGET_ARM64
 
 #if defined(FEATURE_HW_INTRINSICS)

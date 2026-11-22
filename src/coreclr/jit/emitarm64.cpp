@@ -9044,6 +9044,9 @@ void emitter::emitIns_Adrp_Ldr_Add(emitAttr     attr,
 }
 
 // This computes address from the immediate which is relocatable.
+// With INS_ldr, this loads from the address instead, using the destination register for the page address:
+//   adrp ireg, [addr@PAGE]
+//   ldr  ireg, [ireg, addr@PAGEOFF]
 void emitter::emitIns_R_AI(instruction  ins,
                            emitAttr     attr,
                            regNumber    ireg,
@@ -9053,6 +9056,7 @@ void emitter::emitIns_R_AI(instruction  ins,
     emitAttr      size    = EA_SIZE(attr);
     insFormat     fmt     = IF_DI_1E;
     bool          needAdd = false;
+    bool          needLdr = false;
     instrDescJmp* id      = emitNewInstrJmp();
 
     switch (ins)
@@ -9064,6 +9068,14 @@ void emitter::emitIns_R_AI(instruction  ins,
             break;
         case INS_adr:
             break;
+        case INS_ldr:
+            // This computes page address.
+            // page offset is folded into the load.
+            assert(isGeneralRegister(ireg));
+            assert((addr % EA_SIZE_IN_BYTES(size)) == 0);
+            needLdr = true;
+            ins     = INS_adrp;
+            break;
         default:
             unreached();
     }
@@ -9071,7 +9083,7 @@ void emitter::emitIns_R_AI(instruction  ins,
     id->idIns(ins);
     id->idInsFmt(fmt);
     id->idInsOpt(INS_OPTS_NONE);
-    id->idOpSize(size);
+    id->idOpSize(needLdr ? EA_8BYTE : size);
     id->idAddr()->iiaAddr = (BYTE*)addr;
     id->idReg1(ireg);
     id->idSetIsDspReloc();
@@ -9098,6 +9110,20 @@ void emitter::emitIns_R_AI(instruction  ins,
         id->idAddr()->iiaAddr = (BYTE*)addr;
         id->idReg1(ireg);
         id->idReg2(ireg);
+
+        dispIns(id);
+        appendToCurIG(id);
+    }
+    else if (needLdr)
+    {
+        // ldr reg, [reg, imm]; the reloc deposits the page offset scaled by the access size.
+        instrDesc* id = emitNewInstrSC(size, addr);
+        id->idIns(INS_ldr);
+        id->idInsFmt(IF_LS_2A);
+        id->idInsOpt(INS_OPTS_NONE);
+        id->idReg1(ireg);
+        id->idReg2(ireg);
+        id->idSetIsDspReloc();
 
         dispIns(id);
         appendToCurIG(id);
@@ -15038,7 +15064,8 @@ void emitter::emitInsLoadStoreOp(instruction ins, emitAttr attr, regNumber dataR
 
     if (addr->isContained())
     {
-        assert(addr->OperIs(GT_LCL_ADDR, GT_LEA) || (addr->IsIconHandle(GTF_ICON_TLS_HDL)));
+        assert(addr->OperIs(GT_LCL_ADDR, GT_LEA) || addr->IsIconHandle(GTF_ICON_TLS_HDL) ||
+               addr->IsIconHandle(GTF_ICON_GLOBAL_PTR));
 
         int   offset = 0;
         DWORD lsl    = 0;
@@ -15159,6 +15186,13 @@ void emitter::emitInsLoadStoreOp(instruction ins, emitAttr attr, regNumber dataR
             {
                 // On Arm64, TEB is in r18, so load from the r18 as base.
                 emitIns_R_R_I(ins, attr, dataReg, REG_R18, addr->AsIntCon()->IconValue());
+            }
+            else if (addr->IsIconHandle(GTF_ICON_GLOBAL_PTR))
+            {
+                // A global within reach of the code, see Lowering::IsPCRelativeLoadAddress.
+                GenTreeIntCon* con = addr->AsIntCon();
+                emitIns_R_AI(ins, EA_SET_FLG(attr, EA_DSP_RELOC_FLG), dataReg,
+                             con->IconValue() DEBUGARG(con->GetTargetHandle()) DEBUGARG(con->gtFlags));
             }
             else if (emitIns_valid_imm_for_ldst_offset(offset, emitTypeSize(indir->TypeGet())))
             {
