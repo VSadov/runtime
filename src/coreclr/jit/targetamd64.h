@@ -540,6 +540,15 @@
 
 #define RBM_INTERFACELOOKUP_FOR_SLOT_TRASH (RBM_CALLEE_TRASH & ~(RBM_ARG_REGS | RBM_FLTARG_REGS))
 
+// The registers trashed by the CORINFO_HELP_POLL_GC helper in signalless mode (JIT_FLAG_SIGNALLESS). The helper
+// preserves the other general purpose registers, and the runtime reports the GC references in them through the
+// GC info at the return address of the call while the thread is stopped at the poll. RAX may hold the address of
+// the helper or be trashed by a jump stub on the way to it, and the CONTEXT that the runtime reports the registers
+// from does not hold the APX registers.
+#define RBM_SIGNALLESS_POLL_GC_TRASH                                                                                   \
+    (RBM_FLT_CALLEE_TRASH | RBM_MSK_CALLEE_TRASH | RBM_DEFAULT_HELPER_CALL_TARGET |                                     \
+     (RBM_INT_CALLEE_TRASH & ~RBM_INT_CALLEE_TRASH_INIT))
+
 #define RBM_VALIDATE_INDIRECT_CALL_TRASH (RBM_INT_CALLEE_TRASH & ~(RBM_R10 | RBM_RCX))
 #define RBM_VALIDATE_INDIRECT_CALL_TRASH_ALL (RBM_INT_CALLEE_TRASH_ALL & ~(RBM_R10 | RBM_RCX))
 #define REG_VALIDATE_INDIRECT_CALL_ADDR REG_RCX

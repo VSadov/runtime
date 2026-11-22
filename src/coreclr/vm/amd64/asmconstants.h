@@ -253,9 +253,25 @@ ASMCONSTANTS_C_ASSERT(SIZEOF__CONTEXT
 ASMCONSTANTS_C_ASSERT(OFFSETOF__CONTEXT__ContextFlags
                     == offsetof(CONTEXT, ContextFlags));
 
+#define               OFFSETOF__CONTEXT__MxCsr        (8*6 + 4)
+ASMCONSTANTS_C_ASSERT(OFFSETOF__CONTEXT__MxCsr
+                    == offsetof(CONTEXT, MxCsr));
+
+#define               OFFSETOF__CONTEXT__SegCs        (8*6 + 4*2)
+ASMCONSTANTS_C_ASSERT(OFFSETOF__CONTEXT__SegCs
+                    == offsetof(CONTEXT, SegCs));
+
+#define               OFFSETOF__CONTEXT__SegSs        (8*6 + 4*2 + 2*5)
+ASMCONSTANTS_C_ASSERT(OFFSETOF__CONTEXT__SegSs
+                    == offsetof(CONTEXT, SegSs));
+
 #define               OFFSETOF__CONTEXT__EFlags       (8*6 + 4*2 + 2*6)
 ASMCONSTANTS_C_ASSERT(OFFSETOF__CONTEXT__EFlags
                     == offsetof(CONTEXT, EFlags));
+
+#define               CONTEXT_CONTROL_INTEGER_FLOATING_POINT 0x0010000B
+ASMCONSTANTS_C_ASSERT(CONTEXT_CONTROL_INTEGER_FLOATING_POINT
+                    == (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT));
 
 #define               OFFSETOF__CONTEXT__Rax          (8*6 + 4*2 + 2*6 + 4 + 8*6)
 ASMCONSTANTS_C_ASSERT(OFFSETOF__CONTEXT__Rax

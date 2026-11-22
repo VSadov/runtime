@@ -6616,8 +6616,8 @@ void Thread::StaticInitialize()
 {
     WRAPPER_NO_CONTRACT;
 
-    // On ARM64, code compiled for signalless mode expects the register preserving GC poll helper, which needs FEATURE_HIJACK.
-#if !defined(TARGET_ARM64) || defined(FEATURE_HIJACK)
+    // On ARM64 and x64, code compiled for signalless mode expects the register preserving GC poll helper, which needs FEATURE_HIJACK.
+#if !(defined(TARGET_ARM64) || defined(TARGET_AMD64)) || defined(FEATURE_HIJACK)
     s_isSignalless = CLRConfig::GetConfigValue(CLRConfig::UNSUPPORTED_signalless) != 0;
 #endif
 

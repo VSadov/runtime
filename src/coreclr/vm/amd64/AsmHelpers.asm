@@ -11,6 +11,9 @@ extern  ProfileLeave:proc
 extern  ProfileTailcall:proc
 extern OnHijackWorker:proc
 extern JIT_RareDisableHelperWorker:proc
+extern JIT_PollGCPreservingRegsWorker:proc
+extern RedirectForThrowControl:proc
+extern g_TrapReturningThreads:DWORD
 extern IL_Throw_Impl:proc
 extern IL_ThrowExact_Impl:proc
 extern IL_Rethrow_Impl:proc
@@ -134,6 +137,105 @@ NESTED_ENTRY OnHijackTripThread, _TEXT
         pop                 rdx
         ret                 ; return to the correct place, adjusted by our caller
 NESTED_END OnHijackTripThread, _TEXT
+
+; ------------------------------------------------------------------
+; GC poll helper (CORINFO_HELP_POLL_GC) for signalless mode. JIT-compiled code expects it to preserve all general
+; purpose registers other than rax (RBM_SIGNALLESS_POLL_GC_TRASH in the JIT), and the GC info at the return address
+; of the call describes the GC references in any of them.
+LEAF_ENTRY JIT_PollGCPreservingRegs, _TEXT
+        cmp     [g_TrapReturningThreads], 0
+        jnz     JIT_PollGCPreservingRegsRare
+        ret
+LEAF_END JIT_PollGCPreservingRegs, _TEXT
+
+POLL_GC_CONTEXT     equ SIZEOF_MAX_OUTGOING_ARGUMENT_HOMES
+POLL_GC_FRAME_SIZE  equ POLL_GC_CONTEXT + SIZEOF__CONTEXT
+
+; Captures the registers of the method that polled in a CONTEXT, as an interruption at the return address of the poll
+; would, and lets JIT_PollGCPreservingRegsWorker stop the thread there. The GC may update references held in the
+; registers through the CONTEXT, so they are reloaded from it. The thread then returns to the method that polled, or
+; raises a pending abort at the poll.
+NESTED_ENTRY JIT_PollGCPreservingRegsRare, _TEXT
+        push_eflags
+        alloc_stack     POLL_GC_FRAME_SIZE
+        END_PROLOGUE
+
+        ; The CONTEXT must be 16-byte aligned. The return address and the flags leave rsp aligned.
+.errnz POLL_GC_FRAME_SIZE MOD 16
+
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rax], rax
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rcx], rcx
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rdx], rdx
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rbx], rbx
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rbp], rbp
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rsi], rsi
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rdi], rdi
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R8], r8
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R9], r9
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R10], r10
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R11], r11
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R12], r12
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R13], r13
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R14], r14
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R15], r15
+
+        ; The JIT expects the poll to preserve only the callee saved xmm registers, which nothing here changes. Raising
+        ; an abort with the CONTEXT needs all of them though: funclets get the callee saved ones from it, and resuming
+        ; after a catch restores the registers from it.
+        fxsave  [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__FltSave]
+        stmxcsr dword ptr [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__MxCsr]
+
+        ; The prolog pushed the flags above the frame, and the return address of the poll above them.
+        mov     eax, [rsp + POLL_GC_FRAME_SIZE]
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__EFlags], eax
+        mov     rax, [rsp + POLL_GC_FRAME_SIZE + 8]
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rip], rax
+        lea     rax, [rsp + POLL_GC_FRAME_SIZE + 16]
+        mov     [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rsp], rax
+        mov     word ptr [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__SegCs], cs
+        mov     word ptr [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__SegSs], ss
+        mov     dword ptr [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__ContextFlags], CONTEXT_CONTROL_INTEGER_FLOATING_POINT
+
+        lea     rcx, [rsp + POLL_GC_CONTEXT]
+        call    JIT_PollGCPreservingRegsWorker
+
+        ; rax is trashed.
+        mov     rcx, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rcx]
+        mov     rdx, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rdx]
+        mov     rbx, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rbx]
+        mov     rbp, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rbp]
+        mov     rsi, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rsi]
+        mov     rdi, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__Rdi]
+        mov     r8, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R8]
+        mov     r9, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R9]
+        mov     r10, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R10]
+        mov     r11, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R11]
+        mov     r12, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R12]
+        mov     r13, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R13]
+        mov     r14, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R14]
+        mov     r15, [rsp + POLL_GC_CONTEXT + OFFSETOF__CONTEXT__R15]
+
+        test    eax, eax
+        jnz     JIT_PollGCPreservingRegsAbort
+
+        add     rsp, POLL_GC_FRAME_SIZE + 8
+        ret
+
+JIT_PollGCPreservingRegsAbort:
+        ; Raise a pending abort at the return address of the poll. RedirectForThrowControl expects the stack of the
+        ; method that polled and the address to raise the abort at in rcx, as for a thread redirected there. With
+        ; shadow stacks enabled, the return address is popped from the shadow stack as well.
+        xor     eax, eax
+        rdsspq  rax
+        test    rax, rax
+        jz      JIT_PollGCPreservingRegsAbortNoSsp
+        mov     eax, 1
+        incsspq rax
+JIT_PollGCPreservingRegsAbortNoSsp:
+        add     rsp, POLL_GC_FRAME_SIZE + 8
+        pop     rcx
+        jmp     RedirectForThrowControl
+NESTED_END JIT_PollGCPreservingRegsRare, _TEXT
 
 
 ifdef PROFILING_SUPPORTED

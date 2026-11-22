@@ -5991,7 +5991,7 @@ bool Thread::InjectActivation(ActivationReason reason)
 
 #endif // FEATURE_THREAD_ACTIVATION
 
-#if defined(TARGET_ARM64) && defined(FEATURE_HIJACK) && defined(FEATURE_MULTITHREADING)
+#if (defined(TARGET_ARM64) || defined(TARGET_AMD64)) && defined(FEATURE_HIJACK) && defined(FEATURE_MULTITHREADING)
 
 // The GC poll helper of signalless mode. It preserves the general purpose registers of the method that polled.
 extern "C" void JIT_PollGCPreservingRegs();
@@ -6038,18 +6038,18 @@ extern "C" BOOL JIT_PollGCPreservingRegsWorker(CONTEXT* pContext)
     return abort;
 }
 
-#endif // TARGET_ARM64 && FEATURE_HIJACK && FEATURE_MULTITHREADING
+#endif // (TARGET_ARM64 || TARGET_AMD64) && FEATURE_HIJACK && FEATURE_MULTITHREADING
 
 // Initialize thread suspension support
 void ThreadSuspend::Initialize()
 {
-#if defined(TARGET_ARM64) && defined(FEATURE_HIJACK) && defined(FEATURE_MULTITHREADING)
+#if (defined(TARGET_ARM64) || defined(TARGET_AMD64)) && defined(FEATURE_HIJACK) && defined(FEATURE_MULTITHREADING)
     if (Thread::IsSignalless())
     {
         // Code compiled for signalless mode polls often, and the JIT expects the poll helper to preserve registers.
         SetJitHelperFunction(CORINFO_HELP_POLL_GC, JIT_PollGCPreservingRegs);
     }
-#endif // TARGET_ARM64 && FEATURE_HIJACK && FEATURE_MULTITHREADING
+#endif // (TARGET_ARM64 || TARGET_AMD64) && FEATURE_HIJACK && FEATURE_MULTITHREADING
 
 #ifdef FEATURE_HIJACK
 #if defined(TARGET_UNIX)
