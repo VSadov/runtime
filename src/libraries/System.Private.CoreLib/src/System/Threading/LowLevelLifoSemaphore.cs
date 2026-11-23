@@ -128,9 +128,13 @@ namespace System.Threading
         // It is generally unusual to have > 1 signal. That only happens when the count of desired workers had a forced change.
         // In any case, we would prefer that extra signals be consumed by active workers, but must guarantee that signals
         // are consumed eventually thus we release waiters one by one.
+        //
+        // A spinning thread claims a signal within a few microseconds, so a waiter is woken only for the signals beyond one per
+        // spinner. A spinner that stops spinning claims a signal or becomes a waiter in the same update, so the signals it was
+        // counted for are not left without a wake.
         private static bool HasWaitersToWake(Counts counts) =>
             counts.CountOfWaitersSignaledToWake == 0 &&
-            counts.SignalCount > 0 &&
+            counts.SignalCount > counts.SpinnerCount &&
             counts.WaiterCount > 0;
 
         private void MaybeWakeWaiter(Counts counts)
@@ -167,7 +171,7 @@ namespace System.Threading
 
                 // CAS collision, but still have waiters to wake, try again.
                 Backoff.Exponential(collisionCount++);
-                counts = _separated._counts;
+                counts = _separated._counts.ReadAtomic();
             }
             while (HasWaitersToWake(counts));
         }
@@ -455,6 +459,7 @@ namespace System.Threading
             private const byte SignalCountShift = 0;
             private const byte WaiterCountShift = 16;
             private const byte CountOfWaitersSignaledToWakeShift = 32;
+            private const byte SpinnerCountShift = 48;
 
             private ulong _data;
 
@@ -527,6 +532,31 @@ namespace System.Threading
                 Debug.Assert(CountOfWaitersSignaledToWake != 0);
                 _data -= (ulong)1 << CountOfWaitersSignaledToWakeShift;
             }
+
+            public ushort SpinnerCount
+            {
+                get => GetUInt16Value(SpinnerCountShift);
+            }
+
+            public void DecrementSpinnerCount()
+            {
+                Debug.Assert(SpinnerCount != 0);
+                _data -= (ulong)1 << SpinnerCountShift;
+            }
+
+            public void InterlockedIncrementSpinnerCount()
+            {
+                var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, 1ul << SpinnerCountShift));
+                Debug.Assert(countsAfterUpdate.SpinnerCount != 0); // overflow check
+            }
+
+            // A plain read of the 64-bit field can tear on 32-bit platforms.
+            public readonly Counts ReadAtomic() =>
+#if TARGET_64BIT
+                new Counts(_data);
+#else
+                new Counts(Volatile.Read(in _data));
+#endif
 
             public Counts InterlockedCompareExchange(Counts newCounts, Counts oldCounts) =>
                 new Counts(Interlocked.CompareExchange(ref _data, newCounts._data, oldCounts._data));
