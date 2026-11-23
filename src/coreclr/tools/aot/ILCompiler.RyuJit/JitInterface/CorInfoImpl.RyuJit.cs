@@ -643,6 +643,13 @@ namespace Internal.JitInterface
                     return _compilation.NodeFactory.ReadyToRunHelper(ReadyToRunHelper.StackProbe);
 
                 case CorInfoHelpFunc.CORINFO_HELP_POLL_GC:
+                    // In signalless mode, the JIT expects the poll helper to preserve the general purpose registers
+                    // other than RBM_SIGNALLESS_POLL_GC_TRASH on the targets that define it.
+                    if ((_compilation._compilationOptions & RyuJitCompilationOptions.Signalless) != 0 &&
+                        _compilation.TypeSystemContext.Target.Architecture is TargetArchitecture.X64 or TargetArchitecture.ARM64)
+                    {
+                        return _compilation.NodeFactory.ReadyToRunHelper(ReadyToRunHelper.GCPollPreservingRegs);
+                    }
                     return _compilation.NodeFactory.ReadyToRunHelper(ReadyToRunHelper.GCPoll);
 
                 case CorInfoHelpFunc.CORINFO_HELP_LMUL:

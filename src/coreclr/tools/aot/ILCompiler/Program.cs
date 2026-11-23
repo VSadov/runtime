@@ -231,6 +231,11 @@ namespace ILCompiler
                 const string knobsBlobName = "g_compilerEmbeddedKnobsBlob";
                 string[] runtimeOptions = Get(_command.RuntimeOptions);
                 string[] runtimeKnobs = Get(_command.RuntimeKnobs);
+                if (Get(_command.Signalless))
+                {
+                    // Tell the runtime that the code polls for suspension, so that it does not interrupt threads.
+                    runtimeOptions = [.. runtimeOptions, "signalless=1"];
+                }
                 if (nativeLib)
                 {
                     // Set owning module of generated native library startup method to compiler generated module,
@@ -375,6 +380,9 @@ namespace ILCompiler
             string jitPath = Get(_command.JitPath);
             if (!string.IsNullOrEmpty(jitPath))
                 ((RyuJitCompilationBuilder)builder).UseJitPath(jitPath);
+
+            if (Get(_command.Signalless))
+                ((RyuJitCompilationBuilder)builder).UseSignalless();
 
             PInvokeILEmitterConfiguration pinvokePolicy = new ConfigurablePInvokePolicy(typeSystemContext.Target,
                 Get(_command.DirectPInvokes), Get(_command.DirectPInvokeLists));

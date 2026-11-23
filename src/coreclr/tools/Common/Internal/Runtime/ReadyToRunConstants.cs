@@ -432,6 +432,9 @@ namespace Internal.ReadyToRunConstants
         ResolveInterfaceMethod,
 
         TlsGetAddr,
+
+        // GC poll helper of signalless mode, which preserves the registers that the JIT expects it to
+        GCPollPreservingRegs,
     }
 
     // Enum used for HFA type recognition.

@@ -23,6 +23,7 @@ namespace ILCompiler
         private ProfileDataManager _profileDataManager;
         private string _orderFile;
         private string _jitPath;
+        private bool _signalless;
 
         public RyuJitCompilationBuilder(CompilerTypeSystemContext context, CompilationModuleGroup group)
             : base(context, group,
@@ -45,6 +46,12 @@ namespace ILCompiler
         public RyuJitCompilationBuilder UseJitPath(string jitPath)
         {
             _jitPath = jitPath;
+            return this;
+        }
+
+        public RyuJitCompilationBuilder UseSignalless()
+        {
+            _signalless = true;
             return this;
         }
 
@@ -135,6 +142,12 @@ namespace ILCompiler
 
             if (_resilient)
                 options |= RyuJitCompilationOptions.UseResilience;
+
+            if (_signalless)
+            {
+                jitFlagBuilder.Add(CorJitFlag.CORJIT_FLAG_SIGNALLESS);
+                options |= RyuJitCompilationOptions.Signalless;
+            }
 
             MethodBodyDeduplicator methodBodyDeduplicator = _methodBodyFolding switch
             {

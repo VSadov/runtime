@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <CLRTestKind>BuildOnly</CLRTestKind>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The suspension times come from runtime events, which NativeAOT delivers to EventListeners only with EventSource support -->
+    <EventSourceSupport>true</EventSourceSupport>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="SuspensionLatency.cs" />

@@ -143,4 +143,76 @@ NESTED_ENTRY RhpGcPollRare, _TEXT
         ret
 NESTED_END RhpGcPollRare, _TEXT
 
+;; The frame of RhpGcPollPreservingRegsRare: a PInvokeTransitionFrame with the preserved registers, the caller's RSP
+;; and the scratch registers that the poll preserves, RCX, RDX and R8-R11.
+SIGNALLESS_POLL_FRAME_FLAGS equ DEFAULT_FRAME_SAVE_FLAGS + PTFF_SAVE_RCX + PTFF_SAVE_RDX + PTFF_SAVE_R8 + PTFF_SAVE_R9 + PTFF_SAVE_R10 + PTFF_SAVE_R11 + PTFF_THREAD_HIJACK
+
+;;
+;; GC poll helper of signalless mode (ILC --signalless). Compiled code expects it to preserve all general purpose
+;; registers other than RAX (RBM_SIGNALLESS_POLL_GC_TRASH in the JIT), and the GC info at the return address of the
+;; call describes the GC references in any of them.
+;;
+LEAF_ENTRY RhpGcPollPreservingRegs, _TEXT
+        cmp         [RhpTrapThreads], 0
+        jne         @F
+        ret
+@@:
+        jmp         RhpGcPollPreservingRegsRare
+LEAF_END RhpGcPollPreservingRegs, _TEXT
+
+;;
+;; Saves the registers of the method that polled in a transition frame that marks the method as the active frame, as a
+;; return address hijack does. The GC reports the references in the registers through the frame, and may update them
+;; there, so they are reloaded from it.
+;;
+NESTED_ENTRY RhpGcPollPreservingRegsRare, _TEXT
+        push_vol_reg    r11                         ; save the scratch registers
+        push_vol_reg    r10                         ;   ..
+        push_vol_reg    r9                          ;   ..
+        push_vol_reg    r8                          ;   ..
+        push_vol_reg    rdx                         ;   ..
+        push_vol_reg    rcx                         ;   ..
+        lea             rax, [rsp + 38h]
+        push_vol_reg    rax                         ; save caller's RSP
+        push_nonvol_reg r15                         ; save preserved registers
+        push_nonvol_reg r14                         ;   ..
+        push_nonvol_reg r13                         ;   ..
+        push_nonvol_reg r12                         ;   ..
+        push_nonvol_reg rdi                         ;   ..
+        push_nonvol_reg rsi                         ;   ..
+        push_nonvol_reg rbx                         ;   ..
+        push_imm        SIGNALLESS_POLL_FRAME_FLAGS ; save the register bitmask
+        push_vol_reg    rax                         ; Thread * (set by RhpGcPoll2)
+        push_nonvol_reg rbp                         ; save caller's RBP
+        mov             rax, [rsp + 17*8]           ; Find the return address
+        push_vol_reg    rax                         ; save m_RIP
+
+        ;; allocate scratch space and any required alignment
+        alloc_stack     28h
+        END_PROLOGUE
+
+        lea         rcx, [rsp + 28h]                ; the frame
+        call        RhpGcPoll2
+
+        add         rsp, 28h + 8                    ; deallocate scratch space and discard m_RIP
+        pop         rbp
+        pop         rax     ; discard Thread*
+        pop         rax     ; discard BITMASK
+        pop         rbx
+        pop         rsi
+        pop         rdi
+        pop         r12
+        pop         r13
+        pop         r14
+        pop         r15
+        pop         rax     ; discard caller RSP
+        pop         rcx
+        pop         rdx
+        pop         r8
+        pop         r9
+        pop         r10
+        pop         r11
+        ret
+NESTED_END RhpGcPollPreservingRegsRare, _TEXT
+
         end

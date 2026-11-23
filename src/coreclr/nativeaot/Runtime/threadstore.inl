@@ -35,10 +35,16 @@ inline Thread * ThreadStore::GetCurrentThreadIfAvailable()
     return NULL;
 }
 
-EXTERN_C volatile uint32_t RhpTrapThreads;
+EXTERN_C TrapThreadsFlagsCacheLine RhpTrapThreads;
 
 // static
 inline bool ThreadStore::IsTrapThreadsRequested()
 {
-    return (RhpTrapThreads & (uint32_t)TrapThreadsFlags::TrapThreads) != 0;
+    return (RhpTrapThreads.Value & (uint32_t)TrapThreadsFlags::TrapThreads) != 0;
+}
+
+// static
+inline bool ThreadStore::IsSignalless()
+{
+    return s_isSignalless;
 }

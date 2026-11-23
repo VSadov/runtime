@@ -294,6 +294,9 @@ void RuntimeThreadShutdown(void* thread)
 
 extern "C" bool RhInitialize(bool isLibrary)
 {
+    // PalInit does not set up interrupting threads in signalless mode.
+    ThreadStore::InitializeSignalless();
+
     if (!PalInit())
         return false;
 

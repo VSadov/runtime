@@ -10,6 +10,12 @@
 // Compare the default mode with signalless mode (DOTNET_signalless=1) by running the same command with and
 // without the environment variable. The reported suspension time is the time between the GCSuspendEEBegin and
 // GCSuspendEEEnd runtime events. Throughput is reported as millions of inner iterations per second per thread.
+//
+// NativeAOT selects the mode at compile time instead. Build the native executable of each mode with, from a Visual
+// Studio developer command prompt:
+//   dotnet build SuspensionLatency.csproj -t:BuildNativeAot -p:TestBuildMode=nativeaot -p:Configuration=<config>
+//     -p:TargetArchitecture=<arch> -p:CLRTestKind=BuildAndRun -p:RequiresProcessIsolation=true
+//     -p:ReferenceXUnitWrapperGenerator=false -p:IlcSignalless=<true|false>
 
 using System;
 using System.Collections.Generic;

@@ -265,5 +265,6 @@ namespace ILCompiler
         ControlFlowGuardAnnotations = 0x1,
         UseDwarf5 = 0x2,
         UseResilience = 0x4,
+        Signalless = 0x8,
     }
 }

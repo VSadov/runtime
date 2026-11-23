@@ -25,9 +25,9 @@
 #include <minipal/time.h>
 #include <minipal/thread.h>
 #include "SignalSafeThreadMap.h"
+#include "RhConfig.h"
 
-EXTERN_C volatile uint32_t RhpTrapThreads;
-volatile uint32_t RhpTrapThreads = (uint32_t)TrapThreadsFlags::None;
+TrapThreadsFlagsCacheLine RhpTrapThreads = { (uint32_t)TrapThreadsFlags::None };
 
 GVAL_IMPL_INIT(PTR_Thread, RhpSuspendingThread, 0);
 
@@ -67,6 +67,16 @@ PTR_Thread ThreadStore::GetSuspendingThread()
 }
 
 #ifndef DACCESS_COMPILE
+
+bool ThreadStore::s_isSignalless = false;
+
+// static
+void ThreadStore::InitializeSignalless()
+{
+    // Only the compiler knows whether the code polls for suspension, so the mode cannot be changed at run time.
+    uint64_t value;
+    s_isSignalless = g_pRhConfig->ReadEmbeddedConfigValue("signalless", &value) && (value != 0);
+}
 
 
 ThreadStore::ThreadStore() :
@@ -248,7 +258,7 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
 
     // set the global trap for pinvoke leave and return
     GCHeapUtilities::GetGCHeap()->SetSuspensionPending(true);
-    RhpTrapThreads |= (uint32_t)TrapThreadsFlags::TrapThreads;
+    RhpTrapThreads.Value |= (uint32_t)TrapThreadsFlags::TrapThreads;
 
     // Our lock-free algorithm depends on flushing write buffers of all processors running RH code.  The
     // reason for this is that we essentially implement Dekker's algorithm, which requires write ordering.
@@ -258,6 +268,10 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
     bool observeOnly = true;
     uint32_t rehijackDelay = 8;
     uint32_t usecsSinceYield = 0;
+
+    // In signalless mode there is nothing we can do to speed up threads that are running in cooperative mode.
+    // We only observe and wait for them to reach a GC poll or a transition to preemptive mode.
+    const bool canInterrupt = !IsSignalless();
 
     while(true)
     {
@@ -285,7 +299,7 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
 
         // if we see progress or have just done a hijacking pass
         // do not hijack in the next iteration
-        if (remaining < prevRemaining || !observeOnly)
+        if (remaining < prevRemaining || !observeOnly || !canInterrupt)
         {
             // 5 usec delay, then check for more progress
             minipal_microdelay(5, &usecsSinceYield);
@@ -355,7 +369,7 @@ void ThreadStore::ResumeAllThreads(bool waitForGCEvent)
         FireEtwGCRestartEEEnd_V1(GetClrInstanceId());
     }
 
-    RhpTrapThreads &= ~(uint32_t)TrapThreadsFlags::TrapThreads;
+    RhpTrapThreads.Value &= ~(uint32_t)TrapThreadsFlags::TrapThreads;
     GCHeapUtilities::GetGCHeap()->SetSuspensionPending(false);
 
     RhpSuspendingThread = NULL;

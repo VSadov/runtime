@@ -16,6 +16,16 @@ enum class TrapThreadsFlags
     TrapThreads = 1,
 };
 
+// The GC polls in managed code read the trap flags, and they can be very frequent on all the threads, in particular in
+// signalless mode. The flags have a cache line of their own, so that writes to other data do not keep evicting them
+// from the caches of the polling threads. 128 bytes cover the cache lines of Apple Silicon and the pairs of lines that
+// the spatial prefetchers of x64 CPUs fetch together. Assembly helpers and compiled code use the address of
+// RhpTrapThreads as the address of the flags.
+struct alignas(128) TrapThreadsFlagsCacheLine
+{
+    volatile uint32_t Value;
+};
+
 class ThreadStore
 {
     friend class RuntimeInstance;
@@ -64,6 +74,16 @@ public:
     void        ResumeAllThreads(bool waitForGCEvent);
 
     static bool IsTrapThreadsRequested();
+
+    // Signalless mode: the runtime never interrupts a thread asynchronously to suspend it. It neither injects
+    // activations (signals or APCs) nor hijacks return addresses, so threads running managed code stop only at GC
+    // polls. The compiler inserts them into the code that it compiles for this mode (ILC --signalless), which it
+    // records in the configuration embedded in the binary.
+    static bool IsSignalless();
+    static void InitializeSignalless();
+
+private:
+    static bool s_isSignalless;
 };
 typedef DPTR(ThreadStore) PTR_ThreadStore;
 

@@ -281,7 +281,8 @@ bool PalInit()
     InitializeCurrentProcessCpuCount();
 
 #ifdef FEATURE_HIJACK
-    if (!InitializeSignalHandling())
+    // Activations are never injected in signalless mode, which does not rely on signals at all.
+    if (!ThreadStore::IsSignalless() && !InitializeSignalHandling())
     {
         return false;
     }

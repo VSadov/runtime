@@ -166,6 +166,7 @@
       <GroupBuildCmd Condition="'$(BuildTestsOnHelix)' == 'true'">$(GroupBuildCmd) "/p:BuildTestsOnHelix=true"</GroupBuildCmd>
       <GroupBuildCmd Condition="'$(PublishReadyToRunInstructionSet)' != ''">$(GroupBuildCmd) "/p:PublishReadyToRunInstructionSet=$(PublishReadyToRunInstructionSet)"</GroupBuildCmd>
       <GroupBuildCmd Condition="'$(IlcInstructionSet)' != ''">$(GroupBuildCmd) "/p:IlcInstructionSet=$(IlcInstructionSet)"</GroupBuildCmd>
+      <GroupBuildCmd Condition="'$(IlcSignalless)' != ''">$(GroupBuildCmd) "/p:IlcSignalless=$(IlcSignalless)"</GroupBuildCmd>
       <GroupBuildCmd Condition="'$(DevTeamProvisioning)' != ''">$(GroupBuildCmd) "/p:DevTeamProvisioning=$(DevTeamProvisioning)"</GroupBuildCmd>
     </PropertyGroup>
 
@@ -236,6 +237,7 @@
       <CreateLibProperty Include="FrameworkLibPath=$(IlcSdkPath)" />
       <CreateLibProperty Include="FrameworkObjPath=$(IntermediateOutputPath)/NativeAOTFX" />
       <CreateLibProperty Condition="'$(Configuration)' == 'Checked' or '$(Configuration)' == 'Release'" Include="Optimize=true" />
+      <CreateLibProperty Condition="'$(IlcSignalless)' != ''" Include="IlcSignalless=$(IlcSignalless)" />
       <CreateLibProperty Include="NETCoreSdkVersion=6.0.0" />
     </ItemGroup>
     <MSBuild Projects="$(CoreCLRBuildIntegrationDir)/BuildFrameworkNativeObjects.proj"

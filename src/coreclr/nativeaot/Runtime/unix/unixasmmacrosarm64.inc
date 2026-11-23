@@ -109,6 +109,14 @@
 #define PTFF_SAVE_X5            0x00010000
 #define PTFF_SAVE_X6            0x00020000
 #define PTFF_SAVE_X7            0x00040000
+#define PTFF_SAVE_X8            0x00080000
+#define PTFF_SAVE_X9            0x00100000
+#define PTFF_SAVE_X10           0x00200000
+#define PTFF_SAVE_X11           0x00400000
+#define PTFF_SAVE_X12           0x00800000
+#define PTFF_SAVE_X13           0x01000000
+#define PTFF_SAVE_X14           0x02000000
+#define PTFF_SAVE_X15           0x04000000
 #define PTFF_SAVE_ALL_PRESERVED 0x000003FF  // NOTE: x19-x28
 #define PTFF_THREAD_HIJACK_HI   0x00000001  // upper 32 bits of the PTFF_THREAD_HIJACK
 

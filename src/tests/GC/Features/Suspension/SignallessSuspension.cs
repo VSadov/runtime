@@ -10,10 +10,11 @@ using System.Threading;
 using TestLibrary;
 using Xunit;
 
-// Runs with DOTNET_signalless=1 (see the project file). In signalless mode the runtime never interrupts a thread to
-// suspend it for a GC, so all kinds of long running managed code must reach a GC poll on their own. A missing poll
-// makes the GC wait until the code completes, which these workloads never do while the GCs run. The threads stop for
-// the GCs at the polls with references in registers, which the compacting GCs must find and update.
+// Runs in signalless mode: with DOTNET_signalless=1 on CoreCLR, and compiled for it on NativeAOT (see the project
+// file). In signalless mode the runtime never interrupts a thread to suspend it for a GC, so all kinds of long running
+// managed code must reach a GC poll on their own. A missing poll makes the GC wait until the code completes, which
+// these workloads never do while the GCs run. The threads stop for the GCs at the polls with references in registers,
+// which the compacting GCs must find and update.
 public static class SignallessSuspension
 {
     private static volatile bool s_stop;

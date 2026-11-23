@@ -45,6 +45,8 @@ public:
     };
 
     bool ReadConfigValue(_In_z_ const char* wszName, uint64_t* pValue, bool decimal = false);
+    // Reads a hex value from the configuration embedded in the binary by the compiler, ignoring the environment.
+    bool ReadEmbeddedConfigValue(_In_z_ const char* wszName, uint64_t* pValue);
     bool ReadStringConfigValue(_In_z_ const char* wszName, const char** pValue);
     bool ReadKnobUInt64Value(_In_z_ const char* wszName, uint64_t* pValue);
     bool ReadKnobStringValue(_In_z_ const char* wszName, const char** pValue);

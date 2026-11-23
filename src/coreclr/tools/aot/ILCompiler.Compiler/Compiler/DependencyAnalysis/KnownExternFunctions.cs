@@ -88,6 +88,7 @@ namespace ILCompiler.DependencyAnalysis
 
                 ReadyToRunHelper.StackProbe => "RhpStackProbe",
                 ReadyToRunHelper.GCPoll => "RhpGcPoll",
+                ReadyToRunHelper.GCPollPreservingRegs => "RhpGcPollPreservingRegs",
                 ReadyToRunHelper.TlsGetAddr => "__tls_get_addr",
 
                 _ => throw new NotImplementedException(function.ToString())
@@ -186,6 +187,7 @@ namespace ILCompiler.DependencyAnalysis
                 ReadyToRunHelper.ReversePInvokeExit => MakeSignature(voidType, nativeIntType),
 
                 ReadyToRunHelper.GCPoll => MakeSignature(voidType),
+                ReadyToRunHelper.GCPollPreservingRegs => MakeSignature(voidType),
 
                 ReadyToRunHelper.GVMLookupForSlot => MakeSignature(nativeIntType, objectType, nativeIntType),
                 ReadyToRunHelper.ResolveInterfaceMethod => MakeSignature(nativeIntType, objectType, nativeIntType),

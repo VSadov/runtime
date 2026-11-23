@@ -104,6 +104,8 @@ namespace ILCompiler
             new("--ildump") { Description = "Dump IL assembly listing for compiler-generated IL" };
         public Option<bool> NoInlineTls { get; } =
             new("--noinlinetls") { Description = "Do not generate inline thread local statics" };
+        public Option<bool> Signalless { get; } =
+            new("--signalless") { Description = "Generate code that polls for thread suspension, so that the runtime never interrupts threads" };
         public Option<string> StackTraceData { get; } =
             new("--stacktracedata") { Description = "Stack trace data to generate (one of: frames, lines, none)" };
         public Option<string> MethodBodyFolding { get; } =
@@ -237,6 +239,7 @@ namespace ILCompiler
             Options.Add(UseScanner);
             Options.Add(NoScanner);
             Options.Add(NoInlineTls);
+            Options.Add(Signalless);
             Options.Add(IlDump);
             Options.Add(StackTraceData);
             Options.Add(MethodBodyFolding);

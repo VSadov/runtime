@@ -529,6 +529,7 @@ void Thread::Hijack()
 {
     ASSERT(ThreadStore::GetCurrentThread() == ThreadStore::GetSuspendingThread());
     ASSERT_MSG(ThreadStore::GetSuspendingThread() != this, "You may not hijack a thread from itself.");
+    ASSERT_MSG(!ThreadStore::IsSignalless(), "Threads are never interrupted in signalless mode.");
 
     if (IsGCSpecial())
     {

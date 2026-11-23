@@ -5,6 +5,8 @@
     <!-- Threads that spin without transitions make GC stress impractically slow -->
     <GCStressIncompatible>true</GCStressIncompatible>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- NativeAOT compiles the code for signalless mode, which then needs no environment variable -->
+    <IlcSignalless>true</IlcSignalless>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildProjectName).cs" />

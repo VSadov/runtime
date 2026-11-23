@@ -685,6 +685,14 @@ EXTERN_C void* RhpGcAlloc(MethodTable* pEEType, uint32_t uFlags, intptr_t numEle
 
     pThread->SetDeferredTransitionFrame(pTransitionFrame);
 
+    // In signalless mode, compiled code counts allocations through here as GC polls (see fgFindSignallessGCPollBlocks
+    // in the JIT). Allocations that do not come here take memory from the allocation context of the thread, which
+    // holds at most a few KB, so a thread that keeps allocating comes here regularly.
+    if (ThreadStore::IsSignalless() && ThreadStore::IsTrapThreadsRequested())
+    {
+        pThread->WaitForGC(pTransitionFrame);
+    }
+
     return GcAllocInternal(pEEType, uFlags, numElements, pThread);
 }
 

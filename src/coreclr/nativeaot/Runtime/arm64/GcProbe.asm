@@ -194,5 +194,82 @@ WaitForGC
         ret
     NESTED_END RhpGcPollRare
 
+;; The frame of RhpGcPollPreservingRegsRare: the fixed part of the PInvokeTransitionFrame (fp, lr, m_pThread, m_Flags),
+;; x19-x28, the caller's SP and the scratch registers that the poll preserves, x0-x11 and x13-x15.
+SIGNALLESS_POLL_FRAME_SIZE  equ 0xF0
+SIGNALLESS_POLL_FRAME_FLAGS equ DEFAULT_FRAME_SAVE_FLAGS + PTFF_SAVE_X0 + PTFF_SAVE_X1 + PTFF_SAVE_X2 + PTFF_SAVE_X3 + PTFF_SAVE_X4 + PTFF_SAVE_X5 + PTFF_SAVE_X6 + PTFF_SAVE_X7 + PTFF_SAVE_X8 + PTFF_SAVE_X9 + PTFF_SAVE_X10 + PTFF_SAVE_X11 + PTFF_SAVE_X13 + PTFF_SAVE_X14 + PTFF_SAVE_X15
+
+;;
+;; GC poll helper of signalless mode (ILC --signalless). Compiled code expects it to preserve all general purpose
+;; registers other than x12, x16, x17 and lr (RBM_SIGNALLESS_POLL_GC_TRASH in the JIT), and the GC info at the return
+;; address of the call describes the GC references in any of them.
+;;
+    LEAF_ENTRY RhpGcPollPreservingRegs
+        ldr         x16, =RhpTrapThreads
+        ldr         w16, [x16]
+        cbnz        w16, RhpGcPollPreservingRegs_RarePath
+        ret
+RhpGcPollPreservingRegs_RarePath
+        b           RhpGcPollPreservingRegsRare
+    LEAF_END RhpGcPollPreservingRegs
+
+;;
+;; Saves the registers of the method that polled in a transition frame that marks the method as the active frame, as a
+;; return address hijack does. The GC reports the references in the registers through the frame, and may update them
+;; there, so they are reloaded from it.
+;;
+    NESTED_ENTRY RhpGcPollPreservingRegsRare
+        PROLOG_SAVE_REG_PAIR   fp, lr, #-SIGNALLESS_POLL_FRAME_SIZE!
+
+        ;; Slot at [sp, #0x10] is reserved for Thread *
+        ;; Slot at [sp, #0x18] is reserved for bitmask of saved registers
+
+        ;; Save callee saved registers
+        PROLOG_SAVE_REG_PAIR   x19, x20, #0x20
+        PROLOG_SAVE_REG_PAIR   x21, x22, #0x30
+        PROLOG_SAVE_REG_PAIR   x23, x24, #0x40
+        PROLOG_SAVE_REG_PAIR   x25, x26, #0x50
+        PROLOG_SAVE_REG_PAIR   x27, x28, #0x60
+
+        ;; Slot at [sp, #0x70] is reserved for caller sp
+
+        ;; Save the scratch registers
+        stp         x0, x1,   [sp, #0x78]
+        stp         x2, x3,   [sp, #0x88]
+        stp         x4, x5,   [sp, #0x98]
+        stp         x6, x7,   [sp, #0xA8]
+        stp         x8, x9,   [sp, #0xB8]
+        stp         x10, x11, [sp, #0xC8]
+        stp         x13, x14, [sp, #0xD8]
+        str         x15,      [sp, #0xE8]
+
+        add         x16, sp, #SIGNALLESS_POLL_FRAME_SIZE
+        str         x16, [sp, #0x70]
+        movz        x16, #(SIGNALLESS_POLL_FRAME_FLAGS & 0xFFFF)
+        movk        x16, #(SIGNALLESS_POLL_FRAME_FLAGS >> 16), lsl #16
+        movk        x16, #PTFF_THREAD_HIJACK_HI, lsl #32
+        str         x16, [sp, #OFFSETOF__PInvokeTransitionFrame__m_Flags]
+
+        mov         x0, sp
+        bl          RhpGcPoll2
+
+        ldp         x0, x1,   [sp, #0x78]
+        ldp         x2, x3,   [sp, #0x88]
+        ldp         x4, x5,   [sp, #0x98]
+        ldp         x6, x7,   [sp, #0xA8]
+        ldp         x8, x9,   [sp, #0xB8]
+        ldp         x10, x11, [sp, #0xC8]
+        ldp         x13, x14, [sp, #0xD8]
+        ldr         x15,      [sp, #0xE8]
+
+        EPILOG_RESTORE_REG_PAIR x19, x20, #0x20
+        EPILOG_RESTORE_REG_PAIR x21, x22, #0x30
+        EPILOG_RESTORE_REG_PAIR x23, x24, #0x40
+        EPILOG_RESTORE_REG_PAIR x25, x26, #0x50
+        EPILOG_RESTORE_REG_PAIR x27, x28, #0x60
+        EPILOG_RESTORE_REG_PAIR fp, lr, #SIGNALLESS_POLL_FRAME_SIZE!
+        EPILOG_RETURN
+    NESTED_END RhpGcPollPreservingRegsRare
+
 
     end
