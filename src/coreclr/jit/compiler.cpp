@@ -5256,10 +5256,19 @@ bool Compiler::shouldAlignLoop(FlowGraphNaturalLoop* loop, BasicBlock* top)
     bool hasCall = loop->VisitLoopBlocks([](BasicBlock* block) {
         for (GenTree* tree : LIR::AsRange(block))
         {
-            if (tree->IsCall())
+            if (!tree->IsCall())
             {
-                return BasicBlockVisit::Abort;
+                continue;
             }
+
+            // An inline GC poll calls the helper from a rarely run block of its own, only when the runtime is
+            // suspending threads, so the call does not count. Signalless code has such polls in most of its loops.
+            if (block->isRunRarely() && tree->IsHelperCall(CORINFO_HELP_POLL_GC))
+            {
+                continue;
+            }
+
+            return BasicBlockVisit::Abort;
         }
 
         return BasicBlockVisit::Continue;
