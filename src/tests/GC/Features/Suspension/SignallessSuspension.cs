@@ -38,6 +38,7 @@ public static class SignallessSuspension
             HandlerLoop,
             ClearLoop,
             ClearInCalleeLoop,
+            AllocationLoop,
             () => SpinWaitPingPong(0),
             () => SpinWaitPingPong(1),
         };
@@ -134,6 +135,26 @@ public static class SignallessSuspension
     {
         Span<byte> bytes = stackalloc byte[4096];
         bytes.Fill(0xFF);
+    }
+
+    // Loops that allocate on every iteration need no GC polls of their own, as the allocation helpers poll in their
+    // slow path. Aborts, which do not wait for GCs, must reach such loops there too.
+    [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsCoreCLR), nameof(PlatformDetection.IsMultithreadingSupported))]
+    public static void AbortReachesLoopThatOnlyAllocates()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.CancelAfter(100);
+#pragma warning disable SYSLIB0046 // ControlledExecution.Run is obsolete
+        Assert.Throws<OperationCanceledException>(() => ControlledExecution.Run(AllocateForever, cancellation.Token));
+#pragma warning restore SYSLIB0046
+    }
+
+    private static void AllocateForever()
+    {
+        while (true)
+        {
+            s_node = new Node();
+        }
     }
 
     private static void TightLoop()
@@ -267,6 +288,27 @@ public static class SignallessSuspension
     {
         public Node Next;
         public int Value;
+    }
+
+    private static Node s_node;
+    private static Node s_anchored;
+
+    // The allocation is the only GC poll in the loop. The anchor stays in a register across it, where the compacting
+    // GCs must find and update it.
+    private static void AllocationLoop()
+    {
+        Node anchor = new Node { Value = 42 };
+        s_anchored = new Node { Next = anchor };
+        int i = 0;
+        while (!s_stop)
+        {
+            s_anchored = new Node { Next = anchor, Value = i++ };
+        }
+
+        if ((s_anchored.Next != anchor) || (anchor.Value != 42))
+        {
+            Fail($"{nameof(AllocationLoop)} lost its anchor");
+        }
     }
 
     private const int ListLength = 1000;

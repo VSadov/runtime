@@ -2269,8 +2269,9 @@ bool GenTreeCall::HasSideEffects(Compiler* compiler, bool ignoreExceptions, bool
         return true;
     }
 
-    // Consider array allocators side-effect free for constant length (if it's not negative and fits into i32)
-    if (helperProperties.IsAllocator(helper))
+    // Consider array allocators side-effect free for constant length (if it's not negative and fits into i32),
+    // unless the allocation is marked as having side effects.
+    if (helperProperties.IsAllocator(helper) && ((gtCallMoreFlags & GTF_CALL_M_ALLOC_SIDE_EFFECTS) == 0))
     {
         GenTree* arrLen = compiler->getArrayLengthFromAllocation((GenTree*)this);
         // if arrLen is nullptr it means it wasn't an array allocator

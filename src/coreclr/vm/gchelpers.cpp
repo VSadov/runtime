@@ -48,6 +48,26 @@ EXTERN_C ee_alloc_context* GetThreadEEAllocContext()
     return &t_runtime_thread_locals.alloc_context;
 }
 
+// In signalless mode, JIT-compiled code counts allocations through these slow paths as GC polls (see
+// fgFindSignallessGCPollBlocks). Allocations that do not come here take memory from the allocation context
+// of the thread, which holds at most a few KB, so a thread that keeps allocating comes here regularly.
+// Stopping only for GCs, as the GC allocator does, is not enough: every suspension relies on polls.
+static void PollForSuspensionInAllocationSlowPath()
+{
+    CONTRACTL
+    {
+        THROWS;
+        GC_TRIGGERS;
+        MODE_COOPERATIVE;
+    }
+    CONTRACTL_END;
+
+    if (Thread::IsSignalless() && g_TrapReturningThreads)
+    {
+        CommonTripThread();
+    }
+}
+
 // Allocate an object on the GC heap.
 //  pEEType         -  type of the object
 //  uFlags          -  GC type flags (see gc.h GC_ALLOC_*)
@@ -68,6 +88,8 @@ EXTERN_C Object* RhpGcAlloc(MethodTable* pMT, GC_ALLOC_FLAGS uFlags, intptr_t nu
     INSTALL_RESUME_AFTER_CATCH_HANDLER_WITH_FRAME(pFrame);
     INSTALL_MANAGED_EXCEPTION_DISPATCHER;
     INSTALL_UNWIND_AND_CONTINUE_HANDLER;
+
+    PollForSuspensionInAllocationSlowPath();
 
 #ifdef _DEBUG
     if (g_pConfig->FastGCStressLevel()) {
@@ -129,6 +151,8 @@ EXTERN_C Object* RhpGcAllocMaybeFrozen(MethodTable* pMT, intptr_t numElements, T
     INSTALL_RESUME_AFTER_CATCH_HANDLER_WITH_FRAME(pFrame);
     INSTALL_MANAGED_EXCEPTION_DISPATCHER;
     INSTALL_UNWIND_AND_CONTINUE_HANDLER;
+
+    PollForSuspensionInAllocationSlowPath();
 
 #ifdef _DEBUG
     if (g_pConfig->FastGCStressLevel()) {

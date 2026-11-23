@@ -127,7 +127,10 @@ CONFIG_INTEGER(JitGCChecks, "JitGCChecks", 0)
 // 1 - calls poll on return: every method polls before returning, so only loops without managed calls need to poll
 // 2 - calls poll on entry: every method polls on entry, so only loops without managed calls need to poll
 // 3 - loops and returns poll: every loop polls on its back edge, and every method polls before returning
-RELEASE_CONFIG_INTEGER(JitSignallessPolls, "JitSignallessPolls", 3)
+// 4 - loops and returns after calls poll: as 3, but returns poll only if they may follow a call without a poll
+// 5 - loops, first calls and returns after calls poll: as 4, but paths that make managed calls also poll before them
+// In every mode, loops that allocate on each iteration need no polls, as allocations poll in their slow path.
+RELEASE_CONFIG_INTEGER(JitSignallessPolls, "JitSignallessPolls", 5)
 CONFIG_INTEGER(JitGCInfoLogging, "JitGCInfoLogging", 0) // If true, prints GCInfo-related output to standard output.
 CONFIG_INTEGER(JitHashBreak, "JitHashBreak", -1)        // Same as JitBreak, but for a method hash
 CONFIG_INTEGER(JitHashHalt, "JitHashHalt", -1)          // Same as JitHalt, but for a method hash

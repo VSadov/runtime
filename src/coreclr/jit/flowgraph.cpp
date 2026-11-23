@@ -83,14 +83,16 @@ PhaseStatus Compiler::fgInsertGCPolls()
     const unsigned signallessMaxBBNum = fgBBNumMax;
     BitVecTraits   signallessTraits(signallessMaxBBNum + 1, this);
     BitVec         signallessPollBlocks(BitVecOps::UninitVal());
-    bool           signallessEntryPoll = false;
+    BitVec         signallessStartPollBlocks(BitVecOps::UninitVal());
 
     if (signalless)
     {
-        signallessPollBlocks = BitVecOps::MakeEmpty(&signallessTraits);
-        signallessEntryPoll  = fgFindSignallessGCPollBlocks(&signallessTraits, &signallessPollBlocks);
+        signallessPollBlocks      = BitVecOps::MakeEmpty(&signallessTraits);
+        signallessStartPollBlocks = BitVecOps::MakeEmpty(&signallessTraits);
+        fgFindSignallessGCPollBlocks(&signallessTraits, &signallessPollBlocks, &signallessStartPollBlocks);
 
-        if (signallessEntryPoll || !BitVecOps::IsEmpty(&signallessTraits, signallessPollBlocks))
+        if (!BitVecOps::IsEmpty(&signallessTraits, signallessPollBlocks) ||
+            !BitVecOps::IsEmpty(&signallessTraits, signallessStartPollBlocks))
         {
             optMethodFlags |= OMF_NEEDS_GCPOLLS;
         }
@@ -105,6 +107,68 @@ PhaseStatus Compiler::fgInsertGCPolls()
     auto needsSignallessPoll = [&](BasicBlock* block) {
         return signalless && (block->bbNum <= signallessMaxBBNum) &&
                BitVecOps::IsMember(&signallessTraits, signallessPollBlocks, block->bbNum);
+    };
+
+    auto needsSignallessStartPoll = [&](BasicBlock* block) {
+        return signalless && (block->bbNum <= signallessMaxBBNum) &&
+               BitVecOps::IsMember(&signallessTraits, signallessStartPollBlocks, block->bbNum);
+    };
+
+    // In signalless mode, a poll in a return block has to follow all of its calls other than a tail call, as
+    // fgFindSignallessGCPollBlocks expects, while fgCreateGCPoll polls before the last statement of the block. So
+    // make that statement a return or a tail call whose operands do not make calls.
+    auto prepareSignallessReturnBlock = [this](BasicBlock* block) {
+        assert(block->KindIs(BBJ_RETURN));
+
+        Statement* const lastStmt = block->lastStmt();
+        GenTree* const   lastNode = lastStmt->GetRootNode();
+
+        if (!lastNode->OperIs(GT_RETURN, GT_RETURN_SUSPEND, GT_SWIFT_ERROR_RET, GT_JMP) &&
+            !(lastNode->IsCall() && lastNode->AsCall()->IsFastTailCall()))
+        {
+            // The return block of a void method ends with the call that the method makes last if that is a tail.
+            // prefixed call, but not a fast tail call.
+            if (info.compRetType == TYP_VOID)
+            {
+                JITDUMP("Signalless: adding a return to " FMT_BB " to poll before\n", block->bbNum);
+                GenTree* const   ret     = new (this, GT_RETURN) GenTreeOp(GT_RETURN, TYP_VOID);
+                Statement* const retStmt = fgNewStmtAtEnd(block, ret, lastStmt->GetDebugInfo());
+                if (fgNodeThreading != NodeThreading::None)
+                {
+                    gtSetStmtInfo(retStmt);
+                    fgSetStmtSeq(retStmt);
+                }
+            }
+
+            return;
+        }
+
+        if (!lastNode->OperIs(GT_RETURN, GT_RETURN_SUSPEND) && !lastNode->IsCall())
+        {
+            return;
+        }
+
+        bool operandsMakeCalls = false;
+        lastNode->VisitOperands([&operandsMakeCalls](GenTree* operand) {
+            operandsMakeCalls |= (operand->gtFlags & GTF_CALL) != 0;
+            return GenTree::VisitResult::Continue;
+        });
+
+        Statement* newStmt;
+        GenTree**  use;
+        if (operandsMakeCalls && gtSplitTree(block, lastStmt, lastNode, &newStmt, &use))
+        {
+            JITDUMP("Signalless: making the calls of the last statement of " FMT_BB " before its GC poll\n",
+                    block->bbNum);
+
+            for (; (newStmt != nullptr) && (newStmt != lastStmt); newStmt = newStmt->GetNextStmt())
+            {
+                fgMorphStmtBlockOps(block, newStmt);
+            }
+
+            fgMorphStmtBlockOps(block, lastStmt);
+            gtUpdateStmtSideEffects(lastStmt);
+        }
     };
 
     // Splitting a return block moves the return into a new block.
@@ -194,6 +258,11 @@ PhaseStatus Compiler::fgInsertGCPolls()
             pollType = GCPOLL_CALL;
         }
 
+        if (signalless && block->KindIs(BBJ_RETURN) && (block->lastStmt() != nullptr))
+        {
+            prepareSignallessReturnBlock(block);
+        }
+
         BasicBlock* curBasicBlock = fgCreateGCPoll(pollType, block);
         if (block != curBasicBlock)
         {
@@ -208,19 +277,25 @@ PhaseStatus Compiler::fgInsertGCPolls()
         block = curBasicBlock;
     }
 
-    if (signallessEntryPoll)
+    // Some blocks need a poll at their start instead, before their first call, such as the first block of the method
+    // for a poll on entry. Move their code into new blocks to put polls before it. Splitting a block keeps its number,
+    // and blocks created here get larger ones.
+    for (BasicBlock* block = fgFirstBB; signalless && (block != nullptr); block = block->Next())
     {
-        // Move the code of the first block into a new block, so that the method polls before doing anything else.
-        BasicBlock* const entryBlock = fgFirstBB;
-        BasicBlock* const codeBlock  = fgSplitBlockAtBeginning(entryBlock);
-        if (codeBlock->KindIs(BBJ_RETURN))
+        if (!needsSignallessStartPoll(block))
         {
-            replaceReturnBlock(entryBlock, codeBlock);
+            continue;
         }
 
-        JITDUMP("Signalless: adding a GC poll on entry in " FMT_BB "\n", entryBlock->bbNum);
-        compCurBB = entryBlock;
-        fgCreateGCPoll(GCPOLL_INLINE, entryBlock);
+        BasicBlock* const codeBlock = fgSplitBlockAtBeginning(block);
+        if (codeBlock->KindIs(BBJ_RETURN))
+        {
+            replaceReturnBlock(block, codeBlock);
+        }
+
+        JITDUMP("Signalless: adding a GC poll at the start of " FMT_BB "\n", block->bbNum);
+        compCurBB = block;
+        fgCreateGCPoll(GCPOLL_INLINE, block);
 
         createdPollBlocks = true;
         result            = PhaseStatus::MODIFIED_EVERYTHING;
@@ -270,7 +345,10 @@ BasicBlock* Compiler::fgCreateGCPoll(GCPollType pollType, BasicBlock* block)
 
         Statement* newStmt = nullptr;
 
-        if (block->HasFlag(BBF_NEEDS_GCPOLL))
+        // In signalless mode, a poll in a return block has to follow its calls, as fgInsertGCPolls makes sure that
+        // the last statement does not make any but a tail call.
+        if (block->HasFlag(BBF_NEEDS_GCPOLL) &&
+            !(block->KindIs(BBJ_RETURN) && opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS)))
         {
             // This is a block that ends in a tail call; gc probe early.
             //
@@ -4461,15 +4539,56 @@ bool Compiler::fgHasCycleWithoutGCSafePoint()
 }
 
 //------------------------------------------------------------------------------
+// IsSignallessPollingAllocation: Determine whether a helper call is an
+//   allocation that polls for suspension in signalless mode.
+//
+// Arguments:
+//   call - the helper call
+//
+// Returns:
+//   True if the call allocates through a helper whose slow path polls in
+//   signalless mode.
+//
+// Notes:
+//   In signalless mode the runtime polls in RhpGcAlloc and
+//   RhpGcAllocMaybeFrozen, the slow paths of these helpers. Every call of
+//   them either takes the slow path or takes memory from the allocation
+//   context of the thread, which the GC refills with at most a few KB
+//   (allocation_quantum), so a thread that keeps allocating polls at least
+//   once per few hundred allocations. The boxing, multi-dimensional array
+//   and continuation allocators are excluded, as they allocate elsewhere.
+//
+bool Compiler::IsSignallessPollingAllocation(GenTreeCall* call)
+{
+    assert(call->IsHelperCall());
+
+    switch (call->GetHelperNum())
+    {
+        case CORINFO_HELP_NEWFAST:
+        case CORINFO_HELP_NEWFAST_MAYBEFROZEN:
+        case CORINFO_HELP_NEWSFAST:
+        case CORINFO_HELP_NEWSFAST_ALIGN8:
+        case CORINFO_HELP_NEWSFAST_ALIGN8_VC:
+        case CORINFO_HELP_NEWARR_1_DIRECT:
+        case CORINFO_HELP_NEWARR_1_MAYBEFROZEN:
+        case CORINFO_HELP_NEWARR_1_PTR:
+        case CORINFO_HELP_NEWARR_1_VC:
+        case CORINFO_HELP_NEWARR_1_ALIGN8:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+//------------------------------------------------------------------------------
 // fgFindSignallessGCPollBlocks: Determine where the method needs GC polls in
 //   signalless mode.
 //
 // Arguments:
-//   traits     - traits for block sets indexed by bbNum
-//   pollBlocks - [in, out] set of blocks that need a GC poll
-//
-// Returns:
-//   True if the method also needs a GC poll on entry.
+//   traits          - traits for block sets indexed by bbNum
+//   pollBlocks      - [in, out] set of blocks that need a GC poll, which fgInsertGCPolls puts at their end
+//   startPollBlocks - [in, out] set of blocks that need a GC poll at their start, before their first call
 //
 // Notes:
 //   In signalless mode (JIT_FLAG_SIGNALLESS) the runtime never interrupts a
@@ -4478,7 +4597,7 @@ bool Compiler::fgHasCycleWithoutGCSafePoint()
 //   running managed code must reach a GC poll in bounded time on its own, so
 //   every cycle in the flow graph must poll, and so must deep chains of calls.
 //
-//   JitSignallessPolls selects whether calls count as polls:
+//   JitSignallessPolls selects where the polls go:
 //
 //   0 - Calls do not poll. Every cycle polls, unless it goes through a block
 //       with a GC transition or a GC poll of its own, and methods that make
@@ -4500,8 +4619,35 @@ bool Compiler::fgHasCycleWithoutGCSafePoint()
 //       every callee to poll, while precompiled (ReadyToRun) code does not,
 //       so a loop that only calls such code would never poll in them.
 //
+//   4 - Loops and returns after calls poll. As mode 3, except that only
+//       returns that may follow a managed call without a poll in between
+//       poll, so leaf methods and paths without calls do not poll before
+//       returning. Their loops poll, so a frame that has not made a call
+//       since it last polled does a bounded amount of work before returning.
+//
+//   5 - Loops, first calls and returns after calls poll. As mode 4, except
+//       that paths that make managed calls other than tail calls also poll
+//       before the first one, so that deep recursion polls in every frame on
+//       the way down as well as on the way up, even if it only calls leaf
+//       methods. These polls go at the start of the blocks that make the
+//       first calls of such paths, unless any of these blocks is part of a
+//       cycle, in which case the method polls on entry as in mode 0.
+//
 //   Calls to special intrinsics do not count as polls in modes 1 and 2, as
 //   Lowering can expand them into code without calls.
+//
+//   A poll on entry, or before the first call of a path, has to come before
+//   the first managed call, and a poll before returning after the last one,
+//   or deep recursion would not poll in every frame. So only polls that come
+//   before the first call make a poll before it redundant, only polls that
+//   follow the last call before a return make a poll before it redundant,
+//   and calls never do: callees only poll in modes 1 and 2 because polls on
+//   entry and return never count on calls to poll.
+//
+//   Allocations count as polls in every mode: the runtime polls in the slow
+//   path of the allocation helpers, which a thread that keeps allocating
+//   takes at least once per allocation context (see
+//   IsSignallessPollingAllocation).
 //
 //   Reverse P/Invoke methods never poll on entry or return: they are not in
 //   cooperative mode there, and their GC mode transitions poll anyway.
@@ -4512,28 +4658,37 @@ bool Compiler::fgHasCycleWithoutGCSafePoint()
 //   Exceptional flow is not followed, as exception dispatch makes GC mode
 //   transitions on its own.
 //
-bool Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBlocks)
+void Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBlocks, BitVec* startPollBlocks)
 {
     assert(opts.jitFlags->IsSet(JitFlags::JIT_FLAG_SIGNALLESS));
 
     const unsigned placement   = JitConfig.JitSignallessPolls();
     const bool     callsPoll   = (placement == 1) || (placement == 2);
-    const bool     returnsPoll = (placement == 1) || (placement == 3);
+    const bool     returnsPoll = (placement == 1) || (placement == 3) || (placement == 4) || (placement == 5);
+    const bool     entryPolls  = !returnsPoll || (placement == 5);
+    const bool     leavesPoll  = (placement != 4) && (placement != 5);
 
-    // Find the blocks that poll, or that will poll, regardless of their location in the flow graph.
+    // Find the blocks that poll, or that will poll, regardless of their location in the flow graph. Polls before
+    // calls and returns have to come before the first and after the last call, so also find out which blocks make
+    // calls other than tail calls, which of those poll before their first and after their last such call, and
+    // whether the method polls before its first managed call.
     BitVec pollingBlocks(BitVecOps::MakeEmpty(traits));
-    bool   hasManagedCalls = false;
+    BitVec callingBlocks(BitVecOps::MakeEmpty(traits));
+    BitVec pollingBeforeCallsBlocks(BitVecOps::MakeEmpty(traits));
+    BitVec pollingAfterCallsBlocks(BitVecOps::MakeEmpty(traits));
+    bool   hasManagedCalls      = false;
+    bool   pollsBeforeFirstCall = false;
 
     for (BasicBlock* const block : Blocks())
     {
-        // fgInsertGCPolls adds polls to these blocks anyway.
-        bool isPolling = block->HasFlag(BBF_NEEDS_GCPOLL);
+        // fgInsertGCPolls adds polls to these blocks. In a return block, such a poll follows all calls but a tail
+        // call (see fgInsertGCPolls).
+        const bool pollsAtEnd = blockNeedsGCPoll(block);
 
-        if (block->HasFlag(BBF_HAS_JMP))
-        {
-            // The block ends with a tail call or a jmp.
-            hasManagedCalls = true;
-        }
+        bool isPolling        = pollsAtEnd;
+        bool makesCalls       = false;
+        bool pollsBeforeCalls = false;
+        bool pollsAfterCalls  = false;
 
         for (Statement* const stmt : block->NonPhiStatements())
         {
@@ -4542,36 +4697,100 @@ bool Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBl
                 continue;
             }
 
+            bool markedAllocation = false;
+
             for (GenTree* const tree : stmt->TreeList())
             {
-                if (tree->OperIs(GT_GCPOLL))
+                if (!tree->IsCall())
                 {
-                    isPolling = true;
+                    continue;
                 }
-                else if (tree->IsCall())
+
+                GenTreeCall* const call = tree->AsCall();
+
+                if (!call->IsUnmanaged() && !call->IsHelperCall())
                 {
-                    GenTreeCall* const call = tree->AsCall();
-                    if (call->IsUnmanaged())
+                    if ((call->gtCallMoreFlags & GTF_CALL_M_NOGCCHECK) == 0)
                     {
-                        // Either the GC transition polls, or the transition is suppressed and fgInsertGCPolls
-                        // adds a poll after the call.
-                        isPolling = true;
-                    }
-                    else if (!call->IsHelperCall() && ((call->gtCallMoreFlags & GTF_CALL_M_NOGCCHECK) == 0))
-                    {
+                        // In modes 1 and 2, every callee polls on return or on entry, so a call polls for the cycles
+                        // it is in. A call never makes a poll before or after calls redundant, though: callees poll
+                        // there only because such polls never count on calls. A fast tail call does not return here,
+                        // and Lowering can expand a special intrinsic into code without a call.
+                        isPolling |= callsPoll && !call->IsFastTailCall() && !call->IsSpecialIntrinsic();
                         hasManagedCalls = true;
 
-                        // A fast tail call does not return here, and Lowering can expand a special intrinsic into
-                        // code without a call.
-                        isPolling |= callsPoll && !call->IsFastTailCall() && !call->IsSpecialIntrinsic();
+                        if (!call->IsFastTailCall())
+                        {
+                            makesCalls      = true;
+                            pollsAfterCalls = false;
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (call->IsHelperCall())
+                {
+                    if (!IsSignallessPollingAllocation(call))
+                    {
+                        continue;
+                    }
+
+                    // Late liveness removes unused allocations without side effects, but the poll relies on this one.
+                    if ((call->gtCallMoreFlags & GTF_CALL_M_ALLOC_SIDE_EFFECTS) == 0)
+                    {
+                        call->gtCallMoreFlags |= GTF_CALL_M_ALLOC_SIDE_EFFECTS;
+                        call->gtFlags |= GTF_GLOB_REF;
+                        markedAllocation = true;
                     }
                 }
+                else if (call->IsSuppressGCTransition())
+                {
+                    // The block polls at its end instead.
+                    continue;
+                }
+
+                // An allocation, or an unmanaged call with a GC transition, polls where it is.
+                isPolling = true;
+                pollsBeforeCalls |= !makesCalls;
+                pollsAfterCalls = true;
+                pollsBeforeFirstCall |= (block == fgFirstBB) && !hasManagedCalls;
             }
+
+            if (markedAllocation)
+            {
+                gtUpdateStmtSideEffects(stmt);
+            }
+        }
+
+        // Every managed call of the method comes after the first block, if that does not make any.
+        pollsBeforeFirstCall |= (block == fgFirstBB) && !hasManagedCalls && isPolling;
+
+        if (block->HasFlag(BBF_HAS_JMP))
+        {
+            // The block ends with a tail call or a jmp.
+            hasManagedCalls = true;
         }
 
         if (isPolling)
         {
             BitVecOps::AddElemD(traits, pollingBlocks, block->bbNum);
+        }
+
+        if (makesCalls)
+        {
+            BitVecOps::AddElemD(traits, callingBlocks, block->bbNum);
+        }
+
+        if (makesCalls && pollsBeforeCalls)
+        {
+            BitVecOps::AddElemD(traits, pollingBeforeCallsBlocks, block->bbNum);
+        }
+
+        // Only in a return block is the poll that fgInsertGCPolls adds known to follow every call but a tail call.
+        if (makesCalls ? (pollsAfterCalls || (pollsAtEnd && block->KindIs(BBJ_RETURN))) : isPolling)
+        {
+            BitVecOps::AddElemD(traits, pollingAfterCallsBlocks, block->bbNum);
         }
     }
 
@@ -4626,27 +4845,196 @@ bool Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBl
 
     if (opts.IsReversePInvoke())
     {
-        return false;
+        return;
     }
 
     if (returnsPoll)
     {
+        // In modes 4 and 5, a frame that has not made a call since it last polled does a bounded amount of work, as
+        // a leaf method does, so only returns that may follow a call without a poll in between need to poll. Find the
+        // blocks that may end so: those that make calls without polling after the last one, and those that neither
+        // make calls nor poll, but follow such a block. Exceptional flow is not followed, as exception dispatch makes
+        // GC mode transitions on its own.
+        BitVec callingSincePollBlocks(BitVecOps::MakeEmpty(traits));
+
+        if (!leavesPoll)
+        {
+            ArrayStack<BasicBlock*> worklist(getAllocator(CMK_ArrayStack));
+
+            for (BasicBlock* const block : Blocks())
+            {
+                if (BitVecOps::IsMember(traits, callingBlocks, block->bbNum) &&
+                    !BitVecOps::IsMember(traits, pollingAfterCallsBlocks, block->bbNum))
+                {
+                    BitVecOps::AddElemD(traits, callingSincePollBlocks, block->bbNum);
+                    worklist.Push(block);
+                }
+            }
+
+            while (!worklist.Empty())
+            {
+                worklist.Pop()->VisitRegularSuccs(this, [&](BasicBlock* succ) {
+                    if (!BitVecOps::IsMember(traits, callingBlocks, succ->bbNum) &&
+                        !BitVecOps::IsMember(traits, pollingAfterCallsBlocks, succ->bbNum) &&
+                        BitVecOps::TryAddElemD(traits, callingSincePollBlocks, succ->bbNum))
+                    {
+                        worklist.Push(succ);
+                    }
+
+                    return BasicBlockVisit::Continue;
+                });
+            }
+        }
+
         for (BasicBlock* const block : Blocks())
         {
-            if (block->KindIs(BBJ_RETURN) && !BitVecOps::IsMember(traits, pollingBlocks, block->bbNum))
+            if (!block->KindIs(BBJ_RETURN))
+            {
+                continue;
+            }
+
+            // Tail calls and jmps can form loops, so a block that ends with one has to poll on its own.
+            const bool needsPoll = (leavesPoll || block->HasFlag(BBF_HAS_JMP))
+                                       ? !BitVecOps::IsMember(traits, pollingAfterCallsBlocks, block->bbNum)
+                                       : BitVecOps::IsMember(traits, callingSincePollBlocks, block->bbNum);
+            if (needsPoll)
             {
                 JITDUMP("Signalless: return block " FMT_BB " needs a GC poll\n", block->bbNum);
                 BitVecOps::AddElemD(traits, *pollBlocks, block->bbNum);
             }
         }
-
-        return false;
     }
 
-    const bool needsEntryPoll =
-        ((placement == 2) || hasManagedCalls) && !BitVecOps::IsMember(traits, pollingBlocks, fgFirstBB->bbNum);
+    if (!entryPolls)
+    {
+        return;
+    }
+
+    // Polls before calls bound the work done between polls on the way down deep recursion, which only calls other
+    // than tail calls make.
+    if (placement == 5)
+    {
+        // Only paths that make such calls need to poll before the first one. Find the blocks that make the first
+        // calls of paths from the entry that do not poll before them.
+        ArrayStack<BasicBlock*> firstCallBlocks(getAllocator(CMK_ArrayStack));
+        ArrayStack<BasicBlock*> worklist(getAllocator(CMK_ArrayStack));
+        BitVec                  reached(BitVecOps::MakeSingleton(traits, fgFirstBB->bbNum));
+        worklist.Push(fgFirstBB);
+
+        while (!worklist.Empty())
+        {
+            BasicBlock* const block = worklist.Pop();
+
+            if (BitVecOps::IsMember(traits, callingBlocks, block->bbNum))
+            {
+                if (!BitVecOps::IsMember(traits, pollingBeforeCallsBlocks, block->bbNum))
+                {
+                    firstCallBlocks.Push(block);
+                }
+
+                continue;
+            }
+
+            if (BitVecOps::IsMember(traits, pollingBlocks, block->bbNum))
+            {
+                continue;
+            }
+
+            block->VisitRegularSuccs(this, [&](BasicBlock* succ) {
+                if (BitVecOps::TryAddElemD(traits, reached, succ->bbNum))
+                {
+                    worklist.Push(succ);
+                }
+
+                return BasicBlockVisit::Continue;
+            });
+        }
+
+        // Poll at the start of these blocks, unless a poll there could run more than once per call of the method,
+        // or there are so many of them that polling on entry is better. Blocks that begin EH regions are left
+        // alone, as are those with flow that splitting them would have to move elsewhere.
+        const int maxFirstCallBlocks = 4;
+        bool      pollOnEntry        = firstCallBlocks.Height() > maxFirstCallBlocks;
+
+        for (int i = 0; !pollOnEntry && (i < firstCallBlocks.Height()); i++)
+        {
+            BasicBlock* const firstCallBlock = firstCallBlocks.Bottom(i);
+            pollOnEntry = !firstCallBlock->KindIs(BBJ_ALWAYS, BBJ_COND, BBJ_RETURN) || bbIsTryBeg(firstCallBlock) ||
+                          bbIsHandlerBeg(firstCallBlock) || fgSignallessBlockIsInCycle(traits, firstCallBlock);
+        }
+
+        if (!pollOnEntry)
+        {
+            for (int i = 0; i < firstCallBlocks.Height(); i++)
+            {
+                JITDUMP("Signalless: " FMT_BB " needs a GC poll before its first call\n",
+                        firstCallBlocks.Bottom(i)->bbNum);
+                BitVecOps::AddElemD(traits, *startPollBlocks, firstCallBlocks.Bottom(i)->bbNum);
+            }
+
+            return;
+        }
+
+        if (!firstCallBlocks.Empty())
+        {
+            JITDUMP("Signalless: needs a GC poll on entry\n");
+            BitVecOps::AddElemD(traits, *startPollBlocks, fgFirstBB->bbNum);
+        }
+
+        return;
+    }
+
+    // In mode 0, polls on entry also make tail calls and jmps poll, which polls before returning do otherwise.
+    const bool hasCalls       = returnsPoll ? !BitVecOps::IsEmpty(traits, callingBlocks) : hasManagedCalls;
+    const bool needsEntryPoll = ((placement == 2) || hasCalls) && !pollsBeforeFirstCall;
     JITDUMP("Signalless: %s GC poll on entry\n", needsEntryPoll ? "needs a" : "does not need a");
-    return needsEntryPoll;
+
+    if (needsEntryPoll)
+    {
+        BitVecOps::AddElemD(traits, *startPollBlocks, fgFirstBB->bbNum);
+    }
+}
+
+//------------------------------------------------------------------------------
+// fgSignallessBlockIsInCycle: Determine whether a block is part of a cycle of
+//   the flow graph, for the GC polls of signalless mode.
+//
+// Arguments:
+//   traits - traits for block sets indexed by bbNum
+//   block  - the block
+//
+// Returns:
+//   True if the block can be reached from itself through regular flow.
+//
+bool Compiler::fgSignallessBlockIsInCycle(BitVecTraits* traits, BasicBlock* block)
+{
+    ArrayStack<BasicBlock*> worklist(getAllocator(CMK_ArrayStack));
+    BitVec                  reached(BitVecOps::MakeEmpty(traits));
+    bool                    inCycle = false;
+
+    auto visitSuccessor = [&](BasicBlock* succ) {
+        if (succ == block)
+        {
+            inCycle = true;
+            return BasicBlockVisit::Abort;
+        }
+
+        if (BitVecOps::TryAddElemD(traits, reached, succ->bbNum))
+        {
+            worklist.Push(succ);
+        }
+
+        return BasicBlockVisit::Continue;
+    };
+
+    block->VisitRegularSuccs(this, visitSuccessor);
+
+    while (!inCycle && !worklist.Empty())
+    {
+        worklist.Pop()->VisitRegularSuccs(this, visitSuccessor);
+    }
+
+    return inCycle;
 }
 
 /*****************************************************************************/

@@ -7089,7 +7089,9 @@ public:
 
     PhaseStatus fgSetBlockOrder();
     bool fgHasCycleWithoutGCSafePoint();
-    bool fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBlocks);
+    void fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBlocks, BitVec* startPollBlocks);
+    bool fgSignallessBlockIsInCycle(BitVecTraits* traits, BasicBlock* block);
+    bool IsSignallessPollingAllocation(GenTreeCall* call);
 
     template <typename SuccessorEnumerator, typename VisitPreorder, typename VisitPostorder, typename VisitEdge, const bool useProfile = false>
     unsigned fgRunDfs(VisitPreorder assignPreorder, VisitPostorder assignPostorder, VisitEdge visitEdge, jitstd::vector<BasicBlock*>& entries);
