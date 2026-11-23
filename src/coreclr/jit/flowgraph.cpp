@@ -4606,9 +4606,12 @@ bool Compiler::IsSignallessPollingAllocation(GenTreeCall* call)
 //       polls on the way down deep recursion. A poll on entry would do that,
 //       but to keep paths that make no calls from polling, the polls go at
 //       the start of the blocks that make the first calls of the other
-//       paths, unless any of these blocks is part of a cycle. Tail calls and
-//       jmps can form loops, so a block that ends with one polls too, unless
-//       the method polls on entry or the block at its start.
+//       paths, unless any of these blocks is part of a cycle. Several of
+//       these blocks share a poll at the start of the last block that every
+//       path to them goes through instead, if every path from there makes
+//       one of their calls. Tail calls and jmps can form loops, so a block
+//       that ends with one polls too, unless every path from the entry to it
+//       polls on the way.
 //       Nothing polls after calls, so the work done between polls on the way
 //       up deep recursion is bounded only by its depth. A thread that is
 //       asked to stop then does so after it unwinds, rather than at the
@@ -4862,6 +4865,11 @@ void Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBl
         return;
     }
 
+    // The blocks that paths from the entry reach without making calls or polling, and of those, the blocks that make
+    // the first calls of these paths, in modes 0 and 5.
+    BitVec reached(BitVecOps::MakeSingleton(traits, fgFirstBB->bbNum));
+    BitVec firstCallBlockSet(BitVecOps::MakeEmpty(traits));
+
     if (placement == 2)
     {
         // Every method polls on entry, so that calls poll.
@@ -4875,21 +4883,28 @@ void Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBl
     {
         // Polls before calls bound the work done between polls on the way down deep recursion, which only calls
         // other than tail calls make, and only paths that make such calls need to poll before the first one. Find
-        // the blocks that make the first calls of paths from the entry that do not poll before them.
-        ArrayStack<BasicBlock*> firstCallBlocks(getAllocator(CMK_ArrayStack));
-        ArrayStack<BasicBlock*> worklist(getAllocator(CMK_ArrayStack));
-        BitVec                  reached(BitVecOps::MakeSingleton(traits, fgFirstBB->bbNum));
-        worklist.Push(fgFirstBB);
+        // the blocks that make the first calls of paths from the entry that do not poll before them, breadth first
+        // through the blocks before them, which neither make calls nor poll.
+        auto isCallFreeAndPollFree = [&](BasicBlock* block) {
+            return !BitVecOps::IsMember(traits, callingBlocks, block->bbNum) &&
+                   !BitVecOps::IsMember(traits, pollingBlocks, block->bbNum);
+        };
 
-        while (!worklist.Empty())
+        ArrayStack<BasicBlock*> reachedBlocks(getAllocator(CMK_ArrayStack));
+        ArrayStack<BasicBlock*> callFreeBlocks(getAllocator(CMK_ArrayStack));
+        ArrayStack<BasicBlock*> firstCallBlocks(getAllocator(CMK_ArrayStack));
+        reachedBlocks.Push(fgFirstBB);
+
+        for (int i = 0; i < reachedBlocks.Height(); i++)
         {
-            BasicBlock* const block = worklist.Pop();
+            BasicBlock* const block = reachedBlocks.Bottom(i);
 
             if (BitVecOps::IsMember(traits, callingBlocks, block->bbNum))
             {
                 if (!BitVecOps::IsMember(traits, pollingBeforeCallsBlocks, block->bbNum))
                 {
                     firstCallBlocks.Push(block);
+                    BitVecOps::AddElemD(traits, firstCallBlockSet, block->bbNum);
                 }
 
                 continue;
@@ -4900,30 +4915,133 @@ void Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBl
                 continue;
             }
 
+            callFreeBlocks.Push(block);
             block->VisitRegularSuccs(this, [&](BasicBlock* succ) {
                 if (BitVecOps::TryAddElemD(traits, reached, succ->bbNum))
                 {
-                    worklist.Push(succ);
+                    reachedBlocks.Push(succ);
                 }
 
                 return BasicBlockVisit::Continue;
             });
         }
 
-        // Poll at the start of these blocks, unless a poll there could run more than once per call of the method,
-        // or there are so many of them that polling on entry is better. Blocks that begin EH regions are left
-        // alone, as are those with flow that splitting them would have to move elsewhere.
-        const int maxFirstCallBlocks = 4;
-        bool      pollOnEntry        = firstCallBlocks.Height() > maxFirstCallBlocks;
+        // Whether a poll at the start of a block runs at most once per call of the method, and can go there.
+        // Blocks that begin EH regions are left alone, as are those with flow that splitting them would have to
+        // move elsewhere.
+        auto canPollAtStart = [&](BasicBlock* block) {
+            return block->KindIs(BBJ_ALWAYS, BBJ_COND, BBJ_SWITCH, BBJ_RETURN) && !bbIsTryBeg(block) &&
+                   !bbIsHandlerBeg(block) && !fgSignallessBlockIsInCycle(traits, block);
+        };
 
-        for (int i = 0; !pollOnEntry && (i < firstCallBlocks.Height()); i++)
+        // Whether every path from the entry to the first calls that does not poll goes through a block.
+        auto isOnEveryPathToFirstCalls = [&](BasicBlock* candidate) {
+            ArrayStack<BasicBlock*> worklist(getAllocator(CMK_ArrayStack));
+            BitVec                  visited(BitVecOps::MakeSingleton(traits, fgFirstBB->bbNum));
+            worklist.Push(fgFirstBB);
+
+            while ((candidate != fgFirstBB) && !worklist.Empty())
+            {
+                BasicBlock* const block = worklist.Pop();
+
+                if (BitVecOps::IsMember(traits, firstCallBlockSet, block->bbNum))
+                {
+                    return false;
+                }
+
+                if (isCallFreeAndPollFree(block))
+                {
+                    block->VisitRegularSuccs(this, [&](BasicBlock* succ) {
+                        if ((succ != candidate) && BitVecOps::TryAddElemD(traits, visited, succ->bbNum))
+                        {
+                            worklist.Push(succ);
+                        }
+
+                        return BasicBlockVisit::Continue;
+                    });
+                }
+            }
+
+            return true;
+        };
+
+        // Whether every path from a block makes one of the first calls before it returns, throws or polls.
+        auto leadsOnlyToFirstCalls = [&](BasicBlock* start) {
+            ArrayStack<BasicBlock*> worklist(getAllocator(CMK_ArrayStack));
+            BitVec                  visited(BitVecOps::MakeSingleton(traits, start->bbNum));
+            worklist.Push(start);
+
+            while (!worklist.Empty())
+            {
+                BasicBlock* const block = worklist.Pop();
+
+                if (BitVecOps::IsMember(traits, firstCallBlockSet, block->bbNum))
+                {
+                    continue;
+                }
+
+                bool hasSuccessors = false;
+                block->VisitRegularSuccs(this, [&](BasicBlock* succ) {
+                    hasSuccessors = true;
+                    if (BitVecOps::TryAddElemD(traits, visited, succ->bbNum))
+                    {
+                        worklist.Push(succ);
+                    }
+
+                    return BasicBlockVisit::Continue;
+                });
+
+                if (!isCallFreeAndPollFree(block) || !hasSuccessors)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        // Several blocks that make first calls can share a poll at the start of a block that every path to them
+        // that does not poll goes through, if every path from that block makes one of their calls before it
+        // returns, throws or polls: the poll then runs just as often, in less code. The blocks that every such
+        // path goes through are further from the entry the closer they are to the calls, so the first one found
+        // going back from the end of the breadth first order is the closest to the calls.
+        const int   maxSharedPollCandidates = 64;
+        BasicBlock* sharedPollBlock         = nullptr;
+
+        if ((firstCallBlocks.Height() > 1) && (callFreeBlocks.Height() <= maxSharedPollCandidates))
         {
-            BasicBlock* const firstCallBlock = firstCallBlocks.Bottom(i);
-            pollOnEntry = !firstCallBlock->KindIs(BBJ_ALWAYS, BBJ_COND, BBJ_RETURN) || bbIsTryBeg(firstCallBlock) ||
-                          bbIsHandlerBeg(firstCallBlock) || fgSignallessBlockIsInCycle(traits, firstCallBlock);
+            for (int i = callFreeBlocks.Height() - 1; (sharedPollBlock == nullptr) && (i >= 0); i--)
+            {
+                if (isOnEveryPathToFirstCalls(callFreeBlocks.Bottom(i)))
+                {
+                    sharedPollBlock = callFreeBlocks.Bottom(i);
+                }
+            }
+
+            if ((sharedPollBlock != nullptr) &&
+                !(canPollAtStart(sharedPollBlock) && leadsOnlyToFirstCalls(sharedPollBlock)))
+            {
+                sharedPollBlock = nullptr;
+            }
         }
 
-        if (pollOnEntry)
+        // Otherwise, poll at the start of each of these blocks, unless any of them cannot have a poll there, or
+        // there are so many of them that polling on entry is better.
+        const int maxFirstCallBlocks = 4;
+        bool      pollOnEntry        = (sharedPollBlock == nullptr) && (firstCallBlocks.Height() > maxFirstCallBlocks);
+
+        for (int i = 0; (sharedPollBlock == nullptr) && !pollOnEntry && (i < firstCallBlocks.Height()); i++)
+        {
+            pollOnEntry = !canPollAtStart(firstCallBlocks.Bottom(i));
+        }
+
+        if (sharedPollBlock != nullptr)
+        {
+            JITDUMP("Signalless: " FMT_BB " needs a GC poll before the first calls of %d blocks\n",
+                    sharedPollBlock->bbNum, firstCallBlocks.Height());
+            BitVecOps::AddElemD(traits, *startPollBlocks, sharedPollBlock->bbNum);
+        }
+        else if (pollOnEntry)
         {
             JITDUMP("Signalless: needs a GC poll on entry\n");
             BitVecOps::AddElemD(traits, *startPollBlocks, fgFirstBB->bbNum);
@@ -4985,14 +5103,20 @@ void Compiler::fgFindSignallessGCPollBlocks(BitVecTraits* traits, BitVec* pollBl
         }
 
         bool needsPoll;
-        if (block->HasFlag(BBF_HAS_JMP))
+        if (placement == 0)
+        {
+            // Tail calls and jmps can form loops, so a block that ends with one has to poll before it, unless every
+            // path from the entry polls on the way, as the paths that make calls first do.
+            needsPoll = block->HasFlag(BBF_HAS_JMP) && !pollsOnEntry &&
+                        BitVecOps::IsMember(traits, reached, block->bbNum) &&
+                        !BitVecOps::IsMember(traits, firstCallBlockSet, block->bbNum) &&
+                        !BitVecOps::IsMember(traits, pollingBlocks, block->bbNum);
+        }
+        else if (block->HasFlag(BBF_HAS_JMP))
         {
             // Tail calls and jmps can form loops, so a block that ends with one polls after its calls, unless every
-            // callee polls on entry (2). Where returns do not poll (0), the poll only has to come before the tail
-            // call, as one on entry, or at the start of the block, does.
-            needsPoll =
-                (placement != 2) && !BitVecOps::IsMember(traits, pollingAfterCallsBlocks, block->bbNum) &&
-                ((placement != 0) || !(pollsOnEntry || BitVecOps::IsMember(traits, *startPollBlocks, block->bbNum)));
+            // callee polls on entry (2).
+            needsPoll = (placement != 2) && !BitVecOps::IsMember(traits, pollingAfterCallsBlocks, block->bbNum);
         }
         else if (allReturnsPoll)
         {
