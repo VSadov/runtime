@@ -123,14 +123,15 @@ CONFIG_INTEGER(JitFunctionTrace, "JitFunctionTrace", 0) // If non-zero, print JI
 CONFIG_INTEGER(JitGCChecks, "JitGCChecks", 0)
 
 // GC poll placement for signalless mode (CORJIT_FLAG_SIGNALLESS), in which nothing interrupts a running thread:
-// 0 - calls do not poll: every loop polls on its back edge, and methods that make managed calls poll on entry
+// 0 - loops and first calls poll: every loop polls on its back edge, and methods poll before their first managed call
 // 1 - calls poll on return: every method polls before returning, so only loops without managed calls need to poll
 // 2 - calls poll on entry: every method polls on entry, so only loops without managed calls need to poll
 // 3 - loops and returns poll: every loop polls on its back edge, and every method polls before returning
 // 4 - loops and returns after calls poll: as 3, but returns poll only if they may follow a call without a poll
-// 5 - loops, first calls and returns after calls poll: as 4, but paths that make managed calls also poll before them
+// 5 - loops, first calls and returns after calls poll: 0 and 4 combined
+// 0 and 4 do not poll on the way up and on the way down deep recursion, respectively; 5 polls both ways.
 // In every mode, loops that allocate on each iteration need no polls, as allocations poll in their slow path.
-RELEASE_CONFIG_INTEGER(JitSignallessPolls, "JitSignallessPolls", 5)
+RELEASE_CONFIG_INTEGER(JitSignallessPolls, "JitSignallessPolls", 0)
 CONFIG_INTEGER(JitGCInfoLogging, "JitGCInfoLogging", 0) // If true, prints GCInfo-related output to standard output.
 CONFIG_INTEGER(JitHashBreak, "JitHashBreak", -1)        // Same as JitBreak, but for a method hash
 CONFIG_INTEGER(JitHashHalt, "JitHashHalt", -1)          // Same as JitHalt, but for a method hash
