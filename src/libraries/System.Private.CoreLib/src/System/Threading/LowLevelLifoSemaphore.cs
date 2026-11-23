@@ -15,21 +15,74 @@ namespace System.Threading
     /// </summary>
     internal sealed partial class LowLevelLifoSemaphore
     {
-        // The spin count is chosen to be in the range of typical thread wake latency and some additional overhead,
-        // all assuming a single spin is calibrated to around 35 nanoseconds.
-        // The thread wake latency commonly measures at ~10 microseconds (year 2026) and is unlikely to drastically change.
-        // But since the wakes are LIFO, the spin needs to survive additional overhead (we will need to take a lock, unlink the thread).
-        // So we limit the spin to about 35 microseconds.
-        private const int DefaultSemaphoreSpinCountLimit = 1024;
+        // The spin is bounded by three limits, each within the one before:
+        // 1. The absolute limit, UnfairSemaphoreSpinLimit (DefaultMaxSpinLimitUsec unless configured; 0 turns spinning off).
+        //    It is the highest the other two can be.
+        // 2. The cut-off of pointless spinning (WakeBoundUpperLimitScaled): SpinUpperLimitWakeFactor times the measured wake
+        //    latency, which is the time from issuing an OS wake to the woken thread running, a moving average of the wakes that
+        //    the semaphore issues (see RecordWakeLatency). A spin longer than a few wakes costs more than parking and waking
+        //    would, so a signal that arrives later is not worth spinning for.
+        // 3. The estimate of a useful spin (_dynamicSpinLimitScaled), which is the limit a spin actually has. It follows the
+        //    arrival of signals: the time from the start of a spin to the signal that it claimed, or for a spin that ran out and
+        //    parked, to the wake that ended the park (see RecordSpinArrival). Each outcome moves the estimate by what it is worth:
+        //    an arrival that a longer spin could have caught, later than half of the estimate but before the cut-off, steps it up
+        //    by what catching it is worth (the wake latency); an arrival after the cut-off steps it down by the spin that
+        //    it wasted, the estimate itself; an earlier arrival leaves it unchanged, since a shorter spin would not have saved
+        //    anything. The estimate rises while the late catches pay for the wasted spins, and settles where they break even.
+        //
+        // The limit of a spin is a deadline that the spin honors. Only its first InitialSpinIterations iterations, which take
+        // about as long as the lowest estimate, do not read the clock; after them, the spin checks the deadline after every
+        // iteration, so also after every yield of the processor, and ends at most one iteration and one yield past it.
+        //
+        // The times are in scaled microseconds, microseconds times 2^UsecScaleShift, so that small steps are not lost.
+        private const int UsecScaleShift = 3;
+
+        // The lowest estimate of a useful spin, and its starting value. The untimed busy-wait at the start of the spin (see
+        // InitialSpinIterations) takes about as long.
+        private const int MinSpinLimitUsec = 16;
+        private const int MinSpinLimitScaled = MinSpinLimitUsec << UsecScaleShift;
+
+        // The steps of the estimate of a useful spin are 1/2^DynamicSpinLimitStepShift of what an outcome is worth: up by what a
+        // late catch is worth, the wake latency it saves; down by the spin that an arrival after the cut-off wasted.
+        private const int DynamicSpinLimitStepShift = 4;
+
+        // The cut-off of pointless spinning, in wake latencies.
+        private const int SpinUpperLimitWakeFactor = 4;
+
+        // Until a wake is observed, the wake latency is DefaultInitialWakeLatencyUsec, which puts the cut-off at 140 us.
+        private const int DefaultInitialWakeLatencyUsec = 35;
+
+        // The absolute limit, in microseconds, unless UnfairSemaphoreSpinLimit configures another (0 turns spinning off).
+        // Waking a thread that is scheduled to a core in a deep sleep state may take 100 us or more.
+        private const int DefaultMaxSpinLimitUsec = 250;
+
+        // A new wake latency sample has the weight of 1 / 2^WakeLatencyAverageShift in the moving average.
+        private const int WakeLatencyAverageShift = 3;
+
+        // The first iterations of the spin are a busy-wait that does not read the clock or yield: with the exponential backoff,
+        // 10 iterations spin-wait 255-501 units, about 8-17 us, enough to catch a hand-off that is already in flight. Time that
+        // the thread spends descheduled cannot cut them short. Later iterations check the deadline and yield the processor.
+        private const int InitialSpinIterations = 10;
+
         // The cooldown roughly serves as detection that the thread did not spend time being blocked.
         // If it woke in under 4 microseconds, it was likely a fast/trivial wake without blocking.
         private const int DefaultWakeCooldown = 4;
 
         private CacheLineSeparatedCounts _separated;
 
-        private readonly short _maxSpinCount;
+        // The absolute limit (UnfairSemaphoreSpinLimit) in scaled microseconds, at least 0.
+        private readonly int _maxSpinLimitScaled;
         private readonly short _threadWakeCooldownUsec;
         private readonly Action _onWait;
+
+        // The moving average of the wake latency in scaled microseconds: with UsecScaleShift equal to WakeLatencyAverageShift,
+        // adding a sample in microseconds and taking away 1/2^WakeLatencyAverageShift of the value updates the average. Written
+        // without synchronization; a lost update only makes the average slightly stale.
+        private int _wakeLatencyUsecScaled;
+
+        // The estimate of a useful spin in scaled microseconds. Written without synchronization; a lost update only makes the
+        // estimate slightly stale.
+        private int _dynamicSpinLimitScaled = MinSpinLimitScaled;
 
         // When we need to block threads we use a linked list of per-thread blockers.
         // When we need to wake a worker, we pop the topmost blocker and release it.
@@ -37,6 +90,18 @@ namespace System.Threading
         {
             internal LifoBlockerNode? _next;
             internal LowLevelThreadBlocker _blocker = new LowLevelThreadBlocker();
+
+            // The time the wake of this blocker was issued, zero if none is pending. See RecordWakeLatency.
+            internal long _wakeIssuedTimestamp;
+
+            // The start of the spin that preceded the park, zero if there was none. Written before the blocker is pushed and
+            // read by the thread that pops it to wake it. See RecordSpinArrival.
+            internal long _spinStartTimestamp;
+
+            // Whether another blocker was pushed above this one while it was parked. Wakes are LIFO, so a signal that arrived
+            // while it was covered woke the blocker above it instead, and its own wake does not show when the first signal that a
+            // longer spin could have caught arrived. Written under _blockerStackLock.
+            internal bool _covered;
 
             ~LifoBlockerNode()
             {
@@ -70,11 +135,14 @@ namespace System.Threading
             _separated = default;
             _onWait = onWait;
 
-            _maxSpinCount = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
+            short maxSpinLimitUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
                 "System.Threading.ThreadPool.UnfairSemaphoreSpinLimit",
                 "ThreadPool_UnfairSemaphoreSpinLimit",
-                DefaultSemaphoreSpinCountLimit,
+                DefaultMaxSpinLimitUsec,
                 false);
+            _maxSpinLimitScaled = Math.Max(0, (int)maxSpinLimitUsec) << UsecScaleShift;
+
+            _wakeLatencyUsecScaled = DefaultInitialWakeLatencyUsec << UsecScaleShift;
 
             _threadWakeCooldownUsec = AppContextConfigHelper.GetInt16ComPlusOrDotNetConfig(
                 "System.Threading.ThreadPool.UnfairSemaphoreWakeCooldown",
@@ -104,7 +172,10 @@ namespace System.Threading
             return WaitSlow(timeoutMs);
         }
 
-        public bool WaitNoSpin(int timeoutMs)
+        public bool WaitNoSpin(int timeoutMs) => WaitNoSpin(timeoutMs, spinStartTimestamp: 0);
+
+        // spinStartTimestamp is the start of the spin that preceded this wait, zero if there was none.
+        private bool WaitNoSpin(int timeoutMs, long spinStartTimestamp)
         {
             if (timeoutMs == 0)
                 return false;
@@ -118,7 +189,7 @@ namespace System.Threading
             // caller wants to park the thread.
             MaybeWakeWaiter(counts);
 
-            return WaitAsWaiter(timeoutMs);
+            return WaitAsWaiter(timeoutMs, spinStartTimestamp);
         }
 
         // If we have signals and have waiters, we need to make sure at least one is waking.
@@ -176,7 +247,7 @@ namespace System.Threading
             while (HasWaitersToWake(counts));
         }
 
-        private bool WaitAsWaiter(int timeoutMs)
+        private bool WaitAsWaiter(int timeoutMs, long spinStartTimestamp)
         {
             Debug.Assert(timeoutMs > 0 || timeoutMs == -1);
 
@@ -190,12 +261,15 @@ namespace System.Threading
                 // workers that have not been woken for very long time.
                 // We do not need to reduce the timeout after spurious wakes as that will only result
                 // in workers that are woken spuriously to eventually exit and be replaced by new workers.
-                if (!Block(timeoutMs))
+                if (!Block(timeoutMs, spinStartTimestamp))
                 {
                     // Unregister the waiter, but do not decrement wake count, the thread did not observe a wake.
                     _separated._counts.InterlockedDecrementWaiterCount();
                     return false;
                 }
+
+                // A park after a spurious wake does not follow the spin, so its wake tells nothing about the spin.
+                spinStartTimestamp = 0;
 
                 // The thread could not obtain work for quite a while. We will require a 4 usec
                 // cooldown before reintroducing the thread. The sleep/wake transition typically
@@ -263,7 +337,7 @@ namespace System.Threading
             MaybeWakeWaiter(counts);
         }
 
-        private bool Block(int timeoutMs)
+        private bool Block(int timeoutMs, long spinStartTimestamp)
         {
             Debug.Assert(timeoutMs >= -1);
 
@@ -292,6 +366,14 @@ namespace System.Threading
             }
             else
             {
+                // Written under the lock, so the thread that pops the blocker to wake it sees the value.
+                blockerNode._spinStartTimestamp = spinStartTimestamp;
+                blockerNode._covered = false;
+                if (_blockerStack != null)
+                {
+                    _blockerStack._covered = true;
+                }
+
                 blockerNode._next = _blockerStack;
                 _blockerStack = blockerNode;
             }
@@ -330,6 +412,8 @@ namespace System.Threading
                         // just so we do not keep coming here again.
                         timeoutMs = 10;
                     }
+
+                    RecordWakeLatency(blockerNode);
                 }
                 finally
                 {
@@ -342,6 +426,77 @@ namespace System.Threading
 
             return true;
         }
+
+        // Takes a sample of the wake latency when the thread returns from a wait that a wake ended: the time from the wake
+        // being issued to now.
+        private void RecordWakeLatency(LifoBlockerNode node)
+        {
+            long issued = node._wakeIssuedTimestamp;
+            if (issued == 0)
+            {
+                return;
+            }
+
+            node._wakeIssuedTimestamp = 0;
+
+            // The cut-off reaches the absolute limit at a latency of 1/SpinUpperLimitWakeFactor of it, so longer samples carry
+            // no further information. Capping them also keeps a single outlier, such as a preempted thread, from holding the
+            // limits high for long.
+            int sampleScaled = Math.Min(ToScaledUsec(Stopwatch.GetTimestamp() - issued), _maxSpinLimitScaled / SpinUpperLimitWakeFactor);
+
+            int scaled = _wakeLatencyUsecScaled;
+            _wakeLatencyUsecScaled = scaled - (scaled >> WakeLatencyAverageShift) + (sampleScaled >> UsecScaleShift);
+        }
+
+        // The cut-off of pointless spinning in scaled microseconds: SpinUpperLimitWakeFactor times the wake latency, at most the
+        // absolute limit.
+        private int WakeBoundUpperLimitScaled() =>
+            Math.Min(_wakeLatencyUsecScaled * SpinUpperLimitWakeFactor, _maxSpinLimitScaled);
+
+        // Records the arrival of a signal, as the time from the start of a spin: the time of the claim for a spin that claimed it,
+        // or the time the wake was issued for a spin that ran out and parked. An arrival later than half of the estimate of a
+        // useful spin and before the cut-off could have been caught by a somewhat longer spin, and steps the estimate up by a
+        // fraction of what catching it is worth; an arrival after the cut-off steps it down by the same fraction of the
+        // spin that it wasted; an earlier arrival leaves it unchanged. A parked thread that was covered by another (see
+        // LifoBlockerNode._covered) did not see the signals that arrived meanwhile, so its arrival after the cut-off says nothing
+        // about the spin and is left out. The estimate stays within [MinSpinLimitScaled, cut-off], and is written only when it
+        // changes.
+        private void RecordSpinArrival(long arrivalTicks, bool covered = false)
+        {
+            int arrival = ToScaledUsec(arrivalTicks);
+            int upper = WakeBoundUpperLimitScaled();
+            int limit = _dynamicSpinLimitScaled;
+
+            int newLimit;
+            if (arrival >= upper)
+            {
+                if (covered)
+                {
+                    return;
+                }
+
+                newLimit = limit - Math.Max(1, limit >> DynamicSpinLimitStepShift);
+            }
+            else if (arrival > limit / 2)
+            {
+                newLimit = Math.Min(limit + Math.Max(1, _wakeLatencyUsecScaled >> DynamicSpinLimitStepShift), upper);
+            }
+            else
+            {
+                return;
+            }
+
+            newLimit = Math.Max(MinSpinLimitScaled, newLimit);
+            if (newLimit != limit)
+            {
+                _dynamicSpinLimitScaled = newLimit;
+            }
+        }
+
+        // Converts a Stopwatch interval to scaled microseconds, with the interval capped at one second. Every limit is far below
+        // a second, and the cap keeps the product from overflowing.
+        private static int ToScaledUsec(long ticks) =>
+            (int)(Math.Clamp(ticks, 0, Stopwatch.Frequency) * (1_000_000L << UsecScaleShift) / Stopwatch.Frequency);
 
         private void WakeOne()
         {
@@ -409,7 +564,18 @@ namespace System.Threading
 
                 if (top != null)
                 {
+                    // Written before the wake, so the woken thread sees it when it returns from the wait. The spin start is read
+                    // before the wake too, because once woken, the thread may park again and overwrite it.
+                    long now = Stopwatch.GetTimestamp();
+                    long spinStart = top._spinStartTimestamp;
+                    bool covered = top._covered;
+                    top._wakeIssuedTimestamp = now;
                     top._blocker.WakeOne();
+
+                    if (spinStart != 0)
+                    {
+                        RecordSpinArrival(now - spinStart, covered);
+                    }
                 }
 
                 return;
