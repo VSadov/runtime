@@ -34,6 +34,21 @@ namespace System.Threading
         // about as long as the lowest estimate, do not read the clock; after them, the spin checks the deadline after every
         // iteration, so also after every yield of the processor, and ends at most one iteration and one yield past it.
         //
+        // The spinner cap limits how many threads spin at a time: a thread that would spin beyond it parks without spinning. The
+        // check is part of registering as a spinner, so threads that start to spin at the same time cannot all pass it. The cap
+        // follows what spinning is worth, from the outcomes that the thread pool reports for the first dispatch after a claim (see
+        // RecordClaimOutcome), each of which moves the cap by what it is worth:
+        // - A thread that the cap refused is a trial of one more spinner. When a wake ends its park before its spin would have
+        //   ended, and no other thread parked above it meanwhile, its spin would have claimed the signal that the wake is for. If
+        //   the dispatch finds work, the cap steps up by what the spin would have saved, the wake latency times
+        //   SpinnerCapUpWeight, less what it would have cost, the time spun until the signal (see TrialCapStep).
+        // - A spin that ran out, and a spin whose claim found no work, wasted the time spun, at most the limit of the spin (a spin
+        //   that the thread spent partly descheduled did not waste the time that it was off the processor). The spinners share
+        //   the waste, and the cap decides only about the last of them, so the cap steps down by the time spun divided by the cap.
+        // The cap rises while what one more spinner saves pays for the spinning that a spinner wastes, and settles where they
+        // break even. It needs no ceiling: only the trial of a thread that it refused steps it up, by about one spinner at most,
+        // so it does not rise much beyond the most threads that try to spin at a time.
+        //
         // The times are in scaled microseconds, microseconds times 2^UsecScaleShift, so that small steps are not lost.
         private const int UsecScaleShift = 3;
 
@@ -64,6 +79,18 @@ namespace System.Threading
         // the thread spends descheduled cannot cut them short. Later iterations check the deadline and yield the processor.
         private const int InitialSpinIterations = 10;
 
+        // The spinner cap is in fixed point, SpinnerCapOne is one spinner. A step worth one wake latency moves the cap by
+        // 1/2^SpinnerCapStepShift of a spinner.
+        private const int SpinnerCapShift = 16;
+        private const int SpinnerCapOne = 1 << SpinnerCapShift;
+        private const int SpinnerCapStepShift = 4;
+
+        // The weight of the wake latency that a trial would have saved against the time spun. A park costs more than its latency:
+        // the wake, issued by a thread that is busy with work, and the switch to the woken thread cost processor time that a spin
+        // which claims the signal does not. Weighed one to one against the spinning, the latency alone keeps the cap near one
+        // spinner even where more spinners pay for themselves in throughput. The weight is empirical.
+        private const int SpinnerCapUpWeight = 16;
+
         // The cooldown roughly serves as detection that the thread did not spend time being blocked.
         // If it woke in under 4 microseconds, it was likely a fast/trivial wake without blocking.
         private const int DefaultWakeCooldown = 4;
@@ -84,6 +111,10 @@ namespace System.Threading
         // estimate slightly stale.
         private int _dynamicSpinLimitScaled = MinSpinLimitScaled;
 
+        // The spinner cap in fixed point (see SpinnerCapOne), at least SpinnerCapOne. Written without synchronization; a lost
+        // update only makes the cap slightly stale.
+        private int _spinnerCap;
+
         // When we need to block threads we use a linked list of per-thread blockers.
         // When we need to wake a worker, we pop the topmost blocker and release it.
         private sealed class LifoBlockerNode
@@ -103,6 +134,14 @@ namespace System.Threading
             // longer spin could have caught arrived. Written under _blockerStackLock.
             internal bool _covered;
 
+            // The time the spinner cap refused to let the thread spin before the park, zero if it did not. Written before the
+            // blocker is pushed and read by the thread that pops it to wake it. See TrialCapStep.
+            internal long _refusalTimestamp;
+
+            // The step of the spinner cap that the trial of the refused thread is worth, zero if none. Written before the wake and
+            // taken by the woken thread.
+            internal int _capStepScaled;
+
             ~LifoBlockerNode()
             {
                 _blocker.Dispose();
@@ -111,6 +150,79 @@ namespace System.Threading
 
         [ThreadStatic]
         private static LifoBlockerNode? t_blockerNode;
+
+        // The step of the spinner cap that the first dispatch after the signal that the calling thread claimed decides, zero if
+        // none: positive for a thread that the cap refused, the step up if the dispatch finds work; negative for a signal claimed
+        // by spinning, minus the time spun (at most the limit of the spin), which was wasted if the dispatch finds no work. Taken
+        // by the worker when it starts to dispatch (see TakeClaimCapStep), so the step does not outlive the claim.
+        [ThreadStatic]
+        private static int t_claimCapStepScaled;
+
+        // The step of the spinner cap that the signal that the calling thread claimed last is worth, zero if none (see
+        // RecordClaimOutcome). Clears it.
+        internal static int TakeClaimCapStep()
+        {
+            int capStepScaled = t_claimCapStepScaled;
+            if (capStepScaled != 0)
+            {
+                t_claimCapStepScaled = 0;
+            }
+
+            return capStepScaled;
+        }
+
+        // Records whether the first dispatch after a claim whose step of the spinner cap is capStepScaled (see TakeClaimCapStep)
+        // found no work: the trial of a refused thread that found work steps the cap up, a spin whose claim found no work steps
+        // it down.
+        internal void RecordClaimOutcome(int capStepScaled, bool empty)
+        {
+            if (capStepScaled > 0)
+            {
+                if (!empty)
+                {
+                    MoveSpinnerCap(capStepScaled);
+                }
+            }
+            else if (empty)
+            {
+                MoveSpinnerCap(ShareOfWastedSpin(capStepScaled));
+            }
+        }
+
+        // Records a spin that ran out without claiming a signal, which wasted its limit.
+        private void RecordSpinRunOut(int spinLimitScaled) => MoveSpinnerCap(ShareOfWastedSpin(-spinLimitScaled));
+
+        // The share of the last spinner in a wasted spin, which is negative: the spinners share the waste, and the cap decides
+        // only about the last of them.
+        private int ShareOfWastedSpin(int wastedScaled) => wastedScaled / Math.Max(1, _spinnerCap >> SpinnerCapShift);
+
+        // The step of the spinner cap that the trial of a refused thread is worth when a wake ends its park arrivalTicks after
+        // the refusal: a spin that had not ended yet, one with the limit that a spin has now, would have claimed the signal that
+        // the wake is for, and saved the wake, worth the wake latency times SpinnerCapUpWeight, for the time spun until then. Zero
+        // for a wake after the spin would have ended.
+        private int TrialCapStep(long arrivalTicks)
+        {
+            int arrival = ToScaledUsec(arrivalTicks);
+            return arrival < SpinLimitScaled() ? Math.Max(0, _wakeLatencyUsecScaled * SpinnerCapUpWeight - arrival) : 0;
+        }
+
+        // Moves the spinner cap by a step worth stepScaled, which is negative for a step down: a step worth the wake latency
+        // moves the cap by 1/2^SpinnerCapStepShift of a spinner. The cap stays at least SpinnerCapOne, and is written only when it
+        // changes.
+        private void MoveSpinnerCap(int stepScaled)
+        {
+            int cap = _spinnerCap;
+            long delta = (long)stepScaled * (SpinnerCapOne >> SpinnerCapStepShift) / Math.Max(1 << UsecScaleShift, _wakeLatencyUsecScaled);
+            int newCap = (int)Math.Clamp(cap + delta, SpinnerCapOne, int.MaxValue);
+            if (newCap != cap)
+            {
+                _spinnerCap = newCap;
+            }
+        }
+
+        // Whether a thread whose registration as a spinner resulted in registeredCounts is beyond the spinner cap.
+        private bool IsBeyondSpinnerCap(Counts registeredCounts) =>
+            registeredCounts.SpinnerCount > (_spinnerCap >> SpinnerCapShift);
 
         private readonly LowLevelLock _blockerStackLock = new LowLevelLock();
         private LifoBlockerNode? _blockerStack;
@@ -149,6 +261,9 @@ namespace System.Threading
                 "ThreadPool_UnfairSemaphoreWakeCooldown",
                 DefaultWakeCooldown,
                 false);
+
+            // The spinner cap starts at one spinner; the trials of the threads that it refuses raise it to what spinning is worth.
+            _spinnerCap = SpinnerCapOne;
         }
 
         public bool Wait(int timeoutMs)
@@ -189,7 +304,7 @@ namespace System.Threading
             // caller wants to park the thread.
             MaybeWakeWaiter(counts);
 
-            return WaitAsWaiter(timeoutMs, spinStartTimestamp);
+            return WaitAsWaiter(timeoutMs, spinStartTimestamp, refusalTimestamp: 0);
         }
 
         // If we have signals and have waiters, we need to make sure at least one is waking.
@@ -247,7 +362,8 @@ namespace System.Threading
             while (HasWaitersToWake(counts));
         }
 
-        private bool WaitAsWaiter(int timeoutMs, long spinStartTimestamp)
+        // refusalTimestamp is the time the spinner cap refused to let the thread spin before this wait, zero if it did not.
+        private bool WaitAsWaiter(int timeoutMs, long spinStartTimestamp, long refusalTimestamp)
         {
             Debug.Assert(timeoutMs > 0 || timeoutMs == -1);
 
@@ -261,15 +377,16 @@ namespace System.Threading
                 // workers that have not been woken for very long time.
                 // We do not need to reduce the timeout after spurious wakes as that will only result
                 // in workers that are woken spuriously to eventually exit and be replaced by new workers.
-                if (!Block(timeoutMs, spinStartTimestamp))
+                if (!Block(timeoutMs, spinStartTimestamp, refusalTimestamp))
                 {
                     // Unregister the waiter, but do not decrement wake count, the thread did not observe a wake.
                     _separated._counts.InterlockedDecrementWaiterCount();
                     return false;
                 }
 
-                // A park after a spurious wake does not follow the spin, so its wake tells nothing about the spin.
+                // A park after a spurious wake does not follow the spin or the refusal, so its wake tells nothing about them.
                 spinStartTimestamp = 0;
+                refusalTimestamp = 0;
 
                 // The thread could not obtain work for quite a while. We will require a 4 usec
                 // cooldown before reintroducing the thread. The sleep/wake transition typically
@@ -321,6 +438,8 @@ namespace System.Threading
                         // We've consumed a wake, but there was no signal.
                         // The semaphore is unfair and spurious/stolen wakes can happen.
                         // We will have to wait again.
+                        // The trial that the wake ended, if any, claimed nothing.
+                        t_claimCapStepScaled = 0;
                         break;
                     }
 
@@ -337,7 +456,7 @@ namespace System.Threading
             MaybeWakeWaiter(counts);
         }
 
-        private bool Block(int timeoutMs, long spinStartTimestamp)
+        private bool Block(int timeoutMs, long spinStartTimestamp, long refusalTimestamp)
         {
             Debug.Assert(timeoutMs >= -1);
 
@@ -368,6 +487,7 @@ namespace System.Threading
             {
                 // Written under the lock, so the thread that pops the blocker to wake it sees the value.
                 blockerNode._spinStartTimestamp = spinStartTimestamp;
+                blockerNode._refusalTimestamp = refusalTimestamp;
                 blockerNode._covered = false;
                 if (_blockerStack != null)
                 {
@@ -414,6 +534,10 @@ namespace System.Threading
                     }
 
                     RecordWakeLatency(blockerNode);
+
+                    // The step of the trial that the wake ended counts if the thread claims a signal (see WaitAsWaiter).
+                    t_claimCapStepScaled = blockerNode._capStepScaled;
+                    blockerNode._capStepScaled = 0;
                 }
                 finally
                 {
@@ -452,6 +576,11 @@ namespace System.Threading
         // absolute limit.
         private int WakeBoundUpperLimitScaled() =>
             Math.Min(_wakeLatencyUsecScaled * SpinUpperLimitWakeFactor, _maxSpinLimitScaled);
+
+        // The limit of a spin that starts now, in scaled microseconds: the estimate of a useful spin, at most the cut-off of
+        // pointless spinning, and at least MinSpinLimitScaled. Zero when spinning is turned off.
+        private int SpinLimitScaled() =>
+            _maxSpinLimitScaled == 0 ? 0 : Math.Max(MinSpinLimitScaled, Math.Min(_dynamicSpinLimitScaled, WakeBoundUpperLimitScaled()));
 
         // Records the arrival of a signal, as the time from the start of a spin: the time of the claim for a spin that claimed it,
         // or the time the wake was issued for a spin that ran out and parked. An arrival later than half of the estimate of a
@@ -564,11 +693,14 @@ namespace System.Threading
 
                 if (top != null)
                 {
-                    // Written before the wake, so the woken thread sees it when it returns from the wait. The spin start is read
-                    // before the wake too, because once woken, the thread may park again and overwrite it.
+                    // Written before the wake, so the woken thread sees it when it returns from the wait. The spin start and the
+                    // refusal are read before the wake too, because once woken, the thread may park again and overwrite them.
                     long now = Stopwatch.GetTimestamp();
                     long spinStart = top._spinStartTimestamp;
+                    long refusal = top._refusalTimestamp;
                     bool covered = top._covered;
+                    int capStepScaled = refusal != 0 && !covered ? TrialCapStep(now - refusal) : 0;
+                    top._capStepScaled = capStepScaled;
                     top._wakeIssuedTimestamp = now;
                     top._blocker.WakeOne();
 
@@ -710,10 +842,11 @@ namespace System.Threading
                 _data -= (ulong)1 << SpinnerCountShift;
             }
 
-            public void InterlockedIncrementSpinnerCount()
+            public Counts InterlockedIncrementSpinnerCount()
             {
                 var countsAfterUpdate = new Counts(Interlocked.Add(ref _data, 1ul << SpinnerCountShift));
                 Debug.Assert(countsAfterUpdate.SpinnerCount != 0); // overflow check
+                return countsAfterUpdate;
             }
 
             // A plain read of the 64-bit field can tear on 32-bit platforms.

@@ -174,6 +174,7 @@ namespace System.Threading
             {
                 bool spurious = false;
                 bool didWork = false;
+                int claimCapStep = LowLevelLifoSemaphore.TakeClaimCapStep();
                 short numProcessingWork;
 
                 do
@@ -186,7 +187,14 @@ namespace System.Threading
                     {
                         // We took the request, now we must Dispatch some work items.
                         threadPoolInstance.NotifyDispatchProgress(Environment.TickCount);
-                        switch (ThreadPoolWorkQueue.Dispatch())
+                        ThreadPoolWorkQueue.DispatchResult result = ThreadPoolWorkQueue.Dispatch();
+                        if (claimCapStep != 0)
+                        {
+                            s_semaphore.RecordClaimOutcome(claimCapStep, empty: result == ThreadPoolWorkQueue.DispatchResult.Spurious);
+                            claimCapStep = 0;
+                        }
+
+                        switch (result)
                         {
                             case ThreadPoolWorkQueue.DispatchResult.Spurious:
                                 // We were invited but found no work. This is counterproductive. We may want to park.

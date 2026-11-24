@@ -17,40 +17,51 @@ internal sealed partial class LowLevelLifoSemaphore
         if (spinLimitScaled > 0)
         {
             // While the thread spins it is counted as a spinner, so that a signal it can claim does not wake a parked thread.
-            _separated._counts.InterlockedIncrementSpinnerCount();
-            spinStartTick = Stopwatch.GetTimestamp();
-            long spinLimitTicks = ScaledUsecToTicks(spinLimitScaled);
-
-            // Each iteration spin-waits with the exponential backoff, whose iterations are capped at a few microseconds,
-            // and then tries to claim a signal. After the first InitialSpinIterations, an iteration also ends the spin at
-            // the deadline and otherwise yields the processor. The iteration after a yield checks the deadline.
-            uint iteration = 0;
-            while (true)
+            // A thread that registers beyond the spinner cap does not spin: it stops being a spinner right away, there is no spin
+            // to record, and its park is a trial of one more spinner (see TrialCapStep).
+            Counts registeredCounts = _separated._counts.InterlockedIncrementSpinnerCount();
+            bool capped = IsBeyondSpinnerCap(registeredCounts);
+            long refusalTick = 0;
+            if (capped)
             {
-                Backoff.Exponential(iteration++);
+                refusalTick = Stopwatch.GetTimestamp();
+            }
+            else
+            {
+                spinStartTick = Stopwatch.GetTimestamp();
+                long spinLimitTicks = ScaledUsecToTicks(spinLimitScaled);
 
-                Counts counts = _separated._counts;
-                if (counts.SignalCount != 0)
+                // Each iteration spin-waits with the exponential backoff, whose iterations are capped at a few microseconds,
+                // and then tries to claim a signal. After the first InitialSpinIterations, an iteration also ends the spin at
+                // the deadline and otherwise yields the processor. The iteration after a yield checks the deadline.
+                uint iteration = 0;
+                while (true)
                 {
-                    Counts newCounts = counts;
-                    newCounts.DecrementSignalCount();
-                    newCounts.DecrementSpinnerCount();
-                    Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
-                    if (countsBeforeUpdate == counts)
-                    {
-                        // we've consumed a signal
-                        return ClaimedBySpin(spinStartTick);
-                    }
-                }
+                    Backoff.Exponential(iteration++);
 
-                if (iteration > InitialSpinIterations)
-                {
-                    if (Stopwatch.GetTimestamp() - spinStartTick >= spinLimitTicks)
+                    Counts counts = _separated._counts;
+                    if (counts.SignalCount != 0)
                     {
-                        break;
+                        Counts newCounts = counts;
+                        newCounts.DecrementSignalCount();
+                        newCounts.DecrementSpinnerCount();
+                        Counts countsBeforeUpdate = _separated._counts.InterlockedCompareExchange(newCounts, counts);
+                        if (countsBeforeUpdate == counts)
+                        {
+                            // we've consumed a signal
+                            return ClaimedBySpin(spinStartTick, spinLimitScaled);
+                        }
                     }
 
-                    Thread.UninterruptibleSleep0();
+                    if (iteration > InitialSpinIterations)
+                    {
+                        if (Stopwatch.GetTimestamp() - spinStartTick >= spinLimitTicks)
+                        {
+                            break;
+                        }
+
+                        Thread.UninterruptibleSleep0();
+                    }
                 }
             }
 
@@ -76,7 +87,12 @@ internal sealed partial class LowLevelLifoSemaphore
                 {
                     if (counts.SignalCount != 0)
                     {
-                        return ClaimedBySpin(spinStartTick);
+                        return capped || ClaimedBySpin(spinStartTick, spinLimitScaled);
+                    }
+
+                    if (!capped)
+                    {
+                        RecordSpinRunOut(spinLimitScaled);
                     }
 
                     if (timeoutMs == 0)
@@ -84,7 +100,7 @@ internal sealed partial class LowLevelLifoSemaphore
                         return false;
                     }
 
-                    return WaitAsWaiter(timeoutMs, spinStartTick);
+                    return WaitAsWaiter(timeoutMs, spinStartTick, refusalTick);
                 }
 
                 Backoff.Exponential(collisionCount++);
@@ -94,16 +110,16 @@ internal sealed partial class LowLevelLifoSemaphore
         return WaitNoSpin(timeoutMs, spinStartTick);
     }
 
-    private bool ClaimedBySpin(long spinStartTick)
+    private bool ClaimedBySpin(long spinStartTick, int spinLimitScaled)
     {
-        RecordSpinArrival(Stopwatch.GetTimestamp() - spinStartTick);
+        long arrivalTicks = Stopwatch.GetTimestamp() - spinStartTick;
+        RecordSpinArrival(arrivalTicks);
+
+        // The time spun was wasted if the dispatch that follows finds no work (see RecordClaimOutcome). A spin ends about at its
+        // limit, so time beyond the limit is time that the thread was descheduled, not spinning.
+        t_claimCapStepScaled = -Math.Max(1, Math.Min(ToScaledUsec(arrivalTicks), spinLimitScaled));
         return true;
     }
-
-    // The limit of a spin that starts now, in scaled microseconds: the estimate of a useful spin, at most the cut-off of
-    // pointless spinning, and at least MinSpinLimitScaled. Zero when spinning is turned off.
-    private int SpinLimitScaled() =>
-        _maxSpinLimitScaled == 0 ? 0 : Math.Max(MinSpinLimitScaled, Math.Min(_dynamicSpinLimitScaled, WakeBoundUpperLimitScaled()));
 
     // Converts scaled microseconds to a Stopwatch interval.
     private static long ScaledUsecToTicks(int scaled) =>
