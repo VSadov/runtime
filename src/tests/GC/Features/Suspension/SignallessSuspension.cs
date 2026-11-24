@@ -34,6 +34,7 @@ public static class SignallessSuspension
             IrreducibleLoop,
             TryFinallyLoop,
             SwitchLoop,
+            CopyReferencesLoop,
             ListWalkLoop,
             ArrayWalkLoop,
             HandlerLoop,
@@ -279,6 +280,65 @@ public static class SignallessSuspension
                 case 1: x = x + 7; state = 2; break;
                 case 2: x = x ^ 5; state = 3; break;
                 default: x = x - 3; state = 0; break;
+            }
+        }
+
+        s_sink = x;
+    }
+
+    private static readonly Node[] s_copySource = { new Node(), new Node(), new Node(), new Node() };
+    private static readonly Node[] s_copyDestination = new Node[4];
+
+    // Copying a few references ends with a GC poll.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CopyReferences() =>
+        new ReadOnlySpan<Node>(s_copySource, 0, 4).CopyTo(new Span<Node>(s_copyDestination, 0, 4));
+
+    // The copies poll in a block that ends with a switch, and at the ends of a finally and of a catch. The JIT can't
+    // split such blocks to poll inline like elsewhere, so it moves their jumps into blocks of their own.
+    private static void CopyReferencesLoop()
+    {
+        int x = 0;
+        int i = 0;
+        while (!s_stop)
+        {
+            try
+            {
+                try
+                {
+                    CopyReferences();
+                    switch (i++ & 3)
+                    {
+                        case 0: x = x * 31 + 1; break;
+                        case 1: x += 7; break;
+                        case 2: x ^= 5; break;
+                        default:
+                            if ((i & 0x3FF) == 0)
+                            {
+                                Throw();
+                            }
+
+                            break;
+                    }
+                }
+                finally
+                {
+                    x ^= i;
+                    CopyReferences();
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                x += 3;
+                CopyReferences();
+            }
+        }
+
+        for (int j = 0; j < s_copySource.Length; j++)
+        {
+            if (s_copyDestination[j] != s_copySource[j])
+            {
+                Fail($"{nameof(CopyReferencesLoop)} copied the wrong references");
             }
         }
 

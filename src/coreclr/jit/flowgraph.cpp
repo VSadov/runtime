@@ -157,6 +157,14 @@ PhaseStatus Compiler::fgInsertGCPolls()
 
         GCPollType pollType = GCPOLL_INLINE;
 
+        // fgCreateGCPoll can't split a block that ends with a switch or leaves an EH region, so such blocks call the
+        // poll helper unconditionally. Signalless code polls in loops, where that costs the most, so it moves the jump
+        // of such a block into a block of its own instead, and polls inline before it. Only a catchret can move out of
+        // the first block of a catch or filter though, as the code of other jumps may read the exception object, which
+        // has to happen in that block before anything else.
+        const bool moveJump = signalless && (block->KindIs(BBJ_SWITCH) || block->hasEHBoundaryOut()) &&
+                              (!handlerGetsXcptnObj(block->GetCatchType()) || !block->HasTerminator());
+
         // We'd like to insert an inline poll. Below is the list of places where we
         // can't or don't want to emit an inline poll. Check all of those. If after all of that we still
         // have INLINE, then emit an inline check.
@@ -178,14 +186,14 @@ PhaseStatus Compiler::fgInsertGCPolls()
             JITDUMP("Selecting CALL poll in block " FMT_BB " because it is the single return block\n", block->bbNum);
             pollType = GCPOLL_CALL;
         }
-        else if (block->KindIs(BBJ_SWITCH))
+        else if (block->KindIs(BBJ_SWITCH) && !moveJump)
         {
             // We don't want to deal with all the outgoing edges of a switch block.
             //
             JITDUMP("Selecting CALL poll in block " FMT_BB " because it is a SWITCH block\n", block->bbNum);
             pollType = GCPOLL_CALL;
         }
-        else if (block->hasEHBoundaryOut())
+        else if (block->hasEHBoundaryOut() && !moveJump)
         {
             // We can't split a block that leaves an EH region: fgCreateGCPoll does not know how to
             // move its outgoing flow onto the new bottom block.
@@ -201,6 +209,27 @@ PhaseStatus Compiler::fgInsertGCPolls()
             pollType = GCPOLL_CALL;
         }
 
+        BasicBlock* jumpBlock = nullptr;
+        if (moveJump && (pollType == GCPOLL_INLINE))
+        {
+            if (!block->HasTerminator())
+            {
+                // BBJ_EHCATCHRET has no statement for its jump.
+                jumpBlock = fgSplitBlockAtEnd(block);
+            }
+            else if (block->lastStmt() == block->firstStmt())
+            {
+                jumpBlock = fgSplitBlockAtBeginning(block);
+            }
+            else
+            {
+                jumpBlock = fgSplitBlockAfterStatement(block, block->lastStmt()->GetPrevStmt());
+            }
+
+            JITDUMP("Signalless: moved the jump of " FMT_BB " into " FMT_BB " to poll inline before it\n", block->bbNum,
+                    jumpBlock->bbNum);
+        }
+
         BasicBlock* curBasicBlock = fgCreateGCPoll(pollType, block);
         if (block != curBasicBlock)
         {
@@ -212,7 +241,8 @@ PhaseStatus Compiler::fgInsertGCPolls()
             }
         }
 
-        block = curBasicBlock;
+        // The block with the moved jump may still look like it needs a poll, but it already has one before it.
+        block = (jumpBlock != nullptr) ? jumpBlock : curBasicBlock;
     }
 
     // Some blocks need a poll at their start instead, before their first call, such as the first block of the method
