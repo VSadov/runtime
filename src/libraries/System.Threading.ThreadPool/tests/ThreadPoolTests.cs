@@ -540,6 +540,33 @@ namespace System.Threading.ThreadPools.Tests
             }, enqueueAdvanced.ToString(), SingleProcessorQueueTestOptions(usePerCoreQueue: false)).Dispose();
         }
 
+        [ConditionalFact(typeof(ThreadPoolTests), nameof(IsThreadingAndRemoteExecutorSupportedAndNotNativeAot))]
+        public static void PerCoreWorkQueue_DequeueFindsLocalItemDespiteStaleEnqueue()
+        {
+            RemoteExecutor.Invoke(static () =>
+            {
+                const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                const int Full = 1;
+                Type queueType = typeof(ThreadPool).Assembly.GetType("System.Threading.PerCoreThreadPoolWorkQueue", throwOnError: true)!;
+                object queue = Activator.CreateInstance(queueType)!;
+                object localQueue = queueType.GetMethod("GetOrAddWorkStealingQueue", Flags)!.Invoke(queue, null)!;
+                object segment = localQueue.GetType().GetField("_enqSegment", Flags)!.GetValue(localQueue)!;
+                Array slots = (Array)segment.GetType().GetField("_slots", Flags)!.GetValue(segment)!;
+
+                // A thief can read Enqueue before an enqueue into the empty segment advances it, and read the previous
+                // slot after the enqueue has published the item and unlocked that slot. Simulate that view: the item is
+                // published and the previous slot is unlocked, but Enqueue still equals Dequeue.
+                object item = new object();
+                object slot = slots.GetValue(0)!;
+                slot.GetType().GetField("Item", Flags)!.SetValue(slot, item);
+                slot.GetType().GetField("SequenceNumber", Flags)!.SetValue(slot, Full);
+                slots.SetValue(slot, 0);
+
+                object[] arguments = { false };
+                Assert.Same(item, queueType.GetMethod("Dequeue", Flags)!.Invoke(queue, arguments));
+            }, SingleProcessorQueueTestOptions(usePerCoreQueue: false)).Dispose();
+        }
+
         [ConditionalTheory(typeof(ThreadPoolTests), nameof(IsPerCoreWorkQueueWaitTimeTrackingSupported))]
         [MemberData(nameof(TwoBools))]
         public static void PerCoreWorkQueue_WaitTimeTracking_FlushesBeforeBlocking(bool contended, bool flushBeforeWaiting)

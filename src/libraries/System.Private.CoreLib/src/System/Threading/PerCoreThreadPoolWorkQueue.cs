@@ -1123,14 +1123,11 @@ namespace System.Threading
                         // prev is empty in the new generation. We need to check the prev slot before checking the current.
                         // NB: while slots that are prev to dequeue end cannot become Full,they can be locked if
                         //     the current slot is being filled up. In such case we cannot consider the current slot as empty.
+                        // NB: equal ends do not show that the segment is empty. Enqueue may have been read before an enqueue
+                        //     advanced it, and the prev slot after that enqueue unlocked it. Since the prev slot is read with
+                        //     acquire semantics, the current slot read after it shows the item of such an enqueue.
                         if (!missedSteal)
                         {
-                            if (position == _queueEnds.Enqueue)
-                            {
-                                missedSteal = Volatile.Read(ref this[position - 1].SequenceNumber) != (position + _slotsMask);
-                                return null;
-                            }
-
                             missedSteal = Volatile.Read(ref this[position - 1].SequenceNumber) != (position + _slotsMask);
                         }
 
