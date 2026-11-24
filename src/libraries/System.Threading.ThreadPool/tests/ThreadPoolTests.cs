@@ -469,6 +469,41 @@ namespace System.Threading.ThreadPools.Tests
             }, itemCount.ToString(CultureInfo.InvariantCulture), SingleProcessorQueueTestOptions(usePerCoreQueue)).Dispose();
         }
 
+        [ConditionalTheory(typeof(ThreadPoolTests), nameof(IsThreadingAndRemoteExecutorSupported), nameof(UsePortableThreadPool))]
+        [MemberData(nameof(SingleWorkerLocalBurstData))]
+        public static void LocalQueueBurst_TaskWaitInlinesWithSingleWorker(bool usePerCoreQueue, int itemCount)
+        {
+            RemoteExecutor.Invoke(static countString =>
+            {
+                int count = int.Parse(countString, CultureInfo.InvariantCulture);
+                Assert.Equal(1, Environment.ProcessorCount);
+                Assert.True(ThreadPool.SetMinThreads(1, 1));
+                ThreadPool.GetMaxThreads(out _, out int maxIoThreads);
+                Assert.True(ThreadPool.SetMaxThreads(1, maxIoThreads));
+
+                using CountdownEvent waited = new CountdownEvent(count);
+                ThreadPool.UnsafeQueueUserWorkItem(static state =>
+                {
+                    Task[] tasks = new Task[state.Count];
+                    for (int i = 0; i < tasks.Length; i++)
+                    {
+                        tasks[i] = Task.Run(static () => { });
+                    }
+
+                    // The only worker is waiting, so a task can only complete if the wait inlines it. Starting with the
+                    // oldest task covers tasks in older segments of the local queue.
+                    foreach (Task task in tasks)
+                    {
+                        task.Wait();
+                        state.Waited.Signal();
+                    }
+                }, (Count: count, Waited: waited), preferLocal: false);
+
+                Assert.True(waited.Wait(UnexpectedTimeoutMilliseconds),
+                    $"Waited for {count - waited.CurrentCount} of {count} tasks.");
+            }, itemCount.ToString(CultureInfo.InvariantCulture), SingleProcessorQueueTestOptions(usePerCoreQueue)).Dispose();
+        }
+
         [ConditionalTheory(typeof(ThreadPoolTests), nameof(IsThreadingAndRemoteExecutorSupportedAndNotNativeAot))]
         [MemberData(nameof(OneBool))]
         public static void PerCoreWorkQueue_DequeueTracksInFlightLocalEnqueue(bool enqueueAdvanced)

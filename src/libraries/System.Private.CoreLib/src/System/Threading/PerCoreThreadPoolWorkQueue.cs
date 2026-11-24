@@ -1332,7 +1332,16 @@ namespace System.Threading
                 /// </summary>
                 internal bool TryRemove(Task callback)
                 {
-                    for (int position = _queueEnds.Enqueue - 1; ; position--)
+                    // A frozen segment has its Enqueue inflated by FreezeOffset. Scan from the actual end, so that positions
+                    // match the sequence numbers of the slots. Dequeue is read after Enqueue, so it cannot make an unfrozen
+                    // segment appear frozen.
+                    int enqueue = Volatile.Read(ref _queueEnds.Enqueue);
+                    if (enqueue - _queueEnds.Dequeue >= FreezeOffset)
+                    {
+                        enqueue -= FreezeOffset;
+                    }
+
+                    for (int position = enqueue - 1; ; position--)
                     {
                         ref Slot slot = ref this[position];
                         if (slot.Item == callback)
