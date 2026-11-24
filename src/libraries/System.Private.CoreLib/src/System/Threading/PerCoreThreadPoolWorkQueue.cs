@@ -1251,8 +1251,14 @@ namespace System.Threading
 
                                             // the "to" slot must be empty. (not empty means no more space)
                                             // the "next" slot must be full (any write must be completed, this also takes care of stopping at halfSlot)
+                                            // "next" is claimed with a CAS before anything is copied. A pop or an enqueue that has read a stale
+                                            // Enqueue can reserve a slot in the moved range, and its reservation must not be overwritten.
+                                            // Marking "next" empty in the next generation before its item is copied is fine: the slot can only be
+                                            // reused by an enqueue that wraps around past the dequeue slot, which our caller keeps reserved until
+                                            // the move is complete.
+                                            int full = fromIdx + Full;
                                             if (Volatile.Read(ref to.SequenceNumber) != toIdx ||
-                                                Volatile.Read(ref next.SequenceNumber) != fromIdx + Full)
+                                                Interlocked.CompareExchange(ref next.SequenceNumber, fromIdx + nextGenEmpty, full) != full)
                                             {
                                                 break;
                                             }
@@ -1265,8 +1271,6 @@ namespace System.Threading
                                             Volatile.Write(ref to.SequenceNumber, toIdx + Full);
                                             from.Item = null;
 
-                                            // We are going to take from next, mark it empty.
-                                            next.SequenceNumber = fromIdx + nextGenEmpty;
                                             from = ref next;
 
                                             fromIdx++;
