@@ -1250,13 +1250,14 @@ namespace System.Threading
                         int full = nextPos + Full;
 
                         // The "to" slot must be empty (not empty means no more space). It is checked first, so that nothing
-                        // is claimed when there is no room.
+                        // is claimed when there is no room. A plain read is enough: the Enqueue recheck or the previous CAS
+                        // orders it after the tail validation, and the CAS below orders it before "to" is written.
                         // The successor is claimed with a CAS from Full, so that a Pop or an Enqueue that has reserved it
                         // (possibly after reading a stale Enqueue) wins, and its reservation is never overwritten.
                         // Marking the successor empty in the next generation before its item is copied is fine: the slot can
                         // only be reused by an enqueue that wraps around past the dequeue slot, which TrySteal keeps reserved
                         // until the move is complete.
-                        if (Volatile.Read(ref to.SequenceNumber) != dst ||
+                        if (to.SequenceNumber != dst ||
                             Interlocked.CompareExchange(ref next.SequenceNumber, nextPos + sourceCapacity, full) != full)
                         {
                             break;
@@ -1283,8 +1284,15 @@ namespace System.Threading
                     // advance the other enq, enables enq/pop
                     // must be done before unlocking other prev slot, or someone could pop prev once unlocked.
                     // must be done after the enq slot are full, or someone may try locking slots while/before we mark them full.
-                    Volatile.Write(ref other._queueEnds.Enqueue, dst);
-                    Volatile.Write(ref _queueEnds.Dequeue, src + 1);
+                    // Nothing to advance if nothing was moved: the other enq is still dstStart, since its prev slot is locked.
+                    if (dst != dstStart)
+                    {
+                        Volatile.Write(ref other._queueEnds.Enqueue, dst);
+                    }
+
+                    // As in TrySteal, the dequeue end can be advanced with a plain write: none of the slots below it can be reused
+                    // until TrySteal unlocks the dequeue slot, after the last item has been taken.
+                    _queueEnds.Dequeue = src + 1;
 
                     // unlock other prev slot
                     // must be after we moved other enq to the next slot, or someone may pop prev and break continuity of full slots.
