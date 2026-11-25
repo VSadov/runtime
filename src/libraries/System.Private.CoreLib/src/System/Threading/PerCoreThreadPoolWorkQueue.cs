@@ -887,7 +887,10 @@ namespace System.Threading
             ///     When the segment shrinks to just 1 element, all Pop/Enqueue/Steal operations would end up using the same coordinating slot.
             ///     This indirectly guarantees that concurrent Steal and Pop cannot use the same slot and move enqueue/dequeue ends across each other.
             ///
-            /// - Move/Remove operations get exclusive access to appropriate ranges of slots by setting "Change" on both sides of the range.
+            /// - Move reserves the enqueue end of the destination by setting "Change" on the slot previous to it, and requires the destination
+            ///   to be empty. It claims the source slots one at a time, by atomically moving each from "Full" to empty in the next generation,
+            ///   so a slot that a concurrent Pop or Enqueue has reserved stops the Move instead of being overwritten.
+            /// - Remove gets exclusive access to the slot that it removes by setting "Change" on it and on the dequeue slot.
             /// - The enqueue and dequeue ends are updated only when corresponding slots are reserved for changing.
             /// - It is possible, in a case of a contention, to move a wrong slot to the "Change" state.
             ///   (Ex: the slot is no longer previous to an enqueue slot because enqueue index has moved forward)
@@ -1200,131 +1203,102 @@ namespace System.Threading
                 {
                     enqueueTimestamp = 0;
 
-                    // similar sequence as in TryEnqueue, since we will be adding items to the other queue.
-                    int otherEnqPosition = other._queueEnds.Enqueue;
-                    ref Slot enqPrevSlot = ref other[otherEnqPosition - 1];
-                    int prevSequenceNumber = enqPrevSlot.SequenceNumber;
-
                     // Mask the count in case the segment is frozen and enqueue is inflated.
-                    var count = (enqPosition - deqPosition) & _slotsMask;
                     // Recheck after masking. The outer check does not mask for simplicity.
-                    if (count < MoveThreshold)
+                    int count = (enqPosition - deqPosition) & _slotsMask;
+                    if (count < MoveThreshold || other == this)
                     {
-                        // fail
                         return this;
                     }
 
-                    int halfPosition = deqPosition + count / 2;
-                    ref Slot halfSlot = ref this[halfPosition];
+                    // Lock the enqueue end of the other segment by locking its prev slot, similar to TryEnqueue.
+                    // Unlike Enqueue, the prev slot must be empty, so that a rich queue does not get even richer.
+                    int dstStart = other._queueEnds.Enqueue;
+                    ref Slot prevSlot = ref other[dstStart - 1];
+                    int empty = dstStart + other._slotsMask;
+                    int reserved = empty + Change;
 
-                    // unlike Enqueue, we require prev slot be empty
-                    // not just to prevent rich queue getting even richer
-                    // we also do not want a possibility that the same segment is both Moved from and Moved to, which would be messy
-                    if (prevSequenceNumber == otherEnqPosition + other._slotsMask)
+                    if (prevSlot.SequenceNumber != empty ||
+                        Interlocked.CompareExchange(ref prevSlot.SequenceNumber, reserved, empty) != empty)
                     {
-                        // lock the other segment for enqueuing
-                        if (Interlocked.CompareExchange(ref enqPrevSlot.SequenceNumber, prevSequenceNumber + Change, prevSequenceNumber) == prevSequenceNumber)
-                        {
-                            // confirm that enqueue did not change while we were locking the slot
-                            // it is uncommon, but we may see another Pop or Enqueue on the same segment.
-                            if (other._queueEnds.Enqueue == otherEnqPosition)
-                            {
-                                // Lock the halfSlot, it must be full
-                                // We use Dequeue state here as indication that items to the left will likely be not available for popping.
-                                if (Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Dequeue, halfPosition + Full) == halfPosition + Full)
-                                {
-                                    // our enqueue could have changed before we locked half
-                                    // make sure that half-way slot is still before enqueue
-                                    // in fact give it more space - we do not want to Move all remaining items, especially if someone else popping them fast.
-                                    var enq = deqPosition + ((_queueEnds.Enqueue - deqPosition) & _slotsMask);
-                                    var nextGenEmpty = _slotsMask + 1;
-                                    if (enq - halfPosition > (count / 4))
-                                    {
-                                        int fromIdx = deqPosition, toIdx = otherEnqPosition;
-                                        // copy slots from "this" to "other", until the "other" is full or we reach the half-way point, whichever is first.
-                                        // the last "from" slot is not copied and returned instead.
-                                        ref Slot from = ref this[fromIdx++];
-                                        while (true)
-                                        {
-                                            ref Slot next = ref this[fromIdx];
-                                            ref Slot to = ref other[toIdx];
-
-                                            // the "to" slot must be empty. (not empty means no more space)
-                                            // the "next" slot must be full (any write must be completed, this also takes care of stopping at halfSlot)
-                                            // "next" is claimed with a CAS before anything is copied. A pop or an enqueue that has read a stale
-                                            // Enqueue can reserve a slot in the moved range, and its reservation must not be overwritten.
-                                            // Marking "next" empty in the next generation before its item is copied is fine: the slot can only be
-                                            // reused by an enqueue that wraps around past the dequeue slot, which our caller keeps reserved until
-                                            // the move is complete.
-                                            int full = fromIdx + Full;
-                                            if (Volatile.Read(ref to.SequenceNumber) != toIdx ||
-                                                Interlocked.CompareExchange(ref next.SequenceNumber, fromIdx + nextGenEmpty, full) != full)
-                                            {
-                                                break;
-                                            }
-
-                                            to.Item = from.Item;
-                                            // moved items keep their enqueue time
-                                            to.EnqueueTimestamp = from.EnqueueTimestamp;
-                                            // Note: the following enables "to" for dequeuing, which may immediately happen,
-                                            // but not for popping, yet - since the other enq is locked.
-                                            Volatile.Write(ref to.SequenceNumber, toIdx + Full);
-                                            from.Item = null;
-
-                                            from = ref next;
-
-                                            fromIdx++;
-                                            toIdx++;
-                                        }
-
-                                        // return the last slot value
-                                        // (it should already be marked empty, or will be, if it is at deqPosition)
-                                        var result = from.Item;
-                                        enqueueTimestamp = from.EnqueueTimestamp;
-                                        from.Item = null;
-
-                                        // restore the half slot, must be after all the full->empty slot transitioning
-                                        // to make sure that poppers cannot see Moved slots as still incorrectly full.
-                                        Volatile.Write(ref halfSlot.SequenceNumber, halfPosition + Full);
-
-                                        // advance the other enq, enables enq/pop
-                                        // must be done before unlocking other prev slot, or someone could pop prev once unlocked.
-                                        // must be done after the enq slot are full, or someone may try locking slots while/before we mark them full.
-                                        Volatile.Write(ref other._queueEnds.Enqueue, toIdx);
-
-                                        // advance Dequeue, must be after halfSlot is restored - someone could immediately start Moving.
-                                        Volatile.Write(ref _queueEnds.Dequeue, fromIdx);
-
-                                        // unlock other prev slot
-                                        // must be after we moved other enq to the next slot, or someone may pop prev and break continuity of full slots.
-                                        Volatile.Write(ref enqPrevSlot.SequenceNumber, prevSequenceNumber);
-
-                                        if (toIdx != otherEnqPosition)
-                                        {
-                                            // The moved items are now in a queue that a worker may have already scanned and found empty,
-                                            // and no thread request was made for them. Make sure some worker will check the queues again.
-                                            // The fence is needed to publish the moved items before checking for an outstanding request,
-                                            // for the same reason as in the fifo TryEnqueue.
-                                            Interlocked.MemoryBarrier();
-                                            ThreadPool.EnsureWorkerRequested();
-                                        }
-
-                                        return result;
-                                    }
-
-                                    // failed to lock the actual half-way slot.
-                                    // restore via CAS, in case target slot has been Moved to
-                                    Interlocked.CompareExchange(ref halfSlot.SequenceNumber, halfPosition + Full, halfPosition + Dequeue);
-                                }
-                            }
-
-                            // failed to lock actual enqueue end, restore with CAS, in case target slot has been Moved to/from
-                            Interlocked.CompareExchange(ref enqPrevSlot.SequenceNumber, prevSequenceNumber, prevSequenceNumber + Change);
-                        }
+                        return this;
                     }
 
-                    // "this" is a sentinel value for a failed Moving attempt
-                    return this;
+                    // An empty prev slot alone does not show that the destination is empty: a move from the destination can claim
+                    // the slots below its enqueue end, and a pop can retreat next to them, before that move advances the dequeue end.
+                    if (Volatile.Read(ref other._queueEnds.Enqueue) != dstStart ||
+                        Volatile.Read(ref other._queueEnds.Dequeue) != dstStart)
+                    {
+                        Interlocked.CompareExchange(ref prevSlot.SequenceNumber, empty, reserved);
+                        return this;
+                    }
+
+                    int src = deqPosition;
+                    int dst = dstStart;
+                    int sourceCapacity = _slotsMask + 1;
+                    ref Slot current = ref this[src]; // Already claimed by TrySteal.
+
+                    // Keep one claimed item in hand to return. Copy it only after
+                    // successfully claiming its successor.
+                    for (int remaining = count / 2 - 1; remaining > 0; remaining--)
+                    {
+                        ref Slot to = ref other[dst];
+                        int nextPos = src + 1;
+                        ref Slot next = ref this[nextPos];
+                        int full = nextPos + Full;
+
+                        // The "to" slot must be empty (not empty means no more space). It is checked first, so that nothing
+                        // is claimed when there is no room.
+                        // The successor is claimed with a CAS from Full, so that a Pop or an Enqueue that has reserved it
+                        // (possibly after reading a stale Enqueue) wins, and its reservation is never overwritten.
+                        // Marking the successor empty in the next generation before its item is copied is fine: the slot can
+                        // only be reused by an enqueue that wraps around past the dequeue slot, which TrySteal keeps reserved
+                        // until the move is complete.
+                        if (Volatile.Read(ref to.SequenceNumber) != dst ||
+                            Interlocked.CompareExchange(ref next.SequenceNumber, nextPos + sourceCapacity, full) != full)
+                        {
+                            break;
+                        }
+
+                        to.Item = current.Item;
+                        // moved items keep their enqueue time
+                        to.EnqueueTimestamp = current.EnqueueTimestamp;
+                        // Note: the following enables "to" for dequeuing, which may immediately happen,
+                        // but not for popping, yet - since the other prev slot is locked.
+                        Volatile.Write(ref to.SequenceNumber, dst + Full);
+                        current.Item = null;
+
+                        current = ref next;
+                        src = nextPos;
+                        dst++;
+                    }
+
+                    // If nothing was copied, this is just the original source-head item.
+                    object? result = current.Item;
+                    enqueueTimestamp = current.EnqueueTimestamp;
+                    current.Item = null;
+
+                    // advance the other enq, enables enq/pop
+                    // must be done before unlocking other prev slot, or someone could pop prev once unlocked.
+                    // must be done after the enq slot are full, or someone may try locking slots while/before we mark them full.
+                    Volatile.Write(ref other._queueEnds.Enqueue, dst);
+                    Volatile.Write(ref _queueEnds.Dequeue, src + 1);
+
+                    // unlock other prev slot
+                    // must be after we moved other enq to the next slot, or someone may pop prev and break continuity of full slots.
+                    Volatile.Write(ref prevSlot.SequenceNumber, empty);
+
+                    if (dst != dstStart)
+                    {
+                        // The moved items are now in a queue that a worker may have already scanned and found empty,
+                        // and no thread request was made for them. Make sure some worker will check the queues again.
+                        // The fence is needed to publish the moved items before checking for an outstanding request,
+                        // for the same reason as in the fifo TryEnqueue.
+                        Interlocked.MemoryBarrier();
+                        ThreadPool.EnsureWorkerRequested();
+                    }
+
+                    return result;
                 }
 
                 /// <summary>
