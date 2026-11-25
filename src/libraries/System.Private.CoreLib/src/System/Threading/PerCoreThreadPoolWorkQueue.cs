@@ -1226,8 +1226,10 @@ namespace System.Threading
 
                     // An empty prev slot alone does not show that the destination is empty: a move from the destination can claim
                     // the slots below its enqueue end, and a pop can retreat next to them, before that move advances the dequeue end.
+                    // The CAS above orders both reads after the reservation. Enqueue is read with acquire semantics, so that the
+                    // first destination slot is not probed ahead of the recheck. Dequeue is only an admission check.
                     if (Volatile.Read(ref other._queueEnds.Enqueue) != dstStart ||
-                        Volatile.Read(ref other._queueEnds.Dequeue) != dstStart)
+                        other._queueEnds.Dequeue != dstStart)
                     {
                         Interlocked.CompareExchange(ref prevSlot.SequenceNumber, empty, reserved);
                         return this;
